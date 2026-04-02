@@ -1,0 +1,8 @@
+/oqs-scanner
+/engines/cipherscope
+/engines/cryptoscan
+*.exe
+*.test
+*.out
+.DS_Store
+/manifest-hash

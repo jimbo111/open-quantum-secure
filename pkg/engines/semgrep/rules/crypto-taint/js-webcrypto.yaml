@@ -1,0 +1,12 @@
+rules:
+  - id: js-webcrypto-generatekey
+    patterns:
+      - pattern: |
+          crypto.subtle.generateKey(...)
+    message: "Web Crypto API generateKey detected — verify algorithm is quantum-safe"
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      algorithm: WebCrypto
+      primitive: asymmetric
+      cwe: "CWE-327"

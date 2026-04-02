@@ -1,0 +1,70 @@
+rules:
+  - id: crypto-python-hashlib-new
+    language: python
+    rule:
+      pattern: hashlib.new($ALGO)
+    message: "Python hashlib.new: $ALGO"
+    severity: warning
+
+  - id: crypto-python-hashlib-sha256
+    language: python
+    rule:
+      pattern: hashlib.sha256($DATA)
+    message: "Python hashlib.sha256 usage"
+    severity: warning
+
+  - id: crypto-python-hashlib-sha1
+    language: python
+    rule:
+      pattern: hashlib.sha1($DATA)
+    message: "Python hashlib.sha1 usage"
+    severity: warning
+
+  - id: crypto-python-hashlib-md5
+    language: python
+    rule:
+      pattern: hashlib.md5($DATA)
+    message: "Python hashlib.md5 usage"
+    severity: warning
+
+  - id: crypto-python-pycryptodome-aes
+    language: python
+    rule:
+      pattern: AES.new($KEY, $MODE)
+    message: "Python PyCryptodome AES.new: $MODE"
+    severity: warning
+
+  - id: crypto-python-pycryptodome-rsa-generate
+    language: python
+    rule:
+      pattern: RSA.generate($BITS)
+    message: "Python PyCryptodome RSA.generate: $BITS-bit"
+    severity: warning
+
+  - id: crypto-python-cryptography-hazmat-aes
+    language: python
+    rule:
+      pattern: algorithms.AES($KEY)
+    message: "Python cryptography.hazmat AES usage"
+    severity: warning
+
+  - id: crypto-python-cryptography-hazmat-rsa
+    language: python
+    rule:
+      pattern: rsa.generate_private_key($PE, $KS, $BE)
+    message: "Python cryptography.hazmat RSA key generation"
+    severity: warning
+
+  - id: crypto-python-cryptography-hazmat-ec
+    language: python
+    rule:
+      pattern: ec.generate_private_key($CURVE, $BE)
+    message: "Python cryptography.hazmat EC key generation: $CURVE"
+    severity: warning
+
+  - id: crypto-python-ssl-wrap-socket
+    language: python
+    rule:
+      pattern: ssl.wrap_socket($SOCK)
+    message: "Python ssl.wrap_socket usage (deprecated)"
+    severity: warning

@@ -1,0 +1,24 @@
+rules:
+  - id: python-ecdsa-sign
+    patterns:
+      - pattern: $KEY.sign(...)
+      - pattern-either:
+          - pattern-inside: |
+              import ecdsa
+              ...
+          - pattern-inside: |
+              from ecdsa import ...
+              ...
+          - pattern-inside: |
+              from cryptography.hazmat.primitives.asymmetric import ec
+              ...
+          - pattern-inside: |
+              from cryptography.hazmat.primitives.asymmetric.ec import ...
+              ...
+    message: "ECDSA signing detected — quantum-vulnerable elliptic curve signature"
+    languages: [python]
+    severity: WARNING
+    metadata:
+      algorithm: ECDSA
+      primitive: asymmetric
+      cwe: "CWE-327"

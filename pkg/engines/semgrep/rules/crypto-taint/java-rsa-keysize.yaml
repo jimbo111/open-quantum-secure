@@ -1,0 +1,12 @@
+rules:
+  - id: java-rsa-keysize
+    patterns:
+      - pattern: |
+          KeyPairGenerator.getInstance("RSA")
+    message: "RSA key pair generation detected — quantum-vulnerable"
+    languages: [java]
+    severity: WARNING
+    metadata:
+      algorithm: RSA
+      primitive: asymmetric
+      cwe: "CWE-327"

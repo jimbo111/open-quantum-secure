@@ -1,0 +1,5 @@
+{
+  "description": "Spring Boot config with crypto settings",
+  "minFindings": 1,
+  "expectedAlgorithms": ["AES", "TLS"]
+}

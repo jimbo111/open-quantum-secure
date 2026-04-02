@@ -1,0 +1,42 @@
+# Example workflow: OQS Scanner with GitHub Code Scanning integration
+# Copy this to your repo's .github/workflows/ to enable quantum crypto scanning
+name: OQS Quantum Crypto Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  security-events: write
+  contents: read
+  pull-requests: write  # Required for pr-comment feature
+
+jobs:
+  oqs-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: OQS Scanner
+        id: scan
+        uses: jimbo111/open-quantum-secure@main
+        with:
+          path: '.'
+          mode: 'full'
+          format: 'sarif'
+          fail-on: 'critical'
+          upload-sarif: 'true'
+          pr-comment: 'true'
+          compliance: 'cnsa-2.0'
+          ci-mode: 'blocking'
+          # data-lifetime-years: '30'  # Uncomment for healthcare/gov (amplifies HNDL penalties)
+          # webhook-url: 'https://your-jira.example.com/webhook'  # Uncomment for ITSM integration
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always() && steps.scan.outputs.sarif-path != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif-path }}
+          category: oqs-quantum-crypto

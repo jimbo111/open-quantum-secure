@@ -1,0 +1,84 @@
+rules:
+  - id: crypto-go-aes-new-cipher
+    language: go
+    rule:
+      pattern: aes.NewCipher($KEY)
+    message: "Go crypto/aes NewCipher usage"
+    severity: warning
+
+  - id: crypto-go-rsa-generate-key
+    language: go
+    rule:
+      pattern: rsa.GenerateKey($RAND, $BITS)
+    message: "Go crypto/rsa GenerateKey: $BITS-bit"
+    severity: warning
+
+  - id: crypto-go-rsa-encrypt-oaep
+    language: go
+    rule:
+      pattern: rsa.EncryptOAEP($HASH, $RAND, $PUB, $MSG, $LABEL)
+    message: "Go crypto/rsa EncryptOAEP usage"
+    severity: warning
+
+  - id: crypto-go-rsa-sign-pkcs1v15
+    language: go
+    rule:
+      pattern: rsa.SignPKCS1v15($RAND, $PRIV, $HASH, $DIGEST)
+    message: "Go crypto/rsa SignPKCS1v15 usage"
+    severity: warning
+
+  - id: crypto-go-ecdsa-generate-key
+    language: go
+    rule:
+      pattern: ecdsa.GenerateKey($CURVE, $RAND)
+    message: "Go crypto/ecdsa GenerateKey: $CURVE"
+    severity: warning
+
+  - id: crypto-go-ecdsa-sign
+    language: go
+    rule:
+      pattern: ecdsa.Sign($RAND, $PRIV, $DIGEST)
+    message: "Go crypto/ecdsa Sign usage"
+    severity: warning
+
+  - id: crypto-go-sha256-new
+    language: go
+    rule:
+      pattern: sha256.New()
+    message: "Go crypto/sha256 usage"
+    severity: info
+
+  - id: crypto-go-sha512-new
+    language: go
+    rule:
+      pattern: sha512.New()
+    message: "Go crypto/sha512 usage"
+    severity: info
+
+  - id: crypto-go-md5-new
+    language: go
+    rule:
+      pattern: md5.New()
+    message: "Go crypto/md5 usage"
+    severity: warning
+
+  - id: crypto-go-hmac-new
+    language: go
+    rule:
+      pattern: hmac.New($HASH, $KEY)
+    message: "Go crypto/hmac usage"
+    severity: info
+
+  - id: crypto-go-tls-config
+    language: go
+    rule:
+      pattern: tls.Config{$$$}
+    message: "Go crypto/tls Config usage"
+    severity: info
+
+  - id: crypto-go-ecdh-generate-key
+    language: go
+    rule:
+      pattern: ecdh.P256().GenerateKey($RAND)
+    message: "Go crypto/ecdh P-256 key generation"
+    severity: warning

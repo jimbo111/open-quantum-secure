@@ -1,0 +1,719 @@
+{
+  "lastUpdated": "2026-03-01",
+  "algorithms": [
+    {
+      "family": "AES",
+      "standard": [
+        {"name": "FIPS 197", "url": "https://doi.org/10.6028/NIST.FIPS.197-upd1"}
+      ],
+      "variant": [
+        {"pattern": "AES-128", "primitive": "block-cipher"},
+        {"pattern": "AES-192", "primitive": "block-cipher"},
+        {"pattern": "AES-256", "primitive": "block-cipher"},
+        {"pattern": "AES-128-GCM", "primitive": "ae"},
+        {"pattern": "AES-192-GCM", "primitive": "ae"},
+        {"pattern": "AES-256-GCM", "primitive": "ae"},
+        {"pattern": "AES-128-CBC", "primitive": "block-cipher"},
+        {"pattern": "AES-192-CBC", "primitive": "block-cipher"},
+        {"pattern": "AES-256-CBC", "primitive": "block-cipher"},
+        {"pattern": "AES-128-CTR", "primitive": "block-cipher"},
+        {"pattern": "AES-192-CTR", "primitive": "block-cipher"},
+        {"pattern": "AES-256-CTR", "primitive": "block-cipher"},
+        {"pattern": "AES-128-CCM", "primitive": "ae"},
+        {"pattern": "AES-192-CCM", "primitive": "ae"},
+        {"pattern": "AES-256-CCM", "primitive": "ae"},
+        {"pattern": "AES-128-XTS", "primitive": "block-cipher"},
+        {"pattern": "AES-256-XTS", "primitive": "block-cipher"},
+        {"pattern": "AES-128-ECB", "primitive": "block-cipher"},
+        {"pattern": "AES-192-ECB", "primitive": "block-cipher"},
+        {"pattern": "AES-256-ECB", "primitive": "block-cipher"},
+        {"pattern": "AES-128-OFB", "primitive": "block-cipher"},
+        {"pattern": "AES-256-OFB", "primitive": "block-cipher"},
+        {"pattern": "AES-128-CFB", "primitive": "block-cipher"},
+        {"pattern": "AES-256-CFB", "primitive": "block-cipher"},
+        {"pattern": "AES-256-SIV", "primitive": "ae"},
+        {"pattern": "AES-128-WRAP", "primitive": "key-wrap"},
+        {"pattern": "AES-256-WRAP", "primitive": "key-wrap"}
+      ]
+    },
+    {
+      "family": "RSA",
+      "standard": [
+        {"name": "PKCS#1", "url": "https://www.rfc-editor.org/rfc/rfc8017"}
+      ],
+      "variant": [
+        {"pattern": "RSASSA-PKCS1-v1_5", "primitive": "signature"},
+        {"pattern": "RSASSA-PSS", "primitive": "signature"},
+        {"pattern": "RSAES-OAEP", "primitive": "pke"},
+        {"pattern": "RSAES-PKCS1-v1_5", "primitive": "pke"},
+        {"pattern": "RSA-1024", "primitive": "pke"},
+        {"pattern": "RSA-2048", "primitive": "pke"},
+        {"pattern": "RSA-3072", "primitive": "pke"},
+        {"pattern": "RSA-4096", "primitive": "pke"}
+      ]
+    },
+    {
+      "family": "ECDSA",
+      "standard": [
+        {"name": "FIPS 186-5", "url": "https://doi.org/10.6028/NIST.FIPS.186-5"}
+      ],
+      "variant": [
+        {"pattern": "ECDSA", "primitive": "signature"},
+        {"pattern": "ECDSA-P256", "primitive": "signature"},
+        {"pattern": "ECDSA-P384", "primitive": "signature"},
+        {"pattern": "ECDSA-P521", "primitive": "signature"},
+        {"pattern": "ECDSA-secp256k1", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "ECDH",
+      "standard": [
+        {"name": "NIST SP 800-56A", "url": "https://doi.org/10.6028/NIST.SP.800-56Ar3"}
+      ],
+      "variant": [
+        {"pattern": "ECDH", "primitive": "key-agree"},
+        {"pattern": "ECDHE", "primitive": "key-agree"},
+        {"pattern": "ECDH-P256", "primitive": "key-agree"},
+        {"pattern": "ECDH-P384", "primitive": "key-agree"},
+        {"pattern": "ECDH-P521", "primitive": "key-agree"},
+        {"pattern": "ECDHE-P256", "primitive": "key-agree"},
+        {"pattern": "ECDHE-P384", "primitive": "key-agree"},
+        {"pattern": "ECDHE-P521", "primitive": "key-agree"}
+      ]
+    },
+    {
+      "family": "EdDSA",
+      "standard": [
+        {"name": "RFC 8032", "url": "https://www.rfc-editor.org/rfc/rfc8032"}
+      ],
+      "variant": [
+        {"pattern": "EdDSA", "primitive": "signature"},
+        {"pattern": "Ed25519", "primitive": "signature"},
+        {"pattern": "Ed448", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "X25519",
+      "standard": [
+        {"name": "RFC 7748", "url": "https://www.rfc-editor.org/rfc/rfc7748"}
+      ],
+      "variant": [
+        {"pattern": "X25519", "primitive": "key-agree"}
+      ]
+    },
+    {
+      "family": "X448",
+      "standard": [
+        {"name": "RFC 7748", "url": "https://www.rfc-editor.org/rfc/rfc7748"}
+      ],
+      "variant": [
+        {"pattern": "X448", "primitive": "key-agree"}
+      ]
+    },
+    {
+      "family": "DH",
+      "standard": [
+        {"name": "RFC 3526", "url": "https://www.rfc-editor.org/rfc/rfc3526"}
+      ],
+      "variant": [
+        {"pattern": "DH", "primitive": "key-agree"},
+        {"pattern": "DHE", "primitive": "key-agree"},
+        {"pattern": "FFDH", "primitive": "key-agree"},
+        {"pattern": "DH-2048", "primitive": "key-agree"},
+        {"pattern": "DH-3072", "primitive": "key-agree"},
+        {"pattern": "DH-4096", "primitive": "key-agree"}
+      ]
+    },
+    {
+      "family": "SHA-2",
+      "standard": [
+        {"name": "FIPS 180-4", "url": "https://doi.org/10.6028/NIST.FIPS.180-4"}
+      ],
+      "variant": [
+        {"pattern": "SHA-224", "primitive": "hash"},
+        {"pattern": "SHA-256", "primitive": "hash"},
+        {"pattern": "SHA-384", "primitive": "hash"},
+        {"pattern": "SHA-512", "primitive": "hash"},
+        {"pattern": "SHA-512-224", "primitive": "hash"},
+        {"pattern": "SHA-512-256", "primitive": "hash"},
+        {"pattern": "SHA224", "primitive": "hash"},
+        {"pattern": "SHA256", "primitive": "hash"},
+        {"pattern": "SHA384", "primitive": "hash"},
+        {"pattern": "SHA512", "primitive": "hash"}
+      ]
+    },
+    {
+      "family": "SHA-3",
+      "standard": [
+        {"name": "FIPS 202", "url": "https://doi.org/10.6028/NIST.FIPS.202"}
+      ],
+      "variant": [
+        {"pattern": "SHA3-224", "primitive": "hash"},
+        {"pattern": "SHA3-256", "primitive": "hash"},
+        {"pattern": "SHA3-384", "primitive": "hash"},
+        {"pattern": "SHA3-512", "primitive": "hash"},
+        {"pattern": "SHA-3-224", "primitive": "hash"},
+        {"pattern": "SHA-3-256", "primitive": "hash"},
+        {"pattern": "SHA-3-384", "primitive": "hash"},
+        {"pattern": "SHA-3-512", "primitive": "hash"}
+      ]
+    },
+    {
+      "family": "SHAKE",
+      "standard": [
+        {"name": "FIPS 202", "url": "https://doi.org/10.6028/NIST.FIPS.202"}
+      ],
+      "variant": [
+        {"pattern": "SHAKE128", "primitive": "xof"},
+        {"pattern": "SHAKE256", "primitive": "xof"},
+        {"pattern": "SHAKE-128", "primitive": "xof"},
+        {"pattern": "SHAKE-256", "primitive": "xof"}
+      ]
+    },
+    {
+      "family": "ML-KEM",
+      "standard": [
+        {"name": "FIPS 203", "url": "https://doi.org/10.6028/NIST.FIPS.203"}
+      ],
+      "variant": [
+        {"pattern": "ML-KEM-512", "primitive": "kem"},
+        {"pattern": "ML-KEM-768", "primitive": "kem"},
+        {"pattern": "ML-KEM-1024", "primitive": "kem"}
+      ]
+    },
+    {
+      "family": "ML-DSA",
+      "standard": [
+        {"name": "FIPS 204", "url": "https://doi.org/10.6028/NIST.FIPS.204"}
+      ],
+      "variant": [
+        {"pattern": "ML-DSA-44", "primitive": "signature"},
+        {"pattern": "ML-DSA-65", "primitive": "signature"},
+        {"pattern": "ML-DSA-87", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "SLH-DSA",
+      "standard": [
+        {"name": "FIPS 205", "url": "https://doi.org/10.6028/NIST.FIPS.205"}
+      ],
+      "variant": [
+        {"pattern": "SLH-DSA-SHA2-128s", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHA2-128f", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHA2-192s", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHA2-192f", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHA2-256s", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHA2-256f", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHAKE-128s", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHAKE-128f", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHAKE-192s", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHAKE-192f", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHAKE-256s", "primitive": "signature"},
+        {"pattern": "SLH-DSA-SHAKE-256f", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "HQC",
+      "standard": [
+        {"name": "NIST PQC 5th standard (selected March 2025, draft expected 2026)", "url": "https://csrc.nist.gov/projects/post-quantum-cryptography"}
+      ],
+      "variant": [
+        {"pattern": "HQC-128", "primitive": "kem"},
+        {"pattern": "HQC-192", "primitive": "kem"},
+        {"pattern": "HQC-256", "primitive": "kem"}
+      ]
+    },
+    {
+      "family": "XMSS",
+      "standard": [
+        {"name": "RFC 8391", "url": "https://www.rfc-editor.org/rfc/rfc8391"}
+      ],
+      "variant": [
+        {"pattern": "XMSS", "primitive": "signature"},
+        {"pattern": "XMSS-SHA2-10-256", "primitive": "signature"},
+        {"pattern": "XMSS-SHA2-16-256", "primitive": "signature"},
+        {"pattern": "XMSS-SHA2-20-256", "primitive": "signature"},
+        {"pattern": "XMSS-SHA2-10-512", "primitive": "signature"},
+        {"pattern": "XMSS-SHA2-16-512", "primitive": "signature"},
+        {"pattern": "XMSS-SHA2-20-512", "primitive": "signature"},
+        {"pattern": "XMSS-SHAKE-10-256", "primitive": "signature"},
+        {"pattern": "XMSS-SHAKE-16-256", "primitive": "signature"},
+        {"pattern": "XMSS-SHAKE-20-256", "primitive": "signature"},
+        {"pattern": "XMSS-MT", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "LMS",
+      "standard": [
+        {"name": "RFC 8554", "url": "https://www.rfc-editor.org/rfc/rfc8554"}
+      ],
+      "variant": [
+        {"pattern": "LMS", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M24-H5", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M24-H10", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M24-H15", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M24-H20", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M24-H25", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M32-H5", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M32-H10", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M32-H15", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M32-H20", "primitive": "signature"},
+        {"pattern": "LMS-SHA256-M32-H25", "primitive": "signature"},
+        {"pattern": "HSS-LMS", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "ChaCha20",
+      "standard": [
+        {"name": "RFC 8439", "url": "https://www.rfc-editor.org/rfc/rfc8439"}
+      ],
+      "variant": [
+        {"pattern": "ChaCha20-Poly1305", "primitive": "ae"},
+        {"pattern": "ChaCha20", "primitive": "stream-cipher"},
+        {"pattern": "XChaCha20-Poly1305", "primitive": "ae"},
+        {"pattern": "XChaCha20", "primitive": "stream-cipher"}
+      ]
+    },
+    {
+      "family": "HMAC",
+      "standard": [
+        {"name": "RFC 2104", "url": "https://www.rfc-editor.org/rfc/rfc2104"}
+      ],
+      "variant": [
+        {"pattern": "HMAC-SHA256", "primitive": "mac"},
+        {"pattern": "HMAC-SHA384", "primitive": "mac"},
+        {"pattern": "HMAC-SHA512", "primitive": "mac"},
+        {"pattern": "HMAC-SHA224", "primitive": "mac"},
+        {"pattern": "HMAC-SHA1", "primitive": "mac"},
+        {"pattern": "HMAC-MD5", "primitive": "mac"},
+        {"pattern": "HMAC-SHA3-256", "primitive": "mac"},
+        {"pattern": "HMAC-SHA3-384", "primitive": "mac"},
+        {"pattern": "HMAC-SHA3-512", "primitive": "mac"}
+      ]
+    },
+    {
+      "family": "HKDF",
+      "standard": [
+        {"name": "RFC 5869", "url": "https://www.rfc-editor.org/rfc/rfc5869"}
+      ],
+      "variant": [
+        {"pattern": "HKDF", "primitive": "kdf"},
+        {"pattern": "HKDF-SHA256", "primitive": "kdf"},
+        {"pattern": "HKDF-SHA384", "primitive": "kdf"},
+        {"pattern": "HKDF-SHA512", "primitive": "kdf"}
+      ]
+    },
+    {
+      "family": "PBKDF2",
+      "standard": [
+        {"name": "RFC 8018", "url": "https://www.rfc-editor.org/rfc/rfc8018"}
+      ],
+      "variant": [
+        {"pattern": "PBKDF2", "primitive": "kdf"},
+        {"pattern": "PBKDF2-SHA256", "primitive": "kdf"},
+        {"pattern": "PBKDF2-SHA384", "primitive": "kdf"},
+        {"pattern": "PBKDF2-SHA512", "primitive": "kdf"}
+      ]
+    },
+    {
+      "family": "DES",
+      "standard": [
+        {"name": "FIPS 46-3 (withdrawn)", "url": "https://csrc.nist.gov/publications/detail/fips/46/3/final"}
+      ],
+      "variant": [
+        {"pattern": "DES", "primitive": "block-cipher"},
+        {"pattern": "DES-ECB", "primitive": "block-cipher"},
+        {"pattern": "DES-CBC", "primitive": "block-cipher"},
+        {"pattern": "DES-CFB", "primitive": "block-cipher"},
+        {"pattern": "DES-OFB", "primitive": "block-cipher"}
+      ]
+    },
+    {
+      "family": "3DES",
+      "standard": [
+        {"name": "NIST SP 800-67 (withdrawn)", "url": "https://csrc.nist.gov/publications/detail/sp/800/67/rev-2/final"}
+      ],
+      "variant": [
+        {"pattern": "3DES", "primitive": "block-cipher"},
+        {"pattern": "TDEA", "primitive": "block-cipher"},
+        {"pattern": "DES-EDE", "primitive": "block-cipher"},
+        {"pattern": "DES-EDE-CBC", "primitive": "block-cipher"},
+        {"pattern": "DES-EDE-ECB", "primitive": "block-cipher"},
+        {"pattern": "3DES-CBC", "primitive": "block-cipher"},
+        {"pattern": "3DES-ECB", "primitive": "block-cipher"}
+      ]
+    },
+    {
+      "family": "MD5",
+      "standard": [
+        {"name": "RFC 1321 (deprecated)", "url": "https://www.rfc-editor.org/rfc/rfc1321"}
+      ],
+      "variant": [
+        {"pattern": "MD5", "primitive": "hash"}
+      ]
+    },
+    {
+      "family": "MD4",
+      "standard": [
+        {"name": "RFC 1320 (deprecated)", "url": "https://www.rfc-editor.org/rfc/rfc1320"}
+      ],
+      "variant": [
+        {"pattern": "MD4", "primitive": "hash"}
+      ]
+    },
+    {
+      "family": "SHA-1",
+      "standard": [
+        {"name": "FIPS 180-4 (deprecated)", "url": "https://doi.org/10.6028/NIST.FIPS.180-4"}
+      ],
+      "variant": [
+        {"pattern": "SHA-1", "primitive": "hash"},
+        {"pattern": "SHA1", "primitive": "hash"}
+      ]
+    },
+    {
+      "family": "RC4",
+      "standard": [
+        {"name": "RFC 7465 (prohibited)", "url": "https://www.rfc-editor.org/rfc/rfc7465"}
+      ],
+      "variant": [
+        {"pattern": "RC4", "primitive": "stream-cipher"},
+        {"pattern": "ARCFOUR", "primitive": "stream-cipher"}
+      ]
+    },
+    {
+      "family": "Blowfish",
+      "standard": [
+        {"name": "Schneier 1993 (deprecated)", "url": "https://www.schneier.com/academic/blowfish/"}
+      ],
+      "variant": [
+        {"pattern": "Blowfish", "primitive": "block-cipher"},
+        {"pattern": "Blowfish-CBC", "primitive": "block-cipher"},
+        {"pattern": "Blowfish-ECB", "primitive": "block-cipher"},
+        {"pattern": "Blowfish-CFB", "primitive": "block-cipher"}
+      ]
+    },
+    {
+      "family": "ARIA",
+      "standard": [
+        {"name": "KS X 1213-1", "url": "https://seed.kisa.or.kr/kisa/algorithm/getAriaInfo.do"}
+      ],
+      "variant": [
+        {"pattern": "ARIA-128", "primitive": "block-cipher"},
+        {"pattern": "ARIA-192", "primitive": "block-cipher"},
+        {"pattern": "ARIA-256", "primitive": "block-cipher"},
+        {"pattern": "ARIA-128-GCM", "primitive": "ae"},
+        {"pattern": "ARIA-192-GCM", "primitive": "ae"},
+        {"pattern": "ARIA-256-GCM", "primitive": "ae"},
+        {"pattern": "ARIA-128-CBC", "primitive": "block-cipher"},
+        {"pattern": "ARIA-192-CBC", "primitive": "block-cipher"},
+        {"pattern": "ARIA-256-CBC", "primitive": "block-cipher"},
+        {"pattern": "ARIA-128-CTR", "primitive": "block-cipher"},
+        {"pattern": "ARIA-192-CTR", "primitive": "block-cipher"},
+        {"pattern": "ARIA-256-CTR", "primitive": "block-cipher"},
+        {"pattern": "ARIA-128-CCM", "primitive": "ae"},
+        {"pattern": "ARIA-256-CCM", "primitive": "ae"},
+        {"pattern": "ARIA-128-ECB", "primitive": "block-cipher"},
+        {"pattern": "ARIA-256-ECB", "primitive": "block-cipher"}
+      ]
+    },
+    {
+      "family": "SEED",
+      "standard": [
+        {"name": "KS X 1213", "url": "https://seed.kisa.or.kr/kisa/algorithm/getSeedInfo.do"}
+      ],
+      "variant": [
+        {"pattern": "SEED-128", "primitive": "block-cipher"},
+        {"pattern": "SEED-128-CBC", "primitive": "block-cipher"},
+        {"pattern": "SEED-128-ECB", "primitive": "block-cipher"},
+        {"pattern": "SEED-128-CTR", "primitive": "block-cipher"},
+        {"pattern": "SEED-128-OFB", "primitive": "block-cipher"},
+        {"pattern": "SEED-128-CFB", "primitive": "block-cipher"}
+      ]
+    },
+    {
+      "family": "LEA",
+      "standard": [
+        {"name": "KS X 3246", "url": "https://seed.kisa.or.kr/kisa/algorithm/getLeaInfo.do"}
+      ],
+      "variant": [
+        {"pattern": "LEA-128", "primitive": "block-cipher"},
+        {"pattern": "LEA-192", "primitive": "block-cipher"},
+        {"pattern": "LEA-256", "primitive": "block-cipher"},
+        {"pattern": "LEA-128-GCM", "primitive": "ae"},
+        {"pattern": "LEA-192-GCM", "primitive": "ae"},
+        {"pattern": "LEA-256-GCM", "primitive": "ae"},
+        {"pattern": "LEA-128-CBC", "primitive": "block-cipher"},
+        {"pattern": "LEA-192-CBC", "primitive": "block-cipher"},
+        {"pattern": "LEA-256-CBC", "primitive": "block-cipher"},
+        {"pattern": "LEA-128-CTR", "primitive": "block-cipher"},
+        {"pattern": "LEA-192-CTR", "primitive": "block-cipher"},
+        {"pattern": "LEA-256-CTR", "primitive": "block-cipher"},
+        {"pattern": "LEA-128-ECB", "primitive": "block-cipher"},
+        {"pattern": "LEA-256-ECB", "primitive": "block-cipher"}
+      ]
+    },
+    {
+      "family": "KCDSA",
+      "standard": [
+        {"name": "KS X 1001", "url": "https://seed.kisa.or.kr/kisa/algorithm/getKcdsaInfo.do"}
+      ],
+      "variant": [
+        {"pattern": "KCDSA", "primitive": "signature"},
+        {"pattern": "KCDSA-2048", "primitive": "signature"},
+        {"pattern": "KCDSA-3072", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "EC-KCDSA",
+      "standard": [
+        {"name": "KS X 1001", "url": "https://seed.kisa.or.kr/kisa/algorithm/getKcdsaInfo.do"}
+      ],
+      "variant": [
+        {"pattern": "EC-KCDSA", "primitive": "signature"},
+        {"pattern": "EC-KCDSA-P256", "primitive": "signature"},
+        {"pattern": "EC-KCDSA-P384", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "HAS-160",
+      "standard": [
+        {"name": "TTAS.KO-12.0011/R2 (deprecated)", "url": "https://seed.kisa.or.kr"}
+      ],
+      "variant": [
+        {"pattern": "HAS-160", "primitive": "hash"}
+      ]
+    },
+    {
+      "family": "LSH",
+      "standard": [
+        {"name": "KS X 3262", "url": "https://seed.kisa.or.kr/kisa/algorithm/getLshInfo.do"}
+      ],
+      "variant": [
+        {"pattern": "LSH-256-224", "primitive": "hash"},
+        {"pattern": "LSH-256-256", "primitive": "hash"},
+        {"pattern": "LSH-512-256", "primitive": "hash"},
+        {"pattern": "LSH-512-384", "primitive": "hash"},
+        {"pattern": "LSH-512-512", "primitive": "hash"}
+      ]
+    },
+    {
+      "family": "SMAUG-T",
+      "standard": [
+        {"name": "KpqC Round 2", "url": "https://kpqc.or.kr"}
+      ],
+      "variant": [
+        {"pattern": "SMAUG-T-128", "primitive": "kem"},
+        {"pattern": "SMAUG-T-192", "primitive": "kem"},
+        {"pattern": "SMAUG-T-256", "primitive": "kem"}
+      ]
+    },
+    {
+      "family": "HAETAE",
+      "standard": [
+        {"name": "KpqC Round 2", "url": "https://kpqc.or.kr"}
+      ],
+      "variant": [
+        {"pattern": "HAETAE-2", "primitive": "signature"},
+        {"pattern": "HAETAE-3", "primitive": "signature"},
+        {"pattern": "HAETAE-5", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "AIMer",
+      "standard": [
+        {"name": "KpqC Round 2", "url": "https://kpqc.or.kr"}
+      ],
+      "variant": [
+        {"pattern": "AIMer-128f", "primitive": "signature"},
+        {"pattern": "AIMer-128s", "primitive": "signature"},
+        {"pattern": "AIMer-192f", "primitive": "signature"},
+        {"pattern": "AIMer-192s", "primitive": "signature"},
+        {"pattern": "AIMer-256f", "primitive": "signature"},
+        {"pattern": "AIMer-256s", "primitive": "signature"}
+      ]
+    },
+    {
+      "family": "NTRU+",
+      "standard": [
+        {"name": "KpqC Round 2", "url": "https://kpqc.or.kr"}
+      ],
+      "variant": [
+        {"pattern": "NTRU+-576", "primitive": "kem"},
+        {"pattern": "NTRU+-768", "primitive": "kem"},
+        {"pattern": "NTRU+-864", "primitive": "kem"},
+        {"pattern": "NTRU+-1277", "primitive": "kem"}
+      ]
+    },
+    {
+      "family": "Camellia",
+      "standard": [
+        {"name": "RFC 3713", "url": "https://www.rfc-editor.org/rfc/rfc3713"}
+      ],
+      "variant": [
+        {"pattern": "Camellia-128", "primitive": "block-cipher"},
+        {"pattern": "Camellia-192", "primitive": "block-cipher"},
+        {"pattern": "Camellia-256", "primitive": "block-cipher"},
+        {"pattern": "Camellia-128-CBC", "primitive": "block-cipher"},
+        {"pattern": "Camellia-192-CBC", "primitive": "block-cipher"},
+        {"pattern": "Camellia-256-CBC", "primitive": "block-cipher"},
+        {"pattern": "Camellia-128-GCM", "primitive": "ae"},
+        {"pattern": "Camellia-192-GCM", "primitive": "ae"},
+        {"pattern": "Camellia-256-GCM", "primitive": "ae"},
+        {"pattern": "Camellia-128-CTR", "primitive": "block-cipher"},
+        {"pattern": "Camellia-192-CTR", "primitive": "block-cipher"},
+        {"pattern": "Camellia-256-CTR", "primitive": "block-cipher"}
+      ]
+    },
+    {
+      "family": "Poly1305",
+      "standard": [
+        {"name": "RFC 8439", "url": "https://www.rfc-editor.org/rfc/rfc8439"}
+      ],
+      "variant": [
+        {"pattern": "Poly1305", "primitive": "mac"}
+      ]
+    },
+    {
+      "family": "CMAC",
+      "standard": [
+        {"name": "NIST SP 800-38B", "url": "https://doi.org/10.6028/NIST.SP.800-38B"}
+      ],
+      "variant": [
+        {"pattern": "CMAC", "primitive": "mac"},
+        {"pattern": "CMAC-AES128", "primitive": "mac"},
+        {"pattern": "CMAC-AES256", "primitive": "mac"}
+      ]
+    },
+    {
+      "family": "GMAC",
+      "standard": [
+        {"name": "NIST SP 800-38D", "url": "https://doi.org/10.6028/NIST.SP.800-38D"}
+      ],
+      "variant": [
+        {"pattern": "GMAC", "primitive": "mac"},
+        {"pattern": "AES-128-GMAC", "primitive": "mac"},
+        {"pattern": "AES-256-GMAC", "primitive": "mac"}
+      ]
+    },
+    {
+      "family": "scrypt",
+      "standard": [
+        {"name": "RFC 7914", "url": "https://www.rfc-editor.org/rfc/rfc7914"}
+      ],
+      "variant": [
+        {"pattern": "scrypt", "primitive": "kdf"}
+      ]
+    },
+    {
+      "family": "Argon2",
+      "standard": [
+        {"name": "RFC 9106", "url": "https://www.rfc-editor.org/rfc/rfc9106"}
+      ],
+      "variant": [
+        {"pattern": "Argon2id", "primitive": "kdf"},
+        {"pattern": "Argon2i", "primitive": "kdf"},
+        {"pattern": "Argon2d", "primitive": "kdf"}
+      ]
+    }
+  ],
+  "curves": [
+    {
+      "name": "nist",
+      "curves": [
+        {
+          "name": "P-256",
+          "oid": "1.2.840.10045.3.1.7",
+          "form": "Weierstrass",
+          "aliases": [
+            {"category": "secg", "name": "secp256r1"},
+            {"category": "x962", "name": "prime256v1"}
+          ]
+        },
+        {
+          "name": "P-384",
+          "oid": "1.3.132.0.34",
+          "form": "Weierstrass",
+          "aliases": [
+            {"category": "secg", "name": "secp384r1"}
+          ]
+        },
+        {
+          "name": "P-521",
+          "oid": "1.3.132.0.35",
+          "form": "Weierstrass",
+          "aliases": [
+            {"category": "secg", "name": "secp521r1"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "secg",
+      "curves": [
+        {
+          "name": "secp256k1",
+          "oid": "1.3.132.0.10",
+          "form": "Weierstrass",
+          "aliases": []
+        }
+      ]
+    },
+    {
+      "name": "djb",
+      "curves": [
+        {
+          "name": "Curve25519",
+          "oid": "1.3.101.110",
+          "form": "Montgomery",
+          "aliases": [
+            {"category": "rfc", "name": "X25519"}
+          ]
+        },
+        {
+          "name": "Curve448",
+          "oid": "1.3.101.111",
+          "form": "Montgomery",
+          "aliases": [
+            {"category": "rfc", "name": "X448"}
+          ]
+        },
+        {
+          "name": "Ed25519",
+          "oid": "1.3.101.112",
+          "form": "TwistedEdwards",
+          "aliases": []
+        },
+        {
+          "name": "Ed448",
+          "oid": "1.3.101.113",
+          "form": "TwistedEdwards",
+          "aliases": []
+        }
+      ]
+    },
+    {
+      "name": "brainpool",
+      "curves": [
+        {
+          "name": "brainpoolP256r1",
+          "oid": "1.3.36.3.3.2.8.1.1.7",
+          "form": "Weierstrass",
+          "aliases": []
+        },
+        {
+          "name": "brainpoolP384r1",
+          "oid": "1.3.36.3.3.2.8.1.1.11",
+          "form": "Weierstrass",
+          "aliases": []
+        },
+        {
+          "name": "brainpoolP512r1",
+          "oid": "1.3.36.3.3.2.8.1.1.13",
+          "form": "Weierstrass",
+          "aliases": []
+        }
+      ]
+    }
+  ]
+}

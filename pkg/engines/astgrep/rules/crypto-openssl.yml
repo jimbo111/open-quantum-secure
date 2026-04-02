@@ -1,0 +1,84 @@
+rules:
+  - id: crypto-openssl-evp-encrypt-init
+    language: c
+    rule:
+      pattern: EVP_EncryptInit($CTX, $CIPHER, $KEY, $IV)
+    message: "OpenSSL EVP_EncryptInit usage: $CIPHER"
+    severity: warning
+
+  - id: crypto-openssl-evp-encrypt-init-ex
+    language: c
+    rule:
+      pattern: EVP_EncryptInit_ex($CTX, $CIPHER, $IMPL, $KEY, $IV)
+    message: "OpenSSL EVP_EncryptInit_ex usage: $CIPHER"
+    severity: warning
+
+  - id: crypto-openssl-evp-decrypt-init
+    language: c
+    rule:
+      pattern: EVP_DecryptInit($CTX, $CIPHER, $KEY, $IV)
+    message: "OpenSSL EVP_DecryptInit usage: $CIPHER"
+    severity: warning
+
+  - id: crypto-openssl-evp-decrypt-init-ex
+    language: c
+    rule:
+      pattern: EVP_DecryptInit_ex($CTX, $CIPHER, $IMPL, $KEY, $IV)
+    message: "OpenSSL EVP_DecryptInit_ex usage: $CIPHER"
+    severity: warning
+
+  - id: crypto-openssl-evp-digest-init
+    language: c
+    rule:
+      pattern: EVP_DigestInit($CTX, $TYPE)
+    message: "OpenSSL EVP_DigestInit usage: $TYPE"
+    severity: warning
+
+  - id: crypto-openssl-evp-digest-init-ex
+    language: c
+    rule:
+      pattern: EVP_DigestInit_ex($CTX, $TYPE, $IMPL)
+    message: "OpenSSL EVP_DigestInit_ex usage: $TYPE"
+    severity: warning
+
+  - id: crypto-openssl-ssl-ctx-new
+    language: c
+    rule:
+      pattern: SSL_CTX_new($METHOD)
+    message: "OpenSSL SSL_CTX_new usage: $METHOD"
+    severity: warning
+
+  - id: crypto-openssl-rsa-generate-key-ex
+    language: c
+    rule:
+      pattern: RSA_generate_key_ex($RSA, $BITS, $E, $CB)
+    message: "OpenSSL RSA_generate_key_ex: $BITS-bit key"
+    severity: warning
+
+  - id: crypto-openssl-evp-pkey-keygen
+    language: c
+    rule:
+      pattern: EVP_PKEY_keygen($CTX, $PKEY)
+    message: "OpenSSL EVP_PKEY_keygen usage"
+    severity: warning
+
+  - id: crypto-openssl-evp-cipher-fetch
+    language: c
+    rule:
+      pattern: EVP_CIPHER_fetch($LIB, $ALGO, $PROPS)
+    message: "OpenSSL EVP_CIPHER_fetch: $ALGO"
+    severity: warning
+
+  - id: crypto-openssl-evp-md-fetch
+    language: c
+    rule:
+      pattern: EVP_MD_fetch($LIB, $ALGO, $PROPS)
+    message: "OpenSSL EVP_MD_fetch: $ALGO"
+    severity: warning
+
+  - id: crypto-openssl-hmac-init-ex
+    language: c
+    rule:
+      pattern: HMAC_Init_ex($CTX, $KEY, $LEN, $MD, $IMPL)
+    message: "OpenSSL HMAC_Init_ex usage: $MD"
+    severity: warning

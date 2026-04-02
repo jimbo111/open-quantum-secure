@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OQS Scanner Report — {{.Target}}</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f8fafc;
+  color: #1e293b;
+  line-height: 1.5;
+  padding: 24px;
+}
+h1 { font-size: 1.75rem; font-weight: 700; color: #0f172a; }
+h2 { font-size: 1.125rem; font-weight: 600; color: #1e293b; margin-bottom: 12px; }
+.container { max-width: 1200px; margin: 0 auto; }
+.header { margin-bottom: 24px; }
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 0.875rem;
+  color: #64748b;
+}
+.meta span { display: flex; align-items: center; gap: 4px; }
+.card {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+
+/* QRS Score Card */
+.score-card {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.score-number {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1;
+}
+.score-label { font-size: 0.875rem; color: #64748b; margin-top: 4px; }
+.grade-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  color: #ffffff;
+}
+.score-na { font-size: 2rem; font-weight: 600; color: #94a3b8; }
+
+/* Risk Breakdown */
+.risk-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.risk-box {
+  flex: 1;
+  min-width: 120px;
+  text-align: center;
+  padding: 16px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.risk-box .count {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.risk-box .label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+  color: #64748b;
+}
+.risk-vulnerable { border-top: 3px solid #ef4444; }
+.risk-vulnerable .count { color: #ef4444; }
+.risk-weakened { border-top: 3px solid #f97316; }
+.risk-weakened .count { color: #f97316; }
+.risk-safe { border-top: 3px solid #22c55e; }
+.risk-safe .count { color: #22c55e; }
+.risk-resistant { border-top: 3px solid #3b82f6; }
+.risk-resistant .count { color: #3b82f6; }
+.risk-deprecated { border-top: 3px solid #94a3b8; }
+.risk-deprecated .count { color: #94a3b8; }
+
+/* Findings Table */
+.table-wrapper { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+th {
+  text-align: left;
+  padding: 10px 12px;
+  background: #f1f5f9;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  border-bottom: 2px solid #e2e8f0;
+}
+th:hover { background: #e2e8f0; }
+th.sort-asc::after { content: ' \2191'; color: #3b82f6; }
+th.sort-desc::after { content: ' \2193'; color: #3b82f6; }
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+tr:last-child td { border-bottom: none; }
+tr:nth-child(even) { background: #f8fafc; }
+tr:hover td { background: #eff6ff; }
+.no-findings {
+  text-align: center;
+  padding: 32px;
+  color: #64748b;
+  font-size: 0.875rem;
+}
+
+/* Risk / severity badges */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.badge-vulnerable { background: #fee2e2; color: #991b1b; }
+.badge-weakened   { background: #ffedd5; color: #9a3412; }
+.badge-safe       { background: #dcfce7; color: #166534; }
+.badge-resistant  { background: #dbeafe; color: #1e40af; }
+.badge-deprecated { background: #f1f5f9; color: #475569; }
+.badge-unknown    { background: #f1f5f9; color: #64748b; }
+.badge-critical   { background: #fee2e2; color: #991b1b; }
+.badge-high       { background: #ffedd5; color: #9a3412; }
+.badge-medium     { background: #fef9c3; color: #854d0e; }
+.badge-low        { background: #dcfce7; color: #166534; }
+.badge-info       { background: #f0f9ff; color: #075985; }
+.badge-reachable   { background: #fef3c7; color: #92400e; }
+.badge-unreachable { background: #f1f5f9; color: #475569; }
+
+/* Data Flow */
+details { margin-top: 6px; }
+summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #3b82f6;
+  font-weight: 500;
+}
+summary:hover { text-decoration: underline; }
+.flow-path {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid #e2e8f0;
+}
+.flow-step {
+  font-size: 0.75rem;
+  padding: 3px 0;
+  color: #475569;
+}
+.flow-step .step-loc { font-weight: 600; color: #1e293b; font-family: monospace; }
+.flow-step .step-msg { margin-left: 6px; }
+
+/* CNSA Timeline */
+.timeline-box {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+.timeline-box h3 { font-size: 0.875rem; font-weight: 600; color: #1e40af; margin-bottom: 8px; }
+.timeline-items { display: flex; flex-wrap: wrap; gap: 16px; }
+.timeline-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+}
+.timeline-year {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #1e40af;
+  min-width: 36px;
+}
+.timeline-desc { color: #1e293b; }
+.timeline-link { display: block; margin-top: 8px; font-size: 0.8rem; color: #3b82f6; }
+.timeline-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="card header">
+    <h1>OQS Scanner Report</h1>
+    <div class="meta">
+      <span><strong>Version:</strong>&nbsp;{{.Version}}</span>
+      <span><strong>Target:</strong>&nbsp;{{.Target}}</span>
+      <span><strong>Generated:</strong>&nbsp;{{now}}</span>
+      {{if .ScanDuration}}<span><strong>Duration:</strong>&nbsp;{{.ScanDuration}}</span>{{end}}
+      <span><strong>Engines:</strong>&nbsp;{{joinStrings .Engines ", "}}</span>
+    </div>
+  </div>
+
+  <!-- QRS Score + Risk Breakdown -->
+  <div style="display:flex; gap:20px; flex-wrap:wrap;">
+
+    <!-- QRS Score Card -->
+    <div class="card" style="flex:0 0 auto; min-width:240px;">
+      <h2>Quantum Readiness Score</h2>
+      {{with .QRS}}
+      <div class="score-card">
+        <div>
+          <div class="score-number">{{.Score}}<span style="font-size:1.5rem;color:#94a3b8;">/100</span></div>
+          <div class="score-label">Quantum Readiness Score</div>
+        </div>
+        <div class="grade-badge" style="background:{{gradeColor .Grade}}" aria-label="Grade {{.Grade}}">{{.Grade}}</div>
+      </div>
+      {{else}}
+      <div class="score-card">
+        <div class="score-na">N/A</div>
+      </div>
+      {{end}}
+    </div>
+
+    <!-- Risk Breakdown -->
+    <div class="card" style="flex:1; min-width:320px;">
+      <h2>Risk Breakdown</h2>
+      <div class="risk-grid">
+        <div class="risk-box risk-vulnerable">
+          <div class="count">{{.Summary.QuantumVulnerable}}</div>
+          <div class="label">Vulnerable</div>
+        </div>
+        <div class="risk-box risk-weakened">
+          <div class="count">{{.Summary.QuantumWeakened}}</div>
+          <div class="label">Weakened</div>
+        </div>
+        <div class="risk-box risk-safe">
+          <div class="count">{{.Summary.QuantumSafe}}</div>
+          <div class="label">Safe</div>
+        </div>
+        <div class="risk-box risk-resistant">
+          <div class="count">{{.Summary.QuantumResistant}}</div>
+          <div class="label">Resistant</div>
+        </div>
+        <div class="risk-box risk-deprecated">
+          <div class="count">{{.Summary.Deprecated}}</div>
+          <div class="label">Deprecated</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Findings Table -->
+  <div class="card">
+    <h2>Findings <span style="font-weight:400;color:#64748b;font-size:0.9rem;">({{.Summary.TotalFindings}} total)</span></h2>
+    {{if .Findings}}
+    <div class="table-wrapper">
+      <table id="findings-table">
+        <thead>
+          <tr>
+            <th data-col="0">File</th>
+            <th data-col="1">Line</th>
+            <th data-col="2">Identifier</th>
+            <th data-col="3">Quantum Risk</th>
+            <th data-col="4">Severity</th>
+            <th data-col="5">Recommendation</th>
+            <th data-col="6">Confidence</th>
+            <th data-col="7">Engine</th>
+            <th data-col="8">Corroborated By</th>
+            <th data-col="9">Reachable</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Findings}}
+          <tr>
+            <td title="{{.Location.File}}">{{shortPath .Location.File}}</td>
+            <td>{{.Location.Line}}</td>
+            <td data-sort="{{if .Algorithm}}{{.Algorithm.Name}}{{else if .Dependency}}{{.Dependency.Library}}{{else}}{{.RawIdentifier}}{{end}}">
+              {{if .Algorithm}}{{.Algorithm.Name}}{{else if .Dependency}}{{.Dependency.Library}}{{else}}{{.RawIdentifier}}{{end}}
+              {{if hasFlowPath .DataFlowPath}}
+              <details>
+                <summary>data flow ({{len .DataFlowPath}} steps)</summary>
+                <div class="flow-path">
+                  {{range .DataFlowPath}}
+                  <div class="flow-step">
+                    <span class="step-loc">{{.File}}:{{.Line}}</span>
+                    {{if .Message}}<span class="step-msg">&#8212; {{.Message}}</span>{{end}}
+                  </div>
+                  {{end}}
+                </div>
+              </details>
+              {{end}}
+            </td>
+            <td><span class="badge badge-{{riskColor .QuantumRisk}}" aria-label="Quantum risk: {{riskLabel .QuantumRisk}}">{{riskLabel .QuantumRisk}}</span></td>
+            <td><span class="badge badge-{{sevColor .Severity}}">{{.Severity}}</span></td>
+            <td data-sort="{{if .Recommendation}}{{.Recommendation}}{{end}}">{{if .Recommendation}}{{.Recommendation}}{{else}}&mdash;{{end}}</td>
+            <td>{{.Confidence}}</td>
+            <td>{{.SourceEngine}}</td>
+            <td data-sort="{{if .CorroboratedBy}}{{joinStrings .CorroboratedBy ","}}{{end}}">{{if .CorroboratedBy}}{{joinStrings .CorroboratedBy ", "}}{{else}}&mdash;{{end}}</td>
+            <td data-sort="{{reachSort .Reachable}}"><span class="badge badge-{{reachBadge .Reachable}}">{{reachLabel .Reachable}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="no-findings">No findings detected.</div>
+    {{end}}
+  </div>
+
+  <!-- CNSA 2.0 Timeline -->
+  <div class="timeline-box">
+    <h3>CNSA 2.0 Migration Timeline</h3>
+    <div class="timeline-items">
+      <div class="timeline-item">
+        <span class="timeline-year">2030</span>
+        <span class="timeline-desc">Key exchange algorithms must migrate to post-quantum (ML-KEM / CRYSTALS-Kyber)</span>
+      </div>
+      <div class="timeline-item">
+        <span class="timeline-year">2035</span>
+        <span class="timeline-desc">Digital signature algorithms must migrate to post-quantum (ML-DSA, SLH-DSA)</span>
+      </div>
+    </div>
+    <a class="timeline-link" href="https://media.defense.gov/2022/Sep/07/2003071836/-1/-1/0/CSA_CNSA_2.0_ALGORITHMS_.PDF" target="_blank" rel="noopener noreferrer">
+      NSA CNSA 2.0 Reference (PDF)
+    </a>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  var table = document.getElementById('findings-table');
+  if (!table) return;
+
+  var headers = table.querySelectorAll('th');
+  var tbody = table.querySelector('tbody');
+  var sortCol = -1;
+  var sortAsc = true;
+
+  headers.forEach(function(th) {
+    th.setAttribute('tabindex', '0');
+    th.setAttribute('role', 'columnheader');
+    th.setAttribute('aria-sort', 'none');
+
+    function doSort() {
+      var col = parseInt(th.getAttribute('data-col'), 10);
+      if (sortCol === col) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = col;
+        sortAsc = true;
+      }
+      headers.forEach(function(h) {
+        h.classList.remove('sort-asc', 'sort-desc');
+        h.setAttribute('aria-sort', 'none');
+      });
+      th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+      th.setAttribute('aria-sort', sortAsc ? 'ascending' : 'descending');
+      sortTable(col, sortAsc);
+    }
+
+    th.addEventListener('click', doSort);
+    th.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        doSort();
+      }
+    });
+  });
+
+  function sortTable(col, asc) {
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      var aVal = cellText(a, col);
+      var bVal = cellText(b, col);
+      var aNum = parseFloat(aVal);
+      var bNum = parseFloat(bVal);
+      if (!isNaN(aNum) && !isNaN(bNum)) {
+        return asc ? aNum - bNum : bNum - aNum;
+      }
+      return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    });
+    var frag = document.createDocumentFragment();
+    rows.forEach(function(r) { frag.appendChild(r); });
+    tbody.appendChild(frag);
+  }
+
+  function cellText(row, col) {
+    var cells = row.querySelectorAll('td');
+    if (!cells[col]) return '';
+    var sortAttr = cells[col].getAttribute('data-sort');
+    if (sortAttr !== null) return sortAttr.trim().toLowerCase();
+    return (cells[col].textContent || '').trim().toLowerCase();
+  }
+})();
+</script>
+</body>
+</html>

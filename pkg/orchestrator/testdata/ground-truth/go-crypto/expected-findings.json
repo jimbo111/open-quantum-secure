@@ -1,0 +1,19 @@
+{
+  "repo": "go-crypto",
+  "language": "go",
+  "minFindings": 1,
+  "expectedAlgorithms": ["AES"],
+  "expectedFindings": [
+    {
+      "file": "main.go",
+      "algorithm": "AES",
+      "primitive": "symmetric",
+      "expectedVerdict": "quantum-resistant",
+      "notes": "AES usage in Go crypto sample"
+    }
+  ],
+  "expectedQRS": {
+    "scoreRange": [70, 100],
+    "notes": "AES-only repo should score high (symmetric is quantum-resistant)"
+  }
+}

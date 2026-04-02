@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src data:;">
+<title>OQS Scanner — Quantum Security Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#050508;--surface:#0c0c10;--card:#101016;--card-border:#1a1a24;
+  --card-hover:#14141e;--text:#e2e2ea;--muted:#6b6b80;--dim:#3a3a50;
+  --accent:#6366f1;--accent-glow:rgba(99,102,241,.15);
+  --red:#ef4444;--orange:#f97316;--amber:#eab308;--green:#22c55e;--blue:#3b82f6;--cyan:#06b6d4;
+  --red-bg:rgba(239,68,68,.08);--green-bg:rgba(34,197,94,.08);--amber-bg:rgba(234,179,8,.08);
+  --radius:14px;--transition:.2s cubic-bezier(.4,0,.2,1);
+}
+@font-face{font-family:'DM';src:local('DM Sans'),local('system-ui');font-display:swap}
+body{background:var(--bg);color:var(--text);font-family:'DM',system-ui,-apple-system,sans-serif;font-size:13.5px;line-height:1.55;display:flex;height:100vh;overflow:hidden}
+::selection{background:var(--accent);color:#fff}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--dim);border-radius:3px}
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+#sidebar{width:250px;min-width:250px;background:var(--surface);border-right:1px solid var(--card-border);display:flex;flex-direction:column;z-index:10;height:100vh;overflow:hidden}
+#sidebar-header{padding:20px 18px 16px;border-bottom:1px solid var(--card-border)}
+#sidebar-header h1{font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent)}
+#sidebar-header p{font-size:10.5px;color:var(--dim);margin-top:5px;letter-spacing:.3px}
+#project-list{flex:1;overflow-y:auto;padding:6px 0}
+.proj-item{display:flex;align-items:center;justify-content:space-between;padding:10px 18px;cursor:pointer;border-left:2px solid transparent;transition:all var(--transition)}
+.proj-item:hover{background:rgba(255,255,255,.025)}
+.proj-item.active{background:var(--accent-glow);border-left-color:var(--accent)}
+.proj-name{font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.proj-score{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;flex-shrink:0;backdrop-filter:blur(4px)}
+#no-projects{padding:32px 18px;color:var(--dim);font-size:12px;text-align:center;line-height:1.6}
+
+/* ── Main Area ───────────────────────────────────────────── */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+#topbar{padding:16px 28px;border-bottom:1px solid var(--card-border);display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(12px);background:rgba(5,5,8,.85)}
+#project-title{font-size:15px;font-weight:600;letter-spacing:.2px}
+#project-subtitle{font-size:11px;color:var(--dim);margin-top:2px}
+#topbar-actions{display:flex;gap:8px;align-items:center}
+.action-btn{padding:6px 14px;border-radius:8px;border:1px solid var(--card-border);background:var(--card);color:var(--text);font-size:11px;font-weight:600;cursor:pointer;transition:all var(--transition);display:flex;align-items:center;gap:5px;letter-spacing:.3px}
+.action-btn:hover{border-color:var(--accent);background:var(--accent-glow);transform:translateY(-1px)}
+.action-btn .btn-icon{font-size:13px}
+#content{flex:1;overflow-y:auto;padding:24px 28px;scroll-behavior:smooth}
+
+/* ── Cards & Sections ────────────────────────────────────── */
+.grid{display:grid;gap:16px;margin-bottom:20px}
+.grid-5{grid-template-columns:repeat(5,1fr)}
+.grid-2{grid-template-columns:1fr 1fr}
+.grid-2-1{grid-template-columns:2fr 1fr}
+.grid-1-2{grid-template-columns:1fr 2fr}
+.card{background:var(--card);border:1px solid var(--card-border);border-radius:var(--radius);padding:18px;transition:all var(--transition);position:relative;overflow:hidden}
+.card:hover{border-color:#2a2a3a;transform:translateY(-1px)}
+.card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(99,102,241,.04),transparent 60%);pointer-events:none;border-radius:var(--radius)}
+.card-label{font-size:10px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:10px}
+.card-value{font-size:32px;font-weight:800;letter-spacing:-.5px;line-height:1}
+.card-sub{font-size:11px;color:var(--muted);margin-top:8px;display:flex;align-items:center;gap:4px}
+.section{background:var(--card);border:1px solid var(--card-border);border-radius:var(--radius);padding:20px;margin-bottom:20px;position:relative;overflow:hidden}
+.section::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--accent-glow),transparent);pointer-events:none}
+.section-title{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.section-title::before{content:'';width:3px;height:12px;background:var(--accent);border-radius:2px}
+
+/* ── Grade & Score ───────────────────────────────────────── */
+.grade{display:inline-flex;width:44px;height:44px;border-radius:10px;align-items:center;justify-content:center;font-weight:800;font-size:18px;letter-spacing:-.5px}
+
+/* ── Deltas ──────────────────────────────────────────────── */
+.dlt{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:2px}
+.dlt-up{color:var(--green)}.dlt-dn{color:var(--red)}.dlt-neu{color:var(--dim)}
+
+/* ── Chart ───────────────────────────────────────────────── */
+.chart-wrap{overflow:hidden;width:100%;min-height:160px}
+svg.chart{width:100%;overflow:visible}
+.c-grid{stroke:var(--card-border);stroke-width:1;stroke-dasharray:3,6}
+.c-line{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;filter:drop-shadow(0 0 6px rgba(99,102,241,.4))}
+.c-area{opacity:.15}
+.c-dot{fill:var(--accent);stroke:var(--bg);stroke-width:2.5;cursor:pointer;transition:r .15s}
+.c-dot:hover{r:6}
+.c-lbl{fill:var(--dim);font-size:10px;font-family:inherit}
+.c-val{fill:var(--text);font-size:10px;font-weight:700;font-family:inherit}
+.c-tooltip{position:absolute;background:var(--card);border:1px solid var(--card-border);border-radius:8px;padding:8px 12px;font-size:11px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:5;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+
+/* ── Donut Chart ─────────────────────────────────────────── */
+.donut-wrap{position:relative;width:200px;height:200px;margin:0 auto}
+.donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.donut-center-val{font-size:28px;font-weight:800;line-height:1}
+.donut-center-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+.donut-seg{cursor:pointer;transition:opacity .15s,transform .15s;transform-origin:center}
+.donut-seg:hover{opacity:.75;transform:scale(1.03)}
+.donut-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:16px;justify-content:center}
+.donut-legend-item{display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;transition:opacity .15s}
+.donut-legend-item:hover{opacity:.7}
+.donut-legend-swatch{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+
+/* ── HNDL Panel ──────────────────────────────────────────── */
+.hndl-card{display:flex;flex-direction:column;align-items:center;text-align:center;padding:24px 18px}
+.hndl-count{font-size:40px;font-weight:800;line-height:1}
+.hndl-label{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4}
+.hndl-bar{width:100%;height:6px;background:rgba(255,255,255,.06);border-radius:3px;margin-top:12px;overflow:hidden}
+.hndl-bar-fill{height:100%;border-radius:3px;transition:width .6s}
+.hndl-deadline{font-size:10px;color:var(--dim);margin-top:8px;font-variant-numeric:tabular-nums}
+
+/* ── Effort Cards ────────────────────────────────────────── */
+.effort-card{text-align:center;padding:20px 16px}
+.effort-count{font-size:36px;font-weight:800;line-height:1}
+.effort-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:8px}
+.effort-est{font-size:11px;color:var(--dim);margin-top:6px}
+
+/* ── Compliance ──────────────────────────────────────────── */
+.compliance-badge{display:flex;align-items:center;gap:12px;padding:16px 20px;border-radius:10px;margin-bottom:16px}
+.compliance-badge.pass{background:var(--green-bg);border:1px solid rgba(34,197,94,.2)}
+.compliance-badge.fail{background:var(--red-bg);border:1px solid rgba(239,68,68,.2)}
+.compliance-icon{font-size:28px}
+.compliance-text{font-size:14px;font-weight:700}
+.compliance-check{display:flex;align-items:center;gap:8px;padding:7px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,.04)}
+.compliance-check:last-child{border-bottom:none}
+.check-mark{width:18px;text-align:center;font-size:13px}
+
+/* ── Scan Diff ───────────────────────────────────────────── */
+.diff-badges{display:flex;gap:12px;flex-wrap:wrap}
+.diff-badge{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
+.diff-badge.good{border-color:rgba(34,197,94,.2);color:var(--green)}
+.diff-badge.bad{border-color:rgba(239,68,68,.2);color:var(--red)}
+.diff-badge.neutral{color:var(--dim)}
+
+/* ── Severity Heat Bar ───────────────────────────────────── */
+.heat-bar{display:flex;height:32px;border-radius:6px;overflow:hidden;margin-bottom:8px}
+.heat-seg{transition:width .6s;min-width:2px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:rgba(255,255,255,.9);cursor:pointer}
+.heat-seg:hover{filter:brightness(1.2)}
+.heat-legend{display:flex;gap:16px;margin-top:8px}
+.heat-legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+.heat-legend-dot{width:8px;height:8px;border-radius:2px}
+
+/* ── Table ───────────────────────────────────────────────── */
+table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:auto}
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+th{text-align:left;padding:8px 10px;color:var(--dim);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--card-border);cursor:pointer;user-select:none;transition:color .15s}
+th:hover{color:var(--text)}
+th.sort-asc::after{content:' ▲';color:var(--accent);font-size:8px}
+th.sort-desc::after{content:' ▼';color:var(--accent);font-size:8px}
+td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.03);transition:background .1s}
+tr:hover td{background:rgba(99,102,241,.04)}
+.cat-row{cursor:pointer}
+.cat-row td{font-weight:600;background:rgba(255,255,255,.02)}
+.cat-row:hover td{background:rgba(255,255,255,.05)}
+.cat-chevron{display:inline-block;transition:transform .2s;margin-right:6px;font-size:10px;color:var(--dim)}
+.cat-expanded .cat-chevron{transform:rotate(90deg)}
+.cat-detail{display:none}
+.cat-expanded+.cat-detail{display:table-row}
+
+/* ── States ──────────────────────────────────────────────── */
+#empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;color:var(--muted);text-align:center}
+#empty-state h2{font-size:16px;color:var(--text);font-weight:600}
+#loading{display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim);font-size:13px;gap:10px}
+.spinner{width:16px;height:16px;border:2px solid var(--card-border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.animate-in{animation:fadeIn .35s ease-out both}
+.d1{animation-delay:.05s}.d2{animation-delay:.1s}.d3{animation-delay:.15s}.d4{animation-delay:.2s}.d5{animation-delay:.25s}.d6{animation-delay:.3s}.d7{animation-delay:.35s}.d8{animation-delay:.4s}
+
+/* ── Mobile ──────────────────────────────────────────────── */
+@media(max-width:768px){
+  body{flex-direction:column}
+  #sidebar{width:100%;min-width:0;max-height:140px;border-right:none;border-bottom:1px solid var(--card-border)}
+  #project-list{display:flex;overflow-x:auto;padding:4px 8px}
+  .proj-item{min-width:140px;flex-shrink:0;border-left:none;border-bottom:2px solid transparent}
+  .proj-item.active{border-bottom-color:var(--accent);border-left:none}
+  .grid-5{grid-template-columns:repeat(3,1fr)}
+  .grid-2,.grid-2-1,.grid-1-2{grid-template-columns:1fr}
+  #content{padding:16px}
+}
+@media(max-width:480px){.grid-5{grid-template-columns:repeat(2,1fr)}}
+@media print{
+  body{background:#fff;color:#111}
+  .card,.section{border:1px solid #ddd;background:#fafafa;box-shadow:none}
+  .card::before,.section::before{display:none}
+  #sidebar{display:none}
+  #topbar{border-bottom:2px solid #111}
+}
+</style>
+</head>
+<body>
+
+<nav id="sidebar">
+  <div id="sidebar-header">
+    <h1>OQS Scanner</h1>
+    <p>Quantum Security Dashboard</p>
+  </div>
+  <div id="project-list"><div id="no-projects">Loading&#8230;</div></div>
+</nav>
+
+<div id="main">
+  <div id="topbar">
+    <div>
+      <div id="project-title" style="color:var(--dim)">Select a project</div>
+      <div id="project-subtitle"></div>
+    </div>
+    <div id="topbar-actions" style="display:none">
+      <button class="action-btn" id="btn-cbom" title="Download CBOM (CycloneDX 1.7)"><span class="btn-icon">&#x1F4E6;</span> CBOM</button>
+      <button class="action-btn" id="btn-json" title="Download scan results as JSON"><span class="btn-icon">&#x1F4CB;</span> JSON</button>
+    </div>
+  </div>
+  <div id="content">
+    <div id="empty-state">
+      <div style="font-size:40px;opacity:.4">&#x1F6E1;</div>
+      <h2>No project selected</h2>
+      <p style="max-width:300px;line-height:1.5">Choose a project from the sidebar to view its quantum security posture.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){"use strict";
+
+/* ── Utilities ────────────────────────────────────────────── */
+function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function gradeColor(g){if(!g)return"var(--dim)";var c=g[0];return c==="A"?"var(--green)":c==="B"?"var(--blue)":c==="C"?"var(--amber)":c==="D"?"var(--orange)":"var(--red)"}
+function scoreColor(s){return s>=80?"var(--green)":s>=60?"var(--blue)":s>=40?"var(--amber)":s>=20?"var(--orange)":"var(--red)"}
+function scoreHex(s){return s>=80?"#22c55e":s>=60?"#3b82f6":s>=40?"#eab308":s>=20?"#f97316":"#ef4444"}
+function fmtDate(ts){if(!ts)return"\u2014";try{return new Date(ts).toISOString().slice(0,16).replace("T"," ")}catch(e){return String(ts).slice(0,16)}}
+function delta(n,inv){if(n==null||n===0)return'<span class="dlt dlt-neu">\u2014</span>';var g=inv?(n<0):(n>0);return'<span class="dlt '+(g?"dlt-up":"dlt-dn")+'">'+(n>0?"+":"")+n+'</span>'}
+async function api(url){var r=await fetch(url);if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}
+function downloadAs(url,filename,label){
+  fetch(url).then(function(r){return r.blob()}).then(function(b){
+    var a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=filename;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(a.href);
+  }).catch(function(e){alert("Download failed: "+e.message)});
+}
+
+/* ── Project list ─────────────────────────────────────────── */
+async function boot(){
+  var list=document.getElementById("project-list");
+  try{
+    var projects=await api("/api/projects");
+    list.textContent="";
+    if(!projects||!projects.length){list.innerHTML='<div id="no-projects">No scans yet.<br>Run <code>oqs-scanner scan</code> to get started.</div>';return}
+    projects.forEach(function(p){
+      var el=document.createElement("div");el.className="proj-item";el.dataset.slug=p.slug;
+      var n=document.createElement("span");n.className="proj-name";n.title=p.name||"";n.textContent=p.name||p.slug;
+      var s=document.createElement("span");s.className="proj-score";
+      if(p.latestQRS!=null){var h=scoreHex(p.latestQRS);s.style.cssText="background:"+h+"18;color:"+h;s.textContent=p.latestQRS}
+      else{s.style.color="var(--dim)";s.textContent="\u2014"}
+      el.appendChild(n);el.appendChild(s);
+      el.addEventListener("click",function(){selectProject(p.slug,p.name||p.slug)});
+      list.appendChild(el)
+    });
+    selectProject(projects[0].slug,projects[0].name||projects[0].slug)
+  }catch(e){list.innerHTML='<div id="no-projects" style="color:var(--red)">Failed to load</div>'}
+}
+
+function setActive(slug){document.querySelectorAll(".proj-item").forEach(function(el){el.classList.toggle("active",el.dataset.slug===slug)})}
+
+/* ── Load project ─────────────────────────────────────────── */
+async function selectProject(slug,name){
+  setActive(slug);
+  document.getElementById("project-title").textContent=name;
+  document.getElementById("project-title").style.color="";
+  document.getElementById("project-subtitle").textContent="";
+  var ct=document.getElementById("content");
+  ct.innerHTML='<div id="loading"><div class="spinner"></div>Loading\u2026</div>';
+  try{
+    var enc=encodeURIComponent(slug);
+    var res=await Promise.all([api("/api/projects/"+enc+"/history"),api("/api/projects/"+enc+"/trends"),api("/api/projects/"+enc+"/findings")]);
+    // Show action buttons
+    var actions=document.getElementById("topbar-actions");
+    actions.style.display="flex";
+    document.getElementById("btn-cbom").onclick=function(){downloadAs("/api/projects/"+enc+"/history",slug+"-cbom.json","CBOM")};
+    document.getElementById("btn-json").onclick=function(){downloadAs("/api/projects/"+enc+"/history",slug+"-scan.json","JSON")};
+    render(name,res[0],res[1],res[2],ct)
+  }catch(e){ct.innerHTML='<div id="empty-state"><div style="font-size:32px">&#x26A0;</div><h2>Error</h2><p>'+esc(e.message)+'</p></div>'}
+}
+
+/* ── Main render ──────────────────────────────────────────── */
+function render(name,history,trends,findingsData,ct){
+  ct.textContent="";
+  if(!history||!history.length){ct.innerHTML='<div id="empty-state"><div style="font-size:32px;opacity:.4">&#x1F4CB;</div><h2>No scans yet</h2><p>Run <code style="background:var(--card);padding:2px 6px;border-radius:4px">oqs-scanner scan</code></p></div>';return}
+  var latest=history[history.length-1];
+  var prev=history.length>=2?history[history.length-2]:null;
+  if(latest.branch)document.getElementById("project-subtitle").textContent="branch: "+latest.branch+" \u00b7 "+history.length+" scan"+(history.length>1?"s":"");
+  var d=(trends&&trends.delta)||{};
+  var fs=latest.findingSummary||{};
+
+  // KPI row
+  var kpi=mk("div","grid grid-5 animate-in d1");ct.appendChild(kpi);
+  renderKPI(kpi,latest,d,history.length);
+
+  // Trend chart
+  var chart=mk("div","animate-in d2");ct.appendChild(chart);
+  renderChart(chart,trends);
+
+  // HNDL + Compliance row
+  var row1=mk("div","grid grid-2 animate-in d3");ct.appendChild(row1);
+  renderHNDL(row1,fs);
+  renderCompliance(row1,latest);
+
+  // Donut + Effort row
+  var row2=mk("div","grid grid-2 animate-in d4");ct.appendChild(row2);
+  renderDonut(row2,fs);
+  renderEffort(row2,fs);
+
+  // Scan diff + Heat bar row
+  var row3=mk("div","grid grid-2 animate-in d5");ct.appendChild(row3);
+  renderDiff(row3,latest,prev,d);
+  renderHeatBar(row3,fs);
+
+  // Recent scans table
+  var tbl=mk("div","animate-in d6");ct.appendChild(tbl);
+  renderTable(tbl,history);
+
+  // Finding breakdown
+  var brk=mk("div","animate-in d7");ct.appendChild(brk);
+  renderBreakdown(brk,fs);
+
+  // Findings drill-down table (from stored TopFindings)
+  if(findingsData&&findingsData.length>0){
+    var fdiv=mk("div","animate-in d8");ct.appendChild(fdiv);
+    renderFindingsTable(fdiv,findingsData);
+  }
+}
+
+function mk(tag,cls){var e=document.createElement(tag);if(cls)e.className=cls;return e}
+
+/* ── 0. KPI Cards ─────────────────────────────────────────── */
+function renderKPI(el,latest,d,count){
+  var qrs=latest.quantumReadinessScore||0,grade=latest.quantumReadinessGrade||"\u2014",fs=latest.findingSummary||{};
+  var vuln=(fs.quantumVulnerable||0),dep=(fs.deprecated||0);
+  el.innerHTML=
+    '<div class="card"><div class="card-label">QRS Score</div><div class="card-value" style="color:'+scoreHex(qrs)+'">'+qrs+'</div><div class="card-sub">'+delta(d.qrs,false)+' from first scan</div></div>'+
+    '<div class="card"><div class="card-label">Grade</div><div class="card-value"><span class="grade" style="background:'+scoreHex(qrs)+'18;color:'+scoreHex(qrs)+'">'+esc(grade)+'</span></div><div class="card-sub">/100 scale</div></div>'+
+    '<div class="card"><div class="card-label">Findings</div><div class="card-value">'+(fs.total||0)+'</div><div class="card-sub">'+delta(d.findings,true)+'</div></div>'+
+    '<div class="card"><div class="card-label">Vulnerable</div><div class="card-value" style="color:var(--red)">'+vuln+'</div><div class="card-sub">'+delta(d.vulnerable,true)+'</div></div>'+
+    '<div class="card"><div class="card-label">Scans</div><div class="card-value" style="color:var(--accent)">'+count+'</div><div class="card-sub">recorded</div></div>'
+}
+
+/* ── 1. Trend Chart ───────────────────────────────────────── */
+function renderChart(el,trends){
+  if(!trends||!trends.dataPoints||trends.dataPoints.length<2){el.innerHTML='<div class="section"><div class="section-title">QRS Trend</div><p style="color:var(--dim);font-size:12px">Need 2+ scans for trend.</p></div>';return}
+  var pts=trends.dataPoints,W=700,H=170,pl=44,pr=20,pt=20,pb=32,iw=W-pl-pr,ih=H-pt-pb;
+  var scores=pts.map(function(p){return p.qrs||0}),mn=Math.max(0,Math.min.apply(null,scores)-10),mx=Math.min(100,Math.max.apply(null,scores)+10),rng=mx-mn||1;
+  function cx(i){return pl+i/(pts.length-1)*iw}function cy(s){return pt+ih-((s-mn)/rng*ih)}
+  var grid="",axis="";
+  [0,25,50,75,100].forEach(function(v){if(v<mn-5||v>mx+5)return;var y=cy(v);grid+='<line class="c-grid" x1="'+pl+'" y1="'+y.toFixed(1)+'" x2="'+(W-pr)+'" y2="'+y.toFixed(1)+'"/>';axis+='<text class="c-lbl" x="'+(pl-6)+'" y="'+(y+3.5).toFixed(1)+'" text-anchor="end">'+v+'</text>'});
+  var pathD=pts.map(function(p,i){return(i?'L':'M')+cx(i).toFixed(1)+','+cy(p.qrs||0).toFixed(1)}).join(' ');
+  var areaD=pathD+' L'+cx(pts.length-1).toFixed(1)+','+(pt+ih)+' L'+pl+','+(pt+ih)+' Z';
+  var dots="",vals="";
+  pts.forEach(function(p,i){var x=cx(i),y=cy(p.qrs||0);dots+='<circle class="c-dot" cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="4" data-idx="'+i+'"/>';if(i===0||i===pts.length-1||pts.length<=10)vals+='<text class="c-val" x="'+x.toFixed(1)+'" y="'+(y-10).toFixed(1)+'" text-anchor="'+(i===0?'start':i===pts.length-1?'end':'middle')+'">'+(p.qrs||0)+'</text>'});
+  var xlbl="";var step=Math.max(1,Math.floor(pts.length/7));
+  pts.forEach(function(p,i){if(i%step!==0&&i!==pts.length-1)return;xlbl+='<text class="c-lbl" x="'+cx(i).toFixed(1)+'" y="'+(pt+ih+20)+'" text-anchor="middle">'+esc((p.date||"").slice(5))+'</text>'});
+  el.innerHTML='<div class="section"><div class="section-title">QRS Score Over Time</div><div class="chart-wrap"><svg class="chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet"><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#6366f1" stop-opacity=".2"/><stop offset="100%" stop-color="#6366f1" stop-opacity=".01"/></linearGradient></defs>'+grid+axis+'<path d="'+areaD+'" fill="url(#ag)" class="c-area"/><path class="c-line" d="'+pathD+'"/>'+dots+vals+xlbl+'</svg></div>'+(trends.summary?'<div style="font-size:11px;color:var(--muted);margin-top:10px">'+esc(trends.summary)+'</div>':'')+'</div>'
+}
+
+/* ── 2. Donut Chart ───────────────────────────────────────── */
+function renderDonut(el,fs){
+  var sec=mk("div","section");el.appendChild(sec);
+  sec.innerHTML='<div class="section-title">Algorithm Inventory</div>';
+  var data=[{label:"Vulnerable",val:fs.quantumVulnerable||0,color:"#ef4444"},{label:"Weakened",val:fs.quantumWeakened||0,color:"#f97316"},{label:"Safe",val:fs.quantumSafe||0,color:"#22c55e"},{label:"Resistant",val:fs.quantumResistant||0,color:"#3b82f6"},{label:"Deprecated",val:fs.deprecated||0,color:"#6b6b80"}];
+  var total=data.reduce(function(a,d){return a+d.val},0);
+  if(!total){sec.innerHTML+='<p style="color:var(--dim);font-size:12px;text-align:center">No findings</p>';return}
+  var wrap=mk("div","donut-wrap");sec.appendChild(wrap);
+  var R=90,r=62,cx=100,cy=100;
+  var svg='<svg width="200" height="200" viewBox="0 0 200 200">';
+  var angle=-90;
+  data.forEach(function(d){
+    if(!d.val)return;
+    var pct=d.val/total,deg=pct*360,rad1=angle*Math.PI/180,rad2=(angle+deg)*Math.PI/180;
+    var large=deg>180?1:0;
+    var x1=cx+R*Math.cos(rad1),y1=cy+R*Math.sin(rad1),x2=cx+R*Math.cos(rad2),y2=cy+R*Math.sin(rad2);
+    var ix1=cx+r*Math.cos(rad1),iy1=cy+r*Math.sin(rad1),ix2=cx+r*Math.cos(rad2),iy2=cy+r*Math.sin(rad2);
+    svg+='<path d="M'+x1.toFixed(1)+','+y1.toFixed(1)+' A'+R+','+R+' 0 '+large+',1 '+x2.toFixed(1)+','+y2.toFixed(1)+' L'+ix2.toFixed(1)+','+iy2.toFixed(1)+' A'+r+','+r+' 0 '+large+',0 '+ix1.toFixed(1)+','+iy1.toFixed(1)+' Z" fill="'+d.color+'" class="donut-seg"><title>'+esc(d.label)+': '+d.val+' ('+(pct*100).toFixed(1)+'%)</title></path>';
+    angle+=deg
+  });
+  svg+='</svg>';
+  wrap.innerHTML=svg+'<div class="donut-center"><div class="donut-center-val">'+total+'</div><div class="donut-center-lbl">Total</div></div>';
+  var leg=mk("div","donut-legend");sec.appendChild(leg);
+  data.forEach(function(d){if(!d.val)return;leg.innerHTML+='<div class="donut-legend-item"><div class="donut-legend-swatch" style="background:'+d.color+'"></div>'+esc(d.label)+' <span style="font-weight:700">'+d.val+'</span></div>'})
+}
+
+/* ── 3. HNDL Urgency Panel ────────────────────────────────── */
+function renderHNDL(el,fs){
+  var imm=fs.critical||0,def=fs.high||0,total=imm+def||1;
+  var now=new Date(),deadline=new Date("2030-01-01"),days=Math.max(0,Math.ceil((deadline-now)/(1000*60*60*24)));
+  var sec=mk("div","section");el.appendChild(sec);
+  sec.innerHTML=
+    '<div class="section-title">HNDL Threat Assessment</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
+      '<div class="card hndl-card" style="border-color:rgba(239,68,68,.2)"><div style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Immediate</div><div class="hndl-count" style="color:var(--red)">'+imm+'</div><div class="hndl-label">Key exchange findings<br>Must migrate by 2030</div><div class="hndl-bar"><div class="hndl-bar-fill" style="width:'+(imm/total*100).toFixed(0)+'%;background:var(--red)"></div></div><div class="hndl-deadline">'+days.toLocaleString()+' days remaining</div></div>'+
+      '<div class="card hndl-card" style="border-color:rgba(234,179,8,.2)"><div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Deferred</div><div class="hndl-count" style="color:var(--amber)">'+def+'</div><div class="hndl-label">Signature findings<br>Deadline 2035</div><div class="hndl-bar"><div class="hndl-bar-fill" style="width:'+(def/total*100).toFixed(0)+'%;background:var(--amber)"></div></div><div class="hndl-deadline">Transition after key exchange</div></div>'+
+    '</div></div>'
+}
+
+/* ── 4. Migration Effort ──────────────────────────────────── */
+function renderEffort(el,fs){
+  var simple=fs.medium||0,moderate=fs.high||0,complex=fs.critical||0;
+  var weeks=((simple*.5+moderate*2+complex*5)/5).toFixed(1);
+  var sec=mk("div","section");el.appendChild(sec);
+  sec.innerHTML='<div class="section-title">Migration Effort</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">'+
+      '<div class="card effort-card" style="border-color:rgba(34,197,94,.15)"><div class="effort-count" style="color:var(--green)">'+simple+'</div><div class="effort-label">Simple</div><div class="effort-est">~0.5d each</div></div>'+
+      '<div class="card effort-card" style="border-color:rgba(234,179,8,.15)"><div class="effort-count" style="color:var(--amber)">'+moderate+'</div><div class="effort-label">Moderate</div><div class="effort-est">~2d each</div></div>'+
+      '<div class="card effort-card" style="border-color:rgba(239,68,68,.15)"><div class="effort-count" style="color:var(--red)">'+complex+'</div><div class="effort-label">Complex</div><div class="effort-est">~5d each</div></div>'+
+    '</div>'+
+    '<div style="text-align:center;font-size:12px;color:var(--muted)">Estimated total: <span style="font-weight:700;color:var(--text)">~'+weeks+' developer-weeks</span></div>'
+}
+
+/* ── 5. Compliance Status ─────────────────────────────────── */
+function renderCompliance(el,latest){
+  var fs=latest.findingSummary||{},qrs=latest.quantumReadinessScore||0;
+  var pass=qrs>=70;
+  var checks=[
+    {label:"AES-256 symmetric encryption",ok:true},
+    {label:"SHA-384+ hashing",ok:(fs.deprecated||0)===0},
+    {label:"ML-KEM-1024 key exchange",ok:(fs.quantumVulnerable||0)===0},
+    {label:"ML-DSA-87 digital signatures",ok:(fs.quantumVulnerable||0)===0},
+    {label:"No deprecated algorithms",ok:(fs.deprecated||0)===0}
+  ];
+  var sec=mk("div","section");el.appendChild(sec);
+  sec.innerHTML='<div class="section-title">CNSA 2.0 Compliance</div>';
+  sec.innerHTML+='<div class="compliance-badge '+(pass?"pass":"fail")+'"><div class="compliance-icon">'+(pass?"\u2705":"\u26A0\uFE0F")+'</div><div><div class="compliance-text">'+(pass?"Likely Compliant":"At Risk")+'</div><div style="font-size:11px;color:var(--muted)">QRS '+qrs+'/100</div></div></div>';
+  checks.forEach(function(c){sec.innerHTML+='<div class="compliance-check"><div class="check-mark">'+(c.ok?'<span style="color:var(--green)">\u2713</span>':'<span style="color:var(--red)">\u2717</span>')+'</div>'+esc(c.label)+'</div>'})
+}
+
+/* ── 6. Scan Diff ─────────────────────────────────────────── */
+function renderDiff(el,latest,prev,d){
+  var sec=mk("div","section");el.appendChild(sec);
+  sec.innerHTML='<div class="section-title">Latest Scan Delta</div>';
+  if(!prev){sec.innerHTML+='<p style="color:var(--dim);font-size:12px">Need 2+ scans to show diff.</p>';return}
+  var badges='<div class="diff-badges">';
+  if(d.qrs!=null&&d.qrs!==0)badges+='<div class="diff-badge '+(d.qrs>0?'good':'bad')+'">QRS '+(d.qrs>0?"\u2191":"\u2193")+' '+Math.abs(d.qrs)+'</div>';
+  if(d.findings!=null&&d.findings!==0)badges+='<div class="diff-badge '+(d.findings<0?'good':'bad')+'">Findings '+(d.findings<0?"\u2193":"\u2191")+' '+Math.abs(d.findings)+'</div>';
+  if(d.vulnerable!=null&&d.vulnerable!==0)badges+='<div class="diff-badge '+(d.vulnerable<0?'good':'bad')+'">Vulnerable '+(d.vulnerable<0?"\u2193":"\u2191")+' '+Math.abs(d.vulnerable)+'</div>';
+  if(d.deprecated!=null&&d.deprecated!==0)badges+='<div class="diff-badge '+(d.deprecated<0?'good':'bad')+'">Deprecated '+(d.deprecated<0?"\u2193":"\u2191")+' '+Math.abs(d.deprecated)+'</div>';
+  if(d.improving!=null)badges+='<div class="diff-badge '+(d.improving?'good':'bad')+'">'+(d.improving?"\u2705 Improving":"\u26A0 Not Improving")+'</div>';
+  badges+='</div>';
+  sec.innerHTML+=badges;
+  // Mini comparison
+  var pfs=prev.findingSummary||{},lfs=latest.findingSummary||{};
+  sec.innerHTML+='<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:12px;margin-top:16px;font-size:12px;color:var(--muted)">'+
+    '<div style="text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Previous</div><div style="font-size:24px;font-weight:800;color:var(--text)">'+(prev.quantumReadinessScore||0)+'</div><div>'+esc(prev.quantumReadinessGrade||"\u2014")+' \u00b7 '+(pfs.total||0)+' findings</div></div>'+
+    '<div style="display:flex;align-items:center;font-size:20px;color:var(--accent)">\u2192</div>'+
+    '<div style="text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Latest</div><div style="font-size:24px;font-weight:800;color:var(--text)">'+(latest.quantumReadinessScore||0)+'</div><div>'+esc(latest.quantumReadinessGrade||"\u2014")+' \u00b7 '+(lfs.total||0)+' findings</div></div>'+
+  '</div>'
+}
+
+/* ── 7. Severity Heat Bar ─────────────────────────────────── */
+function renderHeatBar(el,fs){
+  var sec=mk("div","section");el.appendChild(sec);
+  sec.innerHTML='<div class="section-title">Severity Distribution</div>';
+  var total=fs.total||0;if(!total){sec.innerHTML+='<p style="color:var(--dim);font-size:12px">No findings.</p>';return}
+  var segs=[{l:"Critical",v:fs.critical||0,c:"#ef4444"},{l:"High",v:fs.high||0,c:"#f97316"},{l:"Medium",v:fs.medium||0,c:"#eab308"},{l:"Low",v:fs.low||0,c:"#3b82f6"},{l:"Info",v:fs.info||0,c:"#6b6b80"}];
+  var bar='<div class="heat-bar">';
+  segs.forEach(function(s){if(!s.v)return;var pct=(s.v/total*100);bar+='<div class="heat-seg" style="width:'+pct.toFixed(1)+'%;background:'+s.c+'" title="'+esc(s.l)+': '+s.v+' ('+(pct).toFixed(1)+'%)">'+(pct>8?s.v:'')+'</div>'});
+  bar+='</div>';
+  sec.innerHTML+=bar;
+  var leg='<div class="heat-legend">';
+  segs.forEach(function(s){if(!s.v)return;leg+='<div class="heat-legend-item"><div class="heat-legend-dot" style="background:'+s.c+'"></div>'+s.l+' '+s.v+'</div>'});
+  sec.innerHTML+=leg+'</div>'
+}
+
+/* ── Recent Scans Table ───────────────────────────────────── */
+function renderTable(el,history){
+  var rows=history.slice().reverse().slice(0,20);
+  var html='<div class="section"><div class="section-title">Recent Scans</div><div style="overflow-x:auto"><table><thead><tr><th>Scan ID</th><th>Date</th><th>QRS</th><th>Grade</th><th>Findings</th><th>Vulnerable</th><th>Deprecated</th><th>Mode</th><th>Duration</th></tr></thead><tbody>';
+  rows.forEach(function(s){
+    var q=s.quantumReadinessScore||0,g=s.quantumReadinessGrade||"\u2014",fs=s.findingSummary||{},id=s.scanId||"\u2014";
+    html+='<tr><td style="font-family:monospace;font-size:11px;color:var(--dim)" title="'+esc(id)+'">'+esc(id.length>12?id.slice(0,12)+"\u2026":id)+'</td><td>'+esc(fmtDate(s.timestamp))+'</td><td style="font-weight:700;color:'+scoreHex(q)+'">'+q+'</td><td style="font-weight:700;color:'+scoreHex(q)+'">'+esc(g)+'</td><td>'+(fs.total||0)+'</td><td style="color:var(--red)">'+(fs.quantumVulnerable||fs.critical||0)+'</td><td style="color:var(--muted)">'+(fs.deprecated||fs.medium||0)+'</td><td style="color:var(--dim)">'+esc(s.scanMode||"\u2014")+'</td><td style="color:var(--dim)">'+esc(s.duration||"\u2014")+'</td></tr>'
+  });
+  html+='</tbody></table></div></div>';
+  el.innerHTML=html
+}
+
+/* ── Finding Breakdown (by category) ──────────────────────── */
+function renderBreakdown(el,fs){
+  var sec=mk("div","section");el.appendChild(sec);
+  sec.innerHTML='<div class="section-title">Finding Breakdown by Quantum Risk</div>';
+  var cats=[
+    {name:"Quantum Vulnerable",count:fs.quantumVulnerable||0,detail:"Broken by quantum computers (Shor\u2019s algorithm). Includes RSA, ECDSA, ECDH, DH, DSA.",color:"var(--red)",icon:"\u26A0"},
+    {name:"Quantum Weakened",count:fs.quantumWeakened||0,detail:"Security halved by Grover\u2019s algorithm. Includes AES-128, SHA-1 in some contexts.",color:"var(--orange)",icon:"\u26A1"},
+    {name:"Quantum Safe",count:fs.quantumSafe||0,detail:"Post-quantum algorithms. Includes ML-KEM, ML-DSA, SLH-DSA.",color:"var(--green)",icon:"\u2705"},
+    {name:"Quantum Resistant",count:fs.quantumResistant||0,detail:"Sufficient post-quantum security. Includes AES-256, SHA-256, SHA-512, HMAC.",color:"var(--blue)",icon:"\uD83D\uDEE1"},
+    {name:"Deprecated",count:fs.deprecated||0,detail:"Classically broken regardless of quantum. Includes MD5, DES, RC4, Blowfish.",color:"var(--muted)",icon:"\u274C"}
+  ];
+  var html='<table><thead><tr><th style="width:40px"></th><th>Category</th><th style="text-align:right">Count</th><th style="text-align:right">% of Total</th></tr></thead><tbody>';
+  var total=fs.total||1;
+  cats.forEach(function(c){
+    if(!c.count)return;
+    var pct=(c.count/total*100).toFixed(1);
+    html+='<tr class="cat-row" onclick="this.classList.toggle(\'cat-expanded\')"><td style="text-align:center">'+c.icon+'</td><td><span class="cat-chevron">\u25B6</span><span style="color:'+c.color+';font-weight:600">'+esc(c.name)+'</span></td><td style="text-align:right;font-weight:700;font-size:16px;color:'+c.color+'">'+c.count+'</td><td style="text-align:right;color:var(--muted)">'+pct+'%</td></tr>';
+    html+='<tr class="cat-detail"><td colspan="4" style="padding:12px 16px 16px 48px;color:var(--muted);font-size:12px;line-height:1.6;background:rgba(255,255,255,.015)">'+esc(c.detail)+'<div style="margin-top:8px"><div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+c.color+';border-radius:2px"></div></div></div></td></tr>'
+  });
+  html+='</tbody></table>';
+  sec.innerHTML+=html
+}
+
+/* ── Findings Drill-Down Table ─────────────────────────────── */
+function renderFindingsTable(el,findings){
+  var sec=mk("div","section");el.appendChild(sec);
+  sec.innerHTML='<div class="section-title">Finding Details (Top '+findings.length+')</div>';
+  // Search filter
+  sec.innerHTML+='<div style="margin-bottom:12px"><input id="findings-search" type="text" placeholder="Filter by file, algorithm, risk..." style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--card-border);border-radius:8px;color:var(--text);font-size:12px;outline:none" oninput="filterFindings(this.value)"></div>';
+  var html='<div class="table-scroll"><table id="findings-tbl"><thead><tr><th>File</th><th>Line</th><th>Algorithm</th><th>Risk</th><th>Severity</th><th>Effort</th><th>HNDL</th><th>Engine</th></tr></thead><tbody>';
+  findings.forEach(function(f,i){
+    var riskColor={"quantum-vulnerable":"var(--red)","quantum-weakened":"var(--orange)","quantum-safe":"var(--green)","quantum-resistant":"var(--blue)","deprecated":"var(--muted)"}[f.quantumRisk]||"var(--dim)";
+    var sevColor={"critical":"var(--red)","high":"var(--orange)","medium":"var(--amber)","low":"var(--blue)","info":"var(--dim)"}[f.severity]||"var(--dim)";
+    var effortBadge={"simple":'<span style="color:var(--green);font-weight:600">S</span>',"moderate":'<span style="color:var(--amber);font-weight:600">M</span>',"complex":'<span style="color:var(--red);font-weight:600">C</span>'}[f.migrationEffort]||'<span style="color:var(--dim)">\u2014</span>';
+    var hndlBadge={"immediate":'<span style="color:var(--red);font-weight:600">IMM</span>',"deferred":'<span style="color:var(--amber);font-weight:600">DEF</span>'}[f.hndlRisk]||'<span style="color:var(--dim)">\u2014</span>';
+    html+='<tr class="finding-row" data-idx="'+i+'" style="cursor:pointer" onclick="toggleFindingDetail(this)">';
+    html+='<td style="font-family:monospace;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(f.file)+'">'+esc(f.file)+'</td>';
+    html+='<td style="font-family:monospace;font-size:11px;color:var(--dim)">'+(f.line||"\u2014")+'</td>';
+    html+='<td style="font-weight:600">'+esc(f.algorithm)+'</td>';
+    html+='<td style="color:'+riskColor+';font-size:11px;font-weight:600">'+esc(f.quantumRisk||"unknown")+'</td>';
+    html+='<td style="color:'+sevColor+';font-size:11px;font-weight:600">'+esc(f.severity||"\u2014")+'</td>';
+    html+='<td style="text-align:center">'+effortBadge+'</td>';
+    html+='<td style="text-align:center">'+hndlBadge+'</td>';
+    html+='<td style="font-size:10px;color:var(--dim)">'+esc(f.sourceEngine||"")+'</td>';
+    html+='</tr>';
+    // Expandable recommendation row
+    if(f.recommendation){
+      html+='<tr class="finding-detail" style="display:none" data-parent="'+i+'"><td colspan="8" style="padding:10px 16px 14px 32px;background:rgba(99,102,241,.03);font-size:12px;color:var(--muted);line-height:1.6;border-left:2px solid var(--accent)">'+esc(f.recommendation)+'</td></tr>';
+    }
+  });
+  html+='</tbody></table></div>';
+  // Pagination info
+  html+='<div style="margin-top:10px;font-size:11px;color:var(--dim);text-align:center">Showing '+findings.length+' findings (max '+100+')</div>';
+  sec.innerHTML+=html;
+}
+// Toggle finding detail row
+function toggleFindingDetail(row){
+  var idx=row.dataset.idx;
+  var detail=document.querySelector('.finding-detail[data-parent="'+idx+'"]');
+  if(detail)detail.style.display=detail.style.display==='none'?'table-row':'none';
+}
+// Filter findings table
+function filterFindings(query){
+  var q=query.toLowerCase();
+  var rows=document.querySelectorAll('#findings-tbl .finding-row');
+  rows.forEach(function(row){
+    var text=row.textContent.toLowerCase();
+    row.style.display=text.includes(q)?'':'none';
+    // Also hide detail rows when filtering
+    var idx=row.dataset.idx;
+    var detail=document.querySelector('.finding-detail[data-parent="'+idx+'"]');
+    if(detail&&!text.includes(q))detail.style.display='none';
+  });
+}
+
+/* ── Boot ──────────────────────────────────────────────────── */
+boot()
+})();
+</script>
+</body>
+</html>

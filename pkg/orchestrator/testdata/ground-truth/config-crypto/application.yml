@@ -1,0 +1,7 @@
+spring:
+  security:
+    crypto:
+      algorithm: AES
+      key-size: 256
+  ssl:
+    protocol: TLSv1.2

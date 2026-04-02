@@ -1,0 +1,56 @@
+rules:
+  - id: crypto-java-cipher
+    language: java
+    rule:
+      pattern: Cipher.getInstance($ALGO)
+    message: "Java Cipher.getInstance: $ALGO"
+    severity: warning
+
+  - id: crypto-java-message-digest
+    language: java
+    rule:
+      pattern: MessageDigest.getInstance($ALGO)
+    message: "Java MessageDigest.getInstance: $ALGO"
+    severity: warning
+
+  - id: crypto-java-key-pair-generator
+    language: java
+    rule:
+      pattern: KeyPairGenerator.getInstance($ALGO)
+    message: "Java KeyPairGenerator.getInstance: $ALGO"
+    severity: warning
+
+  - id: crypto-java-key-generator
+    language: java
+    rule:
+      pattern: KeyGenerator.getInstance($ALGO)
+    message: "Java KeyGenerator.getInstance: $ALGO"
+    severity: warning
+
+  - id: crypto-java-secret-key-factory
+    language: java
+    rule:
+      pattern: SecretKeyFactory.getInstance($ALGO)
+    message: "Java SecretKeyFactory.getInstance: $ALGO"
+    severity: warning
+
+  - id: crypto-java-mac
+    language: java
+    rule:
+      pattern: Mac.getInstance($ALGO)
+    message: "Java Mac.getInstance: $ALGO"
+    severity: warning
+
+  - id: crypto-java-signature
+    language: java
+    rule:
+      pattern: Signature.getInstance($ALGO)
+    message: "Java Signature.getInstance: $ALGO"
+    severity: warning
+
+  - id: crypto-java-key-agreement
+    language: java
+    rule:
+      pattern: KeyAgreement.getInstance($ALGO)
+    message: "Java KeyAgreement.getInstance: $ALGO"
+    severity: warning

@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+/oqs-scanner
+/engines/
+
+# Test artifacts
+*.test
+*.out
+coverage.out
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Documentation (not needed in image)
+*.md
+!README.md
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml

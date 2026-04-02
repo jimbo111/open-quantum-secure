@@ -1,0 +1,5 @@
+{
+  "description": "Python crypto sample with AES-GCM",
+  "minFindings": 1,
+  "expectedAlgorithms": ["AES"]
+}

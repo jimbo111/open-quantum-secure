@@ -1,0 +1,12 @@
+rules:
+  - id: python-aes-key
+    patterns:
+      - pattern: |
+          AES.new(...)
+    message: "AES cipher creation detected — verify key size and mode"
+    languages: [python]
+    severity: WARNING
+    metadata:
+      algorithm: AES
+      primitive: symmetric
+      cwe: "CWE-327"

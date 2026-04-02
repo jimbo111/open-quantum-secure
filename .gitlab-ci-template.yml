@@ -1,0 +1,378 @@
+# OQS Scanner — GitLab CI Reusable Template
+#
+# Usage in your .gitlab-ci.yml:
+#
+#   include:
+#     - remote: 'https://raw.githubusercontent.com/jimbo111/open-quantum-secure/main/.gitlab-ci-template.yml'
+#
+#   oqs-scan:
+#     extends: .oqs-scanner
+#     variables:
+#       OQS_SCAN_PATH: "src/"
+#       OQS_FORMAT: "sarif"
+#       OQS_FAIL_ON: "high"
+#       OQS_MR_NOTE: "true"
+#
+# Required GitLab CI/CD variables (set in project Settings > CI/CD > Variables):
+#   GITLAB_TOKEN  — Personal/project access token with api scope.
+#                   Only required when OQS_MR_NOTE=true. If unset, $CI_JOB_TOKEN
+#                   is attempted as a fallback (works in same-project MRs only).
+#   OQS_API_KEY   — OQS Platform API key (optional; omit for offline/local-only mode).
+
+.oqs-scanner:
+  stage: test
+  image: ghcr.io/jimbo111/open-quantum-secure:latest
+
+  # ---------------------------------------------------------------------------
+  # Variables — all overridable per job via the `variables:` key.
+  # ---------------------------------------------------------------------------
+  variables:
+    # Path inside the repo to scan (relative to $CI_PROJECT_DIR).
+    OQS_SCAN_PATH: "."
+
+    # Scan mode: full | diff
+    # Use "diff" on merge request pipelines to scan only changed files.
+    OQS_MODE: "full"
+
+    # Output format for the primary artifact: json | table | sarif | cbom | html
+    # "sarif" is recommended — it integrates with GitLab Security Dashboard.
+    OQS_FORMAT: "sarif"
+
+    # Fail the job when findings at or above this severity are present.
+    # Values: critical | high | medium | low | "" (empty = never fail on findings alone)
+    OQS_FAIL_ON: ""
+
+    # Set to "true" to skip loading .oqs-scanner.yaml from the scanned repo.
+    # Strongly recommended in CI to prevent untrusted policy bypass.
+    OQS_NO_CONFIG: "true"
+
+    # Compliance standard to enforce: cnsa-2.0 | "" (empty = disabled)
+    OQS_COMPLIANCE: ""
+
+    # CI mode controlling job exit behaviour:
+    #   blocking   — respects OQS_FAIL_ON; non-zero exit fails the pipeline.
+    #   advisory   — always exits 0; findings are visible but do not block merges.
+    OQS_CI_MODE: "blocking"
+
+    # Set to "true" to post scan results as a Merge Request note.
+    # Requires a token with api scope (see GITLAB_TOKEN above).
+    OQS_MR_NOTE: "false"
+
+    # Base branch for diff scans. Only used when OQS_MODE=diff.
+    OQS_DIFF_BASE: "origin/${CI_DEFAULT_BRANCH:-main}"
+
+    # Internal working paths — generally no need to override these.
+    _OQS_WORK_DIR: "/tmp/oqs-results"
+    _OQS_SARIF_PATH: "/tmp/oqs-results.sarif"
+    _OQS_GL_REPORT_PATH: "gl-oqs-report.json"
+
+  # ---------------------------------------------------------------------------
+  # Script
+  # ---------------------------------------------------------------------------
+  script:
+    # ---- 0. Normalise boolean inputs ----------------------------------------
+    - NO_CONFIG=$(echo "${OQS_NO_CONFIG:-true}"   | tr '[:upper:]' '[:lower:]')
+    - MR_NOTE=$(echo   "${OQS_MR_NOTE:-false}"    | tr '[:upper:]' '[:lower:]')
+    - CI_MODE=$(echo   "${OQS_CI_MODE:-blocking}" | tr '[:upper:]' '[:lower:]')
+
+    # ---- 1. Build flag list --------------------------------------------------
+    - NO_CONFIG_FLAG=""
+    - if [ "$NO_CONFIG" = "true" ]; then NO_CONFIG_FLAG="--no-config"; fi
+
+    - DIFF_BASE_FLAG=""
+    - SCAN_SUBCMD="scan"
+    - if [ "${OQS_MODE:-full}" = "diff" ]; then
+        SCAN_SUBCMD="diff";
+        DIFF_BASE_FLAG="--base ${OQS_DIFF_BASE}";
+      fi
+
+    - FAIL_ON_FLAG=""
+    - if [ -n "${OQS_FAIL_ON:-}" ]; then FAIL_ON_FLAG="--fail-on ${OQS_FAIL_ON}"; fi
+
+    - COMPLIANCE_FLAG=""
+    - if [ -n "${OQS_COMPLIANCE:-}" ]; then COMPLIANCE_FLAG="--compliance ${OQS_COMPLIANCE}"; fi
+
+    # ---- 2. Primary scan — JSON output for metric extraction ----------------
+    # Scan exit code is captured; the job may still succeed in advisory mode.
+    - SCAN_EXIT=0
+    - |
+      # shellcheck disable=SC2086
+      oqs-scanner ${SCAN_SUBCMD} \
+        --path "${OQS_SCAN_PATH:-.}" \
+        --format json \
+        --output "${_OQS_WORK_DIR}.json" \
+        ${NO_CONFIG_FLAG} \
+        ${FAIL_ON_FLAG} \
+        ${DIFF_BASE_FLAG} \
+        ${COMPLIANCE_FLAG} \
+        || SCAN_EXIT=$?
+
+    # ---- 3. Parse JSON metrics ----------------------------------------------
+    - QRS="0"
+    - QRS_GRADE="N/A"
+    - TOTAL="0"
+    - VULN="0"
+    - DEPR="0"
+    - SAFE="0"
+    - |
+      if [ -f "${_OQS_WORK_DIR}.json" ]; then
+        QRS=$(python3 -c "
+      import sys, json
+      d = json.load(sys.stdin)
+      q = d.get('quantumReadinessScore')
+      print(q.get('score', 0) if q else 0)
+      " < "${_OQS_WORK_DIR}.json" 2>/dev/null || echo "0")
+
+        QRS_GRADE=$(python3 -c "
+      import sys, json
+      d = json.load(sys.stdin)
+      q = d.get('quantumReadinessScore')
+      print(str(q.get('grade', 'N/A'))[:3] if q else 'N/A')
+      " < "${_OQS_WORK_DIR}.json" 2>/dev/null || echo "N/A")
+
+        TOTAL=$(python3 -c "
+      import sys, json
+      d = json.load(sys.stdin)
+      print(d.get('summary', {}).get('totalFindings', 0))
+      " < "${_OQS_WORK_DIR}.json" 2>/dev/null || echo "0")
+
+        VULN=$(python3 -c "
+      import sys, json
+      d = json.load(sys.stdin)
+      print(d.get('summary', {}).get('quantumVulnerable', 0))
+      " < "${_OQS_WORK_DIR}.json" 2>/dev/null || echo "0")
+
+        DEPR=$(python3 -c "
+      import sys, json
+      d = json.load(sys.stdin)
+      print(d.get('summary', {}).get('deprecated', 0))
+      " < "${_OQS_WORK_DIR}.json" 2>/dev/null || echo "0")
+
+        SAFE=$(python3 -c "
+      import sys, json
+      s = json.load(sys.stdin).get('summary', {})
+      print(int(s.get('quantumSafe', 0)) + int(s.get('quantumResistant', 0)))
+      " < "${_OQS_WORK_DIR}.json" 2>/dev/null || echo "0")
+      fi
+
+    # ---- 4. Generate requested primary format (if not JSON) -----------------
+    - |
+      if [ "${OQS_FORMAT:-sarif}" != "json" ]; then
+        # shellcheck disable=SC2086
+        oqs-scanner ${SCAN_SUBCMD} \
+          --path "${OQS_SCAN_PATH:-.}" \
+          --format "${OQS_FORMAT:-sarif}" \
+          --output "${_OQS_WORK_DIR}" \
+          ${NO_CONFIG_FLAG} \
+          ${FAIL_ON_FLAG} \
+          ${DIFF_BASE_FLAG} \
+          ${COMPLIANCE_FLAG} \
+          2>&1 || echo "WARNING: secondary format (${OQS_FORMAT}) generation failed"
+      fi
+
+    # ---- 5. Generate / locate SARIF -----------------------------------------
+    # SARIF is always produced so GitLab Security Dashboard can ingest it.
+    # Three cases:
+    #   a) format=sarif  — primary scan (step 4) wrote it to _OQS_WORK_DIR; copy.
+    #   b) format!=sarif — run a dedicated sarif pass into _OQS_SARIF_PATH.
+    #   c) format=sarif but file missing (step 4 failed) — fall through to case b.
+    - |
+      if [ "${OQS_FORMAT:-sarif}" = "sarif" ] && [ -f "${_OQS_WORK_DIR}" ]; then
+        cp "${_OQS_WORK_DIR}" "${_OQS_SARIF_PATH}"
+      else
+        # Covers format!=sarif AND the fallback when format=sarif but output is missing.
+        # shellcheck disable=SC2086
+        oqs-scanner ${SCAN_SUBCMD} \
+          --path "${OQS_SCAN_PATH:-.}" \
+          --format sarif \
+          --output "${_OQS_SARIF_PATH}" \
+          ${NO_CONFIG_FLAG} \
+          ${DIFF_BASE_FLAG} \
+          ${COMPLIANCE_FLAG} \
+          2>&1 || echo "WARNING: SARIF generation failed — Security Dashboard integration skipped"
+      fi
+
+    # ---- 6. Convert SARIF to GitLab SAST report format ----------------------
+    # GitLab expects gl-sast-report.json; we produce a compatible file
+    # so findings appear in the Security Dashboard and MR widget.
+    - |
+      if [ -f "${_OQS_SARIF_PATH}" ]; then
+        python3 -c "
+      import sys, json, datetime
+
+      with open('${_OQS_SARIF_PATH}') as f:
+          sarif = json.load(f)
+
+      vulns = []
+      for run in sarif.get('runs', []):
+          rules = {r['id']: r for r in run.get('tool', {}).get('driver', {}).get('rules', [])}
+          for result in run.get('results', []):
+              loc = (result.get('locations') or [{}])[0]
+              phy = loc.get('physicalLocation', {})
+              art = phy.get('artifactLocation', {})
+              region = phy.get('region', {})
+              rule = rules.get(result.get('ruleId', ''), {})
+              msg = result.get('message', {}).get('text', '')
+              level = result.get('level', 'warning')
+              severity_map = {'error': 'High', 'warning': 'Medium', 'note': 'Low', 'none': 'Info'}
+              vulns.append({
+                  'id': result.get('ruleId', 'oqs-unknown'),
+                  'category': 'sast',
+                  'name': rule.get('name', result.get('ruleId', 'OQS Finding')),
+                  'message': msg,
+                  'description': rule.get('fullDescription', {}).get('text', msg),
+                  'severity': severity_map.get(level, 'Medium'),
+                  'confidence': 'Medium',
+                  'scanner': {'id': 'oqs-scanner', 'name': 'OQS Scanner'},
+                  'location': {
+                      'file': art.get('uri', ''),
+                      'start_line': region.get('startLine', 1),
+                      'end_line': region.get('endLine', region.get('startLine', 1)),
+                  },
+                  'identifiers': [{'type': 'oqs_rule_id', 'name': result.get('ruleId', ''), 'value': result.get('ruleId', '')}],
+              })
+
+      report = {
+          'version': '15.0.6',
+          'schema': 'https://gitlab.com/gitlab-org/security-products/security-report-schemas/-/raw/v15.0.6/dist/sast-report-format.json',
+          'scan': {
+              'scanner': {'id': 'oqs-scanner', 'name': 'OQS Scanner', 'version': 'latest',
+                          'vendor': {'name': 'OQS Platform'}},
+              'type': 'sast',
+              'start_time': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S'),
+              'end_time':   datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S'),
+              'status': 'success',
+          },
+          'vulnerabilities': vulns,
+      }
+
+      with open('${_OQS_GL_REPORT_PATH}', 'w') as f:
+          json.dump(report, f)
+
+      print(f'GitLab SAST report written: {len(vulns)} findings')
+      " 2>/dev/null || echo "WARNING: GitLab SAST report conversion failed"
+      fi
+
+    # ---- 7. Expose job-level dotenv for downstream jobs ---------------------
+    - |
+      {
+        echo "OQS_QRS=${QRS}"
+        echo "OQS_QRS_GRADE=${QRS_GRADE}"
+        echo "OQS_TOTAL=${TOTAL}"
+        echo "OQS_VULN=${VULN}"
+        echo "OQS_DEPR=${DEPR}"
+        echo "OQS_SAFE=${SAFE}"
+        echo "OQS_SARIF_PATH=${_OQS_SARIF_PATH}"
+      } >> oqs.env 2>/dev/null || true
+
+    # ---- 8. Post MR note (optional) -----------------------------------------
+    - |
+      if [ "$MR_NOTE" = "true" ] && [ -n "${CI_MERGE_REQUEST_IID:-}" ]; then
+        # Prefer explicit GITLAB_TOKEN; fall back to CI_JOB_TOKEN (same-project MRs only).
+        _GL_TOKEN="${GITLAB_TOKEN:-${CI_JOB_TOKEN}}"
+
+        if [ -z "$_GL_TOKEN" ]; then
+          echo "WARNING: OQS_MR_NOTE=true but no token found (set GITLAB_TOKEN)."
+        else
+          VERSION=$(oqs-scanner version 2>/dev/null | head -1 | tr -cd '[:alnum:].-' || echo "unknown")
+
+          NOTE_BODY="<!-- oqs-scanner-mr-note -->
+      ## OQS Scanner Results
+
+      **Quantum Readiness Score:** ${QRS}/100 (Grade: ${QRS_GRADE})
+
+      | Metric | Count |
+      |--------|-------|
+      | Total Findings | ${TOTAL} |
+      | Quantum Vulnerable | ${VULN} |
+      | Deprecated | ${DEPR} |
+      | Quantum Safe/Resistant | ${SAFE} |
+
+      <details>
+      <summary>What do these results mean?</summary>
+
+      - **Quantum Vulnerable**: Algorithms broken by quantum computers (RSA, ECDSA, ECDH, DH). Migrate to ML-KEM/ML-DSA.
+      - **Deprecated**: Classically broken algorithms (MD5, DES, RC4). Replace immediately.
+      - **Quantum Safe/Resistant**: Algorithms that resist quantum attacks (AES-256, SHA-256, ML-KEM).
+
+      </details>
+
+      ---
+      *Scanned by [OQS Scanner](https://github.com/jimbo111/open-quantum-secure) v${VERSION} — pipeline [#${CI_PIPELINE_ID}](${CI_PIPELINE_URL})*"
+
+          # Check for an existing OQS note to update (idempotent across pipeline retries).
+          EXISTING_NOTE_ID=$(curl -sf \
+            --header "PRIVATE-TOKEN: ${_GL_TOKEN}" \
+            "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes?per_page=100&sort=desc" \
+            | python3 -c "
+      import sys, json
+      notes = json.load(sys.stdin)
+      for n in notes:
+          if '<!-- oqs-scanner-mr-note -->' in n.get('body', ''):
+              print(n['id'])
+              break
+      " 2>/dev/null || echo "")
+
+          NOTE_JSON=$(python3 -c "import json, sys; print(json.dumps({'body': sys.stdin.read()}))" <<NOTE_EOF
+      ${NOTE_BODY}
+      NOTE_EOF
+      )
+
+          if [ -n "$EXISTING_NOTE_ID" ] && [ "$EXISTING_NOTE_ID" != "null" ]; then
+            curl -sf --request PUT \
+              --header "PRIVATE-TOKEN: ${_GL_TOKEN}" \
+              --header "Content-Type: application/json" \
+              "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes/${EXISTING_NOTE_ID}" \
+              --data "${NOTE_JSON}" > /dev/null \
+              && echo "Updated OQS Scanner note on MR !${CI_MERGE_REQUEST_IID}" \
+              || echo "WARNING: Failed to update MR note"
+          else
+            curl -sf --request POST \
+              --header "PRIVATE-TOKEN: ${_GL_TOKEN}" \
+              --header "Content-Type: application/json" \
+              "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes" \
+              --data "${NOTE_JSON}" > /dev/null \
+              && echo "Posted OQS Scanner note to MR !${CI_MERGE_REQUEST_IID}" \
+              || echo "WARNING: Failed to post MR note"
+          fi
+        fi
+      fi
+
+    # ---- 9. Honour CI mode / fail-on exit code ------------------------------
+    - |
+      if [ "$CI_MODE" = "advisory" ]; then
+        if [ "$SCAN_EXIT" -ne 0 ]; then
+          echo "Advisory mode: scan returned exit ${SCAN_EXIT} (treated as warning)"
+        fi
+        exit 0
+      fi
+      exit "$SCAN_EXIT"
+
+  # ---------------------------------------------------------------------------
+  # Artifacts
+  # ---------------------------------------------------------------------------
+  artifacts:
+    # gl-sast-report.json feeds GitLab Security Dashboard and MR security widget.
+    reports:
+      sast: gl-oqs-report.json
+
+    paths:
+      # SARIF for IDE / external tooling integration.
+      - "/tmp/oqs-results.sarif"
+      # Dotenv for downstream jobs that want to gate on QRS.
+      - "oqs.env"
+      # Raw JSON output for custom parsing.
+      - "/tmp/oqs-results.json"
+
+    # Retain artifacts even when the job fails so findings are always available.
+    when: always
+
+    expire_in: 30 days
+
+  # ---------------------------------------------------------------------------
+  # Default rules — override per job as needed.
+  # Runs on:  merge request pipelines  AND  pushes to the default branch.
+  # ---------------------------------------------------------------------------
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

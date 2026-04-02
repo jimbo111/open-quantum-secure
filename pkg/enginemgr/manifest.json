@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "engines": {
+    "cipherscope": {
+      "version": "0.5.0",
+      "downloadSupported": true,
+      "platforms": {
+        "darwin/arm64": { "url": "https://releases.oqs.dev/engines/cipherscope/0.5.0/cipherscope-darwin-arm64", "sha256": "placeholder" },
+        "darwin/amd64": { "url": "https://releases.oqs.dev/engines/cipherscope/0.5.0/cipherscope-darwin-amd64", "sha256": "placeholder" },
+        "linux/amd64": { "url": "https://releases.oqs.dev/engines/cipherscope/0.5.0/cipherscope-linux-amd64", "sha256": "placeholder" },
+        "linux/arm64": { "url": "https://releases.oqs.dev/engines/cipherscope/0.5.0/cipherscope-linux-arm64", "sha256": "placeholder" },
+        "windows/amd64": { "url": "https://releases.oqs.dev/engines/cipherscope/0.5.0/cipherscope-windows-amd64.exe", "sha256": "placeholder" }
+      }
+    },
+    "cryptoscan": {
+      "version": "0.4.0",
+      "downloadSupported": true,
+      "platforms": {
+        "darwin/arm64": { "url": "https://releases.oqs.dev/engines/cryptoscan/0.4.0/cryptoscan-darwin-arm64", "sha256": "placeholder" },
+        "darwin/amd64": { "url": "https://releases.oqs.dev/engines/cryptoscan/0.4.0/cryptoscan-darwin-amd64", "sha256": "placeholder" },
+        "linux/amd64": { "url": "https://releases.oqs.dev/engines/cryptoscan/0.4.0/cryptoscan-linux-amd64", "sha256": "placeholder" },
+        "linux/arm64": { "url": "https://releases.oqs.dev/engines/cryptoscan/0.4.0/cryptoscan-linux-arm64", "sha256": "placeholder" },
+        "windows/amd64": { "url": "https://releases.oqs.dev/engines/cryptoscan/0.4.0/cryptoscan-windows-amd64.exe", "sha256": "placeholder" }
+      }
+    },
+    "astgrep": {
+      "version": "0.38.0",
+      "downloadSupported": true,
+      "binaryOverride": "ast-grep",
+      "platforms": {
+        "darwin/arm64": { "url": "https://releases.oqs.dev/engines/astgrep/0.38.0/ast-grep-darwin-arm64", "sha256": "placeholder" },
+        "darwin/amd64": { "url": "https://releases.oqs.dev/engines/astgrep/0.38.0/ast-grep-darwin-amd64", "sha256": "placeholder" },
+        "linux/amd64": { "url": "https://releases.oqs.dev/engines/astgrep/0.38.0/ast-grep-linux-amd64", "sha256": "placeholder" },
+        "linux/arm64": { "url": "https://releases.oqs.dev/engines/astgrep/0.38.0/ast-grep-linux-arm64", "sha256": "placeholder" },
+        "windows/amd64": { "url": "https://releases.oqs.dev/engines/astgrep/0.38.0/ast-grep-windows-amd64.exe", "sha256": "placeholder" }
+      }
+    },
+    "semgrep": {
+      "version": "1.113.0",
+      "downloadSupported": false,
+      "installHintOverride": "pip install semgrep==1.113.0\n  # or: pipx install semgrep==1.113.0"
+    },
+    "cryptodeps": {
+      "version": "0.3.0",
+      "downloadSupported": true,
+      "platforms": {
+        "darwin/arm64": { "url": "https://releases.oqs.dev/engines/cryptodeps/0.3.0/cryptodeps-darwin-arm64", "sha256": "placeholder" },
+        "darwin/amd64": { "url": "https://releases.oqs.dev/engines/cryptodeps/0.3.0/cryptodeps-darwin-amd64", "sha256": "placeholder" },
+        "linux/amd64": { "url": "https://releases.oqs.dev/engines/cryptodeps/0.3.0/cryptodeps-linux-amd64", "sha256": "placeholder" },
+        "linux/arm64": { "url": "https://releases.oqs.dev/engines/cryptodeps/0.3.0/cryptodeps-linux-arm64", "sha256": "placeholder" },
+        "windows/amd64": { "url": "https://releases.oqs.dev/engines/cryptodeps/0.3.0/cryptodeps-windows-amd64.exe", "sha256": "placeholder" }
+      }
+    },
+    "cdxgen": {
+      "version": "10.10.7",
+      "downloadSupported": false,
+      "installHintOverride": "npm install -g @cyclonedx/cdxgen@10.10.7"
+    },
+    "syft": {
+      "version": "1.21.0",
+      "downloadSupported": true,
+      "platforms": {
+        "darwin/arm64": { "url": "https://releases.oqs.dev/engines/syft/1.21.0/syft-darwin-arm64", "sha256": "placeholder" },
+        "darwin/amd64": { "url": "https://releases.oqs.dev/engines/syft/1.21.0/syft-darwin-amd64", "sha256": "placeholder" },
+        "linux/amd64": { "url": "https://releases.oqs.dev/engines/syft/1.21.0/syft-linux-amd64", "sha256": "placeholder" },
+        "linux/arm64": { "url": "https://releases.oqs.dev/engines/syft/1.21.0/syft-linux-arm64", "sha256": "placeholder" },
+        "windows/amd64": { "url": "https://releases.oqs.dev/engines/syft/1.21.0/syft-windows-amd64.exe", "sha256": "placeholder" }
+      }
+    },
+    "cbomkit-theia": {
+      "version": "0.2.0",
+      "downloadSupported": true,
+      "platforms": {
+        "darwin/arm64": { "url": "https://releases.oqs.dev/engines/cbomkit-theia/0.2.0/cbomkit-theia-darwin-arm64", "sha256": "placeholder" },
+        "darwin/amd64": { "url": "https://releases.oqs.dev/engines/cbomkit-theia/0.2.0/cbomkit-theia-darwin-amd64", "sha256": "placeholder" },
+        "linux/amd64": { "url": "https://releases.oqs.dev/engines/cbomkit-theia/0.2.0/cbomkit-theia-linux-amd64", "sha256": "placeholder" },
+        "linux/arm64": { "url": "https://releases.oqs.dev/engines/cbomkit-theia/0.2.0/cbomkit-theia-linux-arm64", "sha256": "placeholder" },
+        "windows/amd64": { "url": "https://releases.oqs.dev/engines/cbomkit-theia/0.2.0/cbomkit-theia-windows-amd64.exe", "sha256": "placeholder" }
+      }
+    }
+  }
+}

@@ -1,0 +1,89 @@
+name: 'OQS Scanner'
+description: 'Scan your codebase for quantum-vulnerable cryptography'
+author: 'OQS Platform'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Path to scan'
+    required: false
+    default: '.'
+  mode:
+    description: 'Scan mode: full, quick, or diff'
+    required: false
+    default: 'full'
+  format:
+    description: 'Output format: json, table, sarif, cbom, html'
+    required: false
+    default: 'sarif'
+  fail-on:
+    description: 'Fail if findings at or above this severity (critical, high, medium, low)'
+    required: false
+    default: ''
+  no-config:
+    description: 'Skip loading .oqs-scanner.yaml from repo (prevents untrusted policy bypass)'
+    required: false
+    default: 'true'
+  upload-sarif:
+    description: 'Upload SARIF results to GitHub Code Scanning'
+    required: false
+    default: 'true'
+  api-key:
+    description: 'OQS Platform API key for cloud result upload (Phase 5)'
+    required: false
+    default: ''
+  pr-comment:
+    description: 'Post scan results as a PR comment (requires GITHUB_TOKEN with pull-requests: write permission). Not supported for fork PRs.'
+    required: false
+    default: 'false'
+  compliance:
+    description: 'Compliance standard to enforce: cnsa-2.0 or empty (disabled)'
+    required: false
+    default: ''
+  ci-mode:
+    description: 'CI behavior: blocking (exit 1 on violations), advisory (warn only, exit 0), silent (no policy output, exit 0)'
+    required: false
+    default: 'blocking'
+  data-lifetime-years:
+    description: 'Expected data retention in years. Adjusts HNDL urgency. 0=disabled. healthcare=30, finance=7, government=25.'
+    required: false
+    default: '0'
+  webhook-url:
+    description: 'HTTPS URL to POST scan results to on completion (ServiceNow, Jira, etc.)'
+    required: false
+    default: ''
+
+outputs:
+  quantum-readiness-score:
+    description: 'Quantum Readiness Score (0-100)'
+  finding-count:
+    description: 'Total number of findings'
+  critical-count:
+    description: 'Number of quantum-vulnerable findings'
+  cbom-path:
+    description: 'Path to the generated CycloneDX CBOM file'
+  sarif-path:
+    description: 'Path to the SARIF file for GitHub Code Scanning upload'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  env:
+    OQS_API_KEY: ${{ inputs.api-key }}
+    GITHUB_TOKEN: ${{ github.token }}
+  args:
+    - ${{ inputs.path }}
+    - ${{ inputs.mode }}
+    - ${{ inputs.format }}
+    - '/tmp/oqs-results'
+    - ${{ inputs.fail-on }}
+    - ${{ inputs.no-config }}
+    - ${{ inputs.upload-sarif }}
+    - ${{ inputs.pr-comment }}
+    - ${{ inputs.compliance }}
+    - ${{ inputs.ci-mode }}
+    - ${{ inputs.data-lifetime-years }}
+    - ${{ inputs.webhook-url }}

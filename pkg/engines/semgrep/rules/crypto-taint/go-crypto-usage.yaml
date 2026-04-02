@@ -1,0 +1,12 @@
+rules:
+  - id: go-crypto-rsa-usage
+    patterns:
+      - pattern: |
+          rsa.GenerateKey(...)
+    message: "crypto/rsa usage detected — quantum-vulnerable asymmetric algorithm"
+    languages: [go]
+    severity: WARNING
+    metadata:
+      algorithm: RSA
+      primitive: asymmetric
+      cwe: "CWE-327"

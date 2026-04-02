@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Build
+        run: go build -o oqs-scanner ./cmd/oqs-scanner/
+
+  bench:
+    name: Benchmark Regression
+    runs-on: ubuntu-latest
+    # Only run on pull requests - pushes to main update the baseline instead.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Compare benchmarks against baseline
+        run: |
+          if [ ! -f benchmarks/baseline.json ]; then
+            echo "No baseline found - skipping regression check."
+            exit 0
+          fi
+          go test -bench=. -benchmem -count=3 -timeout 10m ./pkg/orchestrator/... 2>/dev/null | \
+            go run ./cmd/bench-compare -baseline benchmarks/baseline.json -threshold 20
