@@ -73,7 +73,6 @@ runs:
   image: 'Dockerfile'
   env:
     OQS_API_KEY: ${{ inputs.api-key }}
-    GITHUB_TOKEN: ${{ github.token }}
   args:
     - ${{ inputs.path }}
     - ${{ inputs.mode }}

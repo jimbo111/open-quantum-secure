@@ -22,6 +22,8 @@ jobs:
       - name: OQS Scanner
         id: scan
         uses: jimbo111/open-quantum-secure@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path: '.'
           mode: 'full'
