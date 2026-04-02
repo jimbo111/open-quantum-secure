@@ -233,7 +233,7 @@ func TestProjectSlug(t *testing.T) {
 		{"/org/repo/", "org--repo"},
 		{"simple", "simple"},
 		{"org/repo", "org--repo"},
-		{"github.com/jimbo111/open-quantum-secure", "github.com--jimbo111--pqc_scanner"},
+		{"github.com/jimbo111/open-quantum-secure", "github.com--jimbo111--open-quantum-secure"},
 		{"a/b/c/d", "a--b--c--d"},
 		{"//double//slash//", "double----slash"},
 		{"with spaces/repo", "with spaces--repo"},
