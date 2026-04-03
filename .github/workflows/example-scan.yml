@@ -1,12 +1,11 @@
 # Example workflow: OQS Scanner with GitHub Code Scanning integration
-# Copy this to your repo's .github/workflows/ to enable quantum crypto scanning
+# Copy this to YOUR repo's .github/workflows/ to enable quantum crypto scanning.
+# This file is disabled in this repo (workflow_dispatch only) to avoid scanning
+# the scanner's own crypto references on every push.
 name: OQS Quantum Crypto Scan
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch: # Manual trigger only — this is an example, not for this repo
 
 permissions:
   security-events: write
