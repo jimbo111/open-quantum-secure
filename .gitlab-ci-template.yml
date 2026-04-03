@@ -32,6 +32,9 @@
 
     # Scan mode: full | diff
     # Use "diff" on merge request pipelines to scan only changed files.
+    # NOTE: diff mode requires the base branch history. If your project
+    # uses shallow clones (default GIT_DEPTH: 20), add GIT_DEPTH: 0 or
+    # a before_script that runs: git fetch origin $CI_DEFAULT_BRANCH
     OQS_MODE: "full"
 
     # Output format for the primary artifact: json | table | sarif | cbom | html
@@ -59,11 +62,20 @@
     OQS_MR_NOTE: "false"
 
     # Base branch for diff scans. Only used when OQS_MODE=diff.
+    # NOTE: Branch names containing spaces are not supported.
     OQS_DIFF_BASE: "origin/${CI_DEFAULT_BRANCH:-main}"
 
-    # Internal working paths — generally no need to override these.
-    _OQS_WORK_DIR: "/tmp/oqs-results"
-    _OQS_SARIF_PATH: "/tmp/oqs-results.sarif"
+    # Webhook URL for posting scan results on completion (HTTPS only).
+    OQS_WEBHOOK_URL: ""
+
+    # Expected data retention in years. Adjusts HNDL urgency.
+    # 0=disabled. healthcare=30, finance=7, government=25.
+    OQS_DATA_LIFETIME_YEARS: "0"
+
+    # Internal working paths — relative to $CI_PROJECT_DIR so GitLab
+    # can collect them as artifacts. Do not use absolute /tmp/ paths.
+    _OQS_WORK_DIR: "oqs-results"
+    _OQS_SARIF_PATH: "oqs-results.sarif"
     _OQS_GL_REPORT_PATH: "gl-oqs-report.json"
 
   # ---------------------------------------------------------------------------
@@ -92,6 +104,12 @@
     - COMPLIANCE_FLAG=""
     - if [ -n "${OQS_COMPLIANCE:-}" ]; then COMPLIANCE_FLAG="--compliance ${OQS_COMPLIANCE}"; fi
 
+    - WEBHOOK_FLAG=""
+    - if [ -n "${OQS_WEBHOOK_URL:-}" ]; then WEBHOOK_FLAG="--webhook-url ${OQS_WEBHOOK_URL}"; fi
+
+    - DATA_LIFETIME_FLAG=""
+    - if [ -n "${OQS_DATA_LIFETIME_YEARS:-}" ] && [ "${OQS_DATA_LIFETIME_YEARS:-0}" != "0" ]; then DATA_LIFETIME_FLAG="--data-lifetime-years ${OQS_DATA_LIFETIME_YEARS}"; fi
+
     # ---- 2. Primary scan — JSON output for metric extraction ----------------
     # Scan exit code is captured; the job may still succeed in advisory mode.
     - SCAN_EXIT=0
@@ -105,6 +123,8 @@
         ${FAIL_ON_FLAG} \
         ${DIFF_BASE_FLAG} \
         ${COMPLIANCE_FLAG} \
+        ${WEBHOOK_FLAG} \
+        ${DATA_LIFETIME_FLAG} \
         || SCAN_EXIT=$?
 
     # ---- 3. Parse JSON metrics ----------------------------------------------
@@ -167,6 +187,7 @@
           ${FAIL_ON_FLAG} \
           ${DIFF_BASE_FLAG} \
           ${COMPLIANCE_FLAG} \
+          ${DATA_LIFETIME_FLAG} \
           2>&1 || echo "WARNING: secondary format (${OQS_FORMAT}) generation failed"
       fi
 
@@ -233,8 +254,8 @@
               })
 
       report = {
-          'version': '15.0.6',
-          'schema': 'https://gitlab.com/gitlab-org/security-products/security-report-schemas/-/raw/v15.0.6/dist/sast-report-format.json',
+          'version': '15.1.0',
+          'schema': 'https://gitlab.com/gitlab-org/security-products/security-report-schemas/-/raw/v15.1.0/dist/sast-report-format.json',
           'scan': {
               'scanner': {'id': 'oqs-scanner', 'name': 'OQS Scanner', 'version': 'latest',
                           'vendor': {'name': 'OQS Platform'}},
@@ -358,11 +379,11 @@
 
     paths:
       # SARIF for IDE / external tooling integration.
-      - "/tmp/oqs-results.sarif"
+      - "oqs-results.sarif"
       # Dotenv for downstream jobs that want to gate on QRS.
       - "oqs.env"
       # Raw JSON output for custom parsing.
-      - "/tmp/oqs-results.json"
+      - "oqs-results.json"
 
     # Retain artifacts even when the job fails so findings are always available.
     when: always

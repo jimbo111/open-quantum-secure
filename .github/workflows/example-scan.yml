@@ -20,7 +20,7 @@ jobs:
 
       - name: OQS Scanner
         id: scan
-        uses: jimbo111/open-quantum-secure@main
+        uses: jimbo111/open-quantum-secure@main  # Pin to a release tag (e.g., @v1) for stability
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -29,7 +29,8 @@ jobs:
           format: 'sarif'
           fail-on: 'critical'
           upload-sarif: 'true'
-          pr-comment: 'true'
+          # pr-comment only works on pull_request events (not workflow_dispatch)
+          # pr-comment: 'true'
           compliance: 'cnsa-2.0'
           ci-mode: 'blocking'
           # data-lifetime-years: '30'  # Uncomment for healthcare/gov (amplifies HNDL penalties)

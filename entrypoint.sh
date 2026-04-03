@@ -45,6 +45,9 @@ oqs-scanner "$SCAN_CMD" --path "$PATH_ARG" --format json --output "${OUTPUT_DIR}
   ${WEBHOOK_URL:+--webhook-url "$WEBHOOK_URL"} \
   || SCAN_EXIT=$?
 
+# Initialize metric variables with sane defaults (used by PR comment even if JSON fails)
+QRS="0"; QRS_GRADE="N/A"; FINDINGS="0"; CRITICAL="0"; DEPRECATED="0"; QUANTUM_SAFE="0"
+
 # Parse outputs from JSON result using correct field names
 if [ -f "${OUTPUT_DIR}.json" ]; then
   QRS=$(python3 -c "import sys,json; d=json.load(sys.stdin); q=d.get('quantumReadinessScore'); print(q.get('score',0) if q else 0)" < "${OUTPUT_DIR}.json" 2>/dev/null || echo "0")
@@ -84,7 +87,8 @@ if [ "$UPLOAD_SARIF" = "true" ] && [ "$FORMAT" != "sarif" ]; then
   if ! oqs-scanner "$SCAN_CMD" --path "$PATH_ARG" --format sarif --output "$SARIF_PATH" \
     --incremental --cache-path /tmp/oqs-ci-cache.json \
     ${NO_CONFIG_FLAG:+"$NO_CONFIG_FLAG"} \
-    ${DIFF_BASE_VAL:+--base "$DIFF_BASE_VAL"} 2>&1; then
+    ${DIFF_BASE_VAL:+--base "$DIFF_BASE_VAL"} \
+    ${COMPLIANCE:+--compliance "$COMPLIANCE"} 2>&1; then
     echo "::warning::SARIF generation failed — Code Scanning upload will be skipped"
   fi
 elif [ "$FORMAT" = "sarif" ]; then

@@ -12,7 +12,7 @@ inputs:
     required: false
     default: '.'
   mode:
-    description: 'Scan mode: full, quick, or diff'
+    description: 'Scan mode: full or diff'
     required: false
     default: 'full'
   format:
