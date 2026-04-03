@@ -92,19 +92,19 @@ The scanner is an **orchestrator** — it coordinates external tools and merges 
 
 ```
                     ┌──────────────────────────────────┐
-                    │         oqs-scanner CLI           │
-                    │  (orchestrator, Go, MIT license)  │
+                    │         oqs-scanner CLI          │
+                    │  (orchestrator, Go, MIT license) │
                     └──────────┬───────────────────────┘
                                │ calls via subprocess
           ┌────────────────────┼────────────────────────┐
-          │                    │                         │
-   ┌──────┴──────┐    ┌───────┴───────┐    ┌────────────┴────────────┐
+          │                    │                        │
+   ┌──────┴──────┐    ┌────────┴──────┐    ┌────────────┴────────────┐
    │  Built-in   │    │   Optional    │    │      Optional           │
    │  (embedded) │    │   (install)   │    │      (install)          │
    ├─────────────┤    ├───────────────┤    ├─────────────────────────┤
    │config-scanner│   │ ast-grep      │    │ semgrep (taint/flow)    │
    │binary-scanner│   │ syft          │    │ cdxgen (SBOM)           │
-   │             │    │ cryptodeps    │    │ cbomkit-theia (artifacts)│
+   │             │    │ cryptodeps    │    │ cbomkit-theia(artifacts)│
    └─────────────┘    └───────────────┘    └─────────────────────────┘
 ```
 
