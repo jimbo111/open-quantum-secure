@@ -1,7 +1,8 @@
 #!/bin/sh
 set -e
 
-# Parse inputs from action.yml args
+# Parse inputs from action.yml args.
+# POSIX sh only supports $1-$9 directly; use shift for args 10+.
 PATH_ARG="${1:-.}"
 MODE="${2:-full}"
 FORMAT="${3:-sarif}"
@@ -11,9 +12,10 @@ NO_CONFIG=$(echo "${6:-true}" | tr '[:upper:]' '[:lower:]')
 UPLOAD_SARIF=$(echo "${7:-true}" | tr '[:upper:]' '[:lower:]')
 PR_COMMENT=$(echo "${8:-false}" | tr '[:upper:]' '[:lower:]')
 COMPLIANCE="${9:-}"
-CI_MODE="${10:-blocking}"
-DATA_LIFETIME="${11:-0}"
-WEBHOOK_URL="${12:-}"
+shift 9 2>/dev/null || true
+CI_MODE="${1:-blocking}"
+DATA_LIFETIME="${2:-0}"
+WEBHOOK_URL="${3:-}"
 
 # Select command based on mode
 SCAN_CMD="scan"
