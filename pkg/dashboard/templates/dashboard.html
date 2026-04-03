@@ -196,7 +196,7 @@ tr:hover td{background:rgba(99,102,241,.04)}
       <div id="project-subtitle"></div>
     </div>
     <div id="topbar-actions" style="display:none">
-      <button class="action-btn" id="btn-cbom" title="Download CBOM (CycloneDX 1.7)"><span class="btn-icon">&#x1F4E6;</span> CBOM</button>
+      <button class="action-btn" id="btn-cbom" title="Export scan history as JSON"><span class="btn-icon">&#x1F4E6;</span> Export</button>
       <button class="action-btn" id="btn-json" title="Download scan results as JSON"><span class="btn-icon">&#x1F4CB;</span> JSON</button>
     </div>
   </div>
@@ -217,7 +217,7 @@ function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"
 function gradeColor(g){if(!g)return"var(--dim)";var c=g[0];return c==="A"?"var(--green)":c==="B"?"var(--blue)":c==="C"?"var(--amber)":c==="D"?"var(--orange)":"var(--red)"}
 function scoreColor(s){return s>=80?"var(--green)":s>=60?"var(--blue)":s>=40?"var(--amber)":s>=20?"var(--orange)":"var(--red)"}
 function scoreHex(s){return s>=80?"#22c55e":s>=60?"#3b82f6":s>=40?"#eab308":s>=20?"#f97316":"#ef4444"}
-function fmtDate(ts){if(!ts)return"\u2014";try{return new Date(ts).toISOString().slice(0,16).replace("T"," ")}catch(e){return String(ts).slice(0,16)}}
+function fmtDate(ts){if(!ts)return"\u2014";try{var d=new Date(ts);return d.toLocaleDateString(undefined,{year:"numeric",month:"2-digit",day:"2-digit"})+" "+d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"})}catch(e){return String(ts).slice(0,16)}}
 function delta(n,inv){if(n==null||n===0)return'<span class="dlt dlt-neu">\u2014</span>';var g=inv?(n<0):(n>0);return'<span class="dlt '+(g?"dlt-up":"dlt-dn")+'">'+(n>0?"+":"")+n+'</span>'}
 async function api(url){var r=await fetch(url);if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}
 function downloadAs(url,filename,label){
@@ -257,6 +257,7 @@ async function selectProject(slug,name){
   document.getElementById("project-title").style.color="";
   document.getElementById("project-subtitle").textContent="";
   var ct=document.getElementById("content");
+  ct.scrollTop=0;
   ct.innerHTML='<div id="loading"><div class="spinner"></div>Loading\u2026</div>';
   try{
     var enc=encodeURIComponent(slug);
@@ -264,7 +265,7 @@ async function selectProject(slug,name){
     // Show action buttons
     var actions=document.getElementById("topbar-actions");
     actions.style.display="flex";
-    document.getElementById("btn-cbom").onclick=function(){downloadAs("/api/projects/"+enc+"/history",slug+"-cbom.json","CBOM")};
+    document.getElementById("btn-cbom").onclick=function(){downloadAs("/api/projects/"+enc+"/history",slug+"-history.json","History")};
     document.getElementById("btn-json").onclick=function(){downloadAs("/api/projects/"+enc+"/history",slug+"-scan.json","JSON")};
     render(name,res[0],res[1],res[2],ct)
   }catch(e){ct.innerHTML='<div id="empty-state"><div style="font-size:32px">&#x26A0;</div><h2>Error</h2><p>'+esc(e.message)+'</p></div>'}
@@ -290,13 +291,13 @@ function render(name,history,trends,findingsData,ct){
 
   // HNDL + Compliance row
   var row1=mk("div","grid grid-2 animate-in d3");ct.appendChild(row1);
-  renderHNDL(row1,fs);
+  renderHNDL(row1,fs,findingsData);
   renderCompliance(row1,latest);
 
   // Donut + Effort row
   var row2=mk("div","grid grid-2 animate-in d4");ct.appendChild(row2);
   renderDonut(row2,fs);
-  renderEffort(row2,fs);
+  renderEffort(row2,fs,findingsData);
 
   // Scan diff + Heat bar row
   var row3=mk("div","grid grid-2 animate-in d5");ct.appendChild(row3);
@@ -312,9 +313,11 @@ function render(name,history,trends,findingsData,ct){
   renderBreakdown(brk,fs);
 
   // Findings drill-down table (from stored TopFindings)
+  var fdiv=mk("div","animate-in d8");ct.appendChild(fdiv);
   if(findingsData&&findingsData.length>0){
-    var fdiv=mk("div","animate-in d8");ct.appendChild(fdiv);
     renderFindingsTable(fdiv,findingsData);
+  } else {
+    fdiv.innerHTML='<div class="section"><div class="section-title">Finding Details</div><p style="color:var(--dim);font-size:12px">No finding details stored. Re-run <code style="background:var(--bg);padding:2px 6px;border-radius:4px">oqs-scanner scan</code> to capture findings.</p></div>';
   }
 }
 
@@ -376,21 +379,39 @@ function renderDonut(el,fs){
 }
 
 /* ── 3. HNDL Urgency Panel ────────────────────────────────── */
-function renderHNDL(el,fs){
-  var imm=fs.critical||0,def=fs.high||0,total=imm+def||1;
-  var now=new Date(),deadline=new Date("2030-01-01"),days=Math.max(0,Math.ceil((deadline-now)/(1000*60*60*24)));
+function renderHNDL(el,fs,findingsData){
+  var imm=0,def=0;
+  if(findingsData&&findingsData.length>0){
+    findingsData.forEach(function(f){
+      if(f.hndlRisk==="immediate")imm++;
+      else if(f.hndlRisk==="deferred")def++;
+    });
+  } else {
+    imm=fs.quantumVulnerable||0;def=fs.quantumWeakened||0;
+  }
+  var total=imm+def||1;
+  var now=new Date(),deadline=new Date("2030-01-01"),days=Math.ceil((deadline-now)/(1000*60*60*24));
   var sec=mk("div","section");el.appendChild(sec);
   sec.innerHTML=
     '<div class="section-title">HNDL Threat Assessment</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'+
-      '<div class="card hndl-card" style="border-color:rgba(239,68,68,.2)"><div style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Immediate</div><div class="hndl-count" style="color:var(--red)">'+imm+'</div><div class="hndl-label">Key exchange findings<br>Must migrate by 2030</div><div class="hndl-bar"><div class="hndl-bar-fill" style="width:'+(imm/total*100).toFixed(0)+'%;background:var(--red)"></div></div><div class="hndl-deadline">'+days.toLocaleString()+' days remaining</div></div>'+
+      '<div class="card hndl-card" style="border-color:rgba(239,68,68,.2)"><div style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Immediate</div><div class="hndl-count" style="color:var(--red)">'+imm+'</div><div class="hndl-label">Key exchange findings<br>Must migrate by 2030</div><div class="hndl-bar"><div class="hndl-bar-fill" style="width:'+(imm/total*100).toFixed(0)+'%;background:var(--red)"></div></div><div class="hndl-deadline">'+(days>0?days.toLocaleString()+' days remaining':'<span style="color:var(--red);font-weight:700">OVERDUE</span>')+'</div></div>'+
       '<div class="card hndl-card" style="border-color:rgba(234,179,8,.2)"><div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Deferred</div><div class="hndl-count" style="color:var(--amber)">'+def+'</div><div class="hndl-label">Signature findings<br>Deadline 2035</div><div class="hndl-bar"><div class="hndl-bar-fill" style="width:'+(def/total*100).toFixed(0)+'%;background:var(--amber)"></div></div><div class="hndl-deadline">Transition after key exchange</div></div>'+
     '</div></div>'
 }
 
 /* ── 4. Migration Effort ──────────────────────────────────── */
-function renderEffort(el,fs){
-  var simple=fs.medium||0,moderate=fs.high||0,complex=fs.critical||0;
+function renderEffort(el,fs,findingsData){
+  var simple=0,moderate=0,complex=0;
+  if(findingsData&&findingsData.length>0){
+    findingsData.forEach(function(f){
+      if(f.migrationEffort==="simple")simple++;
+      else if(f.migrationEffort==="moderate")moderate++;
+      else if(f.migrationEffort==="complex")complex++;
+    });
+  } else {
+    simple=fs.low||0;moderate=fs.medium||0;complex=fs.high||0;
+  }
   var weeks=((simple*.5+moderate*2+complex*5)/5).toFixed(1);
   var sec=mk("div","section");el.appendChild(sec);
   sec.innerHTML='<div class="section-title">Migration Effort</div>'+
@@ -407,7 +428,7 @@ function renderCompliance(el,latest){
   var fs=latest.findingSummary||{},qrs=latest.quantumReadinessScore||0;
   var pass=qrs>=70;
   var checks=[
-    {label:"AES-256 symmetric encryption",ok:true},
+    {label:"AES-256 symmetric encryption",ok:(fs.quantumWeakened||0)===0},
     {label:"SHA-384+ hashing",ok:(fs.deprecated||0)===0},
     {label:"ML-KEM-1024 key exchange",ok:(fs.quantumVulnerable||0)===0},
     {label:"ML-DSA-87 digital signatures",ok:(fs.quantumVulnerable||0)===0},
@@ -462,10 +483,11 @@ function renderTable(el,history){
   var html='<div class="section"><div class="section-title">Recent Scans</div><div style="overflow-x:auto"><table><thead><tr><th>Scan ID</th><th>Date</th><th>QRS</th><th>Grade</th><th>Findings</th><th>Vulnerable</th><th>Deprecated</th><th>Mode</th><th>Duration</th></tr></thead><tbody>';
   rows.forEach(function(s){
     var q=s.quantumReadinessScore||0,g=s.quantumReadinessGrade||"\u2014",fs=s.findingSummary||{},id=s.scanId||"\u2014";
-    html+='<tr><td style="font-family:monospace;font-size:11px;color:var(--dim)" title="'+esc(id)+'">'+esc(id.length>12?id.slice(0,12)+"\u2026":id)+'</td><td>'+esc(fmtDate(s.timestamp))+'</td><td style="font-weight:700;color:'+scoreHex(q)+'">'+q+'</td><td style="font-weight:700;color:'+scoreHex(q)+'">'+esc(g)+'</td><td>'+(fs.total||0)+'</td><td style="color:var(--red)">'+(fs.quantumVulnerable||fs.critical||0)+'</td><td style="color:var(--muted)">'+(fs.deprecated||fs.medium||0)+'</td><td style="color:var(--dim)">'+esc(s.scanMode||"\u2014")+'</td><td style="color:var(--dim)">'+esc(s.duration||"\u2014")+'</td></tr>'
+    html+='<tr><td style="font-family:monospace;font-size:11px;color:var(--dim)" title="'+esc(id)+'">'+esc(id.length>12?id.slice(0,12)+"\u2026":id)+'</td><td>'+esc(fmtDate(s.timestamp))+'</td><td style="font-weight:700;color:'+scoreHex(q)+'">'+q+'</td><td style="font-weight:700;color:'+scoreHex(q)+'">'+esc(g)+'</td><td>'+(fs.total||0)+'</td><td style="color:var(--red)">'+(fs.quantumVulnerable!=null?fs.quantumVulnerable:fs.critical||0)+'</td><td style="color:var(--muted)">'+(fs.deprecated!=null?fs.deprecated:fs.medium||0)+'</td><td style="color:var(--dim)">'+esc(s.scanMode||"\u2014")+'</td><td style="color:var(--dim)">'+esc(s.duration||"\u2014")+'</td></tr>'
   });
   html+='</tbody></table></div></div>';
-  el.innerHTML=html
+  el.innerHTML=html;
+  attachSort(el.querySelector("table"));
 }
 
 /* ── Finding Breakdown (by category) ──────────────────────── */
@@ -522,6 +544,7 @@ function renderFindingsTable(el,findings){
   // Pagination info
   html+='<div style="margin-top:10px;font-size:11px;color:var(--dim);text-align:center">Showing '+findings.length+' findings (max '+100+')</div>';
   sec.innerHTML+=html;
+  attachSort(document.getElementById("findings-tbl"));
 }
 // Toggle finding detail row
 function toggleFindingDetail(row){
@@ -543,7 +566,31 @@ function filterFindings(query){
   });
 }
 
+/* ── Table Sort ────────────────────────────────────────────── */
+function attachSort(tblEl){
+  if(!tblEl)return;
+  var state={col:-1,dir:1};
+  tblEl.querySelectorAll("thead th").forEach(function(th,i){
+    th.addEventListener("click",function(){
+      state.dir=state.col===i?-state.dir:1;state.col=i;
+      tblEl.querySelectorAll("thead th").forEach(function(t){t.classList.remove("sort-asc","sort-desc")});
+      th.classList.add(state.dir===1?"sort-asc":"sort-desc");
+      var tbody=tblEl.querySelector("tbody");
+      var rows=Array.from(tbody.querySelectorAll("tr:not(.cat-detail):not(.finding-detail)"));
+      rows.sort(function(a,b){
+        var av=a.cells[i]?a.cells[i].getAttribute("data-sort")||a.cells[i].textContent.trim():"";
+        var bv=b.cells[i]?b.cells[i].getAttribute("data-sort")||b.cells[i].textContent.trim():"";
+        var an=parseFloat(av),bn=parseFloat(bv);
+        return(!isNaN(an)&&!isNaN(bn)?an-bn:av.localeCompare(bv))*state.dir;
+      });
+      rows.forEach(function(r){tbody.appendChild(r)});
+    });
+  });
+}
+
 /* ── Boot ──────────────────────────────────────────────────── */
+window.filterFindings=filterFindings;
+window.toggleFindingDetail=toggleFindingDetail;
 boot()
 })();
 </script>

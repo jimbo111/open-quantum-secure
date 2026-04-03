@@ -133,6 +133,13 @@ td {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+td:nth-child(6) {
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  min-width: 200px;
+}
 tr:last-child td { border-bottom: none; }
 tr:nth-child(even) { background: #f8fafc; }
 tr:hover td { background: #eff6ff; }
@@ -214,6 +221,13 @@ summary:hover { text-decoration: underline; }
 .timeline-desc { color: #1e293b; }
 .timeline-link { display: block; margin-top: 8px; font-size: 0.8rem; color: #3b82f6; }
 .timeline-link:hover { text-decoration: underline; }
+@media print {
+  body { font-size: 11px; }
+  .card, .risk-box { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  th { background: #f1f5f9 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  td { white-space: normal; max-width: none; }
+}
 </style>
 </head>
 <body>
@@ -323,7 +337,7 @@ summary:hover { text-decoration: underline; }
             </td>
             <td><span class="badge badge-{{riskColor .QuantumRisk}}" aria-label="Quantum risk: {{riskLabel .QuantumRisk}}">{{riskLabel .QuantumRisk}}</span></td>
             <td><span class="badge badge-{{sevColor .Severity}}">{{.Severity}}</span></td>
-            <td data-sort="{{if .Recommendation}}{{.Recommendation}}{{end}}">{{if .Recommendation}}{{.Recommendation}}{{else}}&mdash;{{end}}</td>
+            <td data-sort="{{if .Recommendation}}{{.Recommendation}}{{end}}" title="{{if .Recommendation}}{{.Recommendation}}{{end}}">{{if .Recommendation}}{{.Recommendation}}{{else}}&mdash;{{end}}</td>
             <td>{{.Confidence}}</td>
             <td>{{.SourceEngine}}</td>
             <td data-sort="{{if .CorroboratedBy}}{{joinStrings .CorroboratedBy ","}}{{end}}">{{if .CorroboratedBy}}{{joinStrings .CorroboratedBy ", "}}{{else}}&mdash;{{end}}</td>

@@ -3,28 +3,44 @@ package output
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 )
+
+var useColor = os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+
+func colorize(code, s string) string {
+	if !useColor {
+		return s
+	}
+	return "\033[" + code + "m" + s + "\033[0m"
+}
 
 // WriteTable writes findings as a human-readable table.
 func WriteTable(w io.Writer, result ScanResult) error {
 	if len(result.Findings) == 0 {
 		fmt.Fprintf(w, "No findings detected in %s\n", result.Target)
+		if len(result.Engines) > 0 {
+			fmt.Fprintf(w, "Scanned with: %s\n", strings.Join(result.Engines, ", "))
+		}
+		fmt.Fprintf(w, "%s\n", colorize("90", "Tip: run 'oqs-scanner engines doctor' to verify engine coverage."))
 		return nil
 	}
 
 	// Header
 	fmt.Fprintf(w, "\nOQS Scanner v%s — %s\n", result.Version, result.Target)
 	fmt.Fprintf(w, "Engines: %s\n", strings.Join(result.Engines, ", "))
-	fmt.Fprintf(w, "%s\n\n", strings.Repeat("─", 80))
+	fmt.Fprintf(w, "%s\n", strings.Repeat("─", 80))
+	fmt.Fprintf(w, "%s\n", colorize("90", "Legend: [QV]=Vulnerable [QW]=Weakened [QS]=Safe [QR]=Resistant [DEP]=Deprecated [HNDL:IMM/DEF]=Harvest-Now-Decrypt-Later"))
+	fmt.Fprintln(w)
 
 	// Column widths
 	const (
-		typeW   = 12
-		nameW   = 28
-		fileW   = 30
-		locW    = 8
+		typeW = 12
+		nameW = 28
+		fileW = 30
+		locW  = 8
 	)
 
 	// Header row
@@ -152,9 +168,44 @@ func WriteTable(w io.Writer, result ScanResult) error {
 		)
 	}
 
+	// HNDL count
+	var hndlImm, hndlDef int
+	for _, f := range result.Findings {
+		switch f.HNDLRisk {
+		case "immediate":
+			hndlImm++
+		case "deferred":
+			hndlDef++
+		}
+	}
+	if hndlImm > 0 || hndlDef > 0 {
+		fmt.Fprintf(w, "HNDL Risk: %s immediate (key exchange, by 2030), %s deferred (signatures, by 2035)\n",
+			colorize("1;31", fmt.Sprintf("%d", hndlImm)),
+			colorize("33", fmt.Sprintf("%d", hndlDef)))
+	}
+
 	// QRS (Quantum Readiness Score)
 	if result.QRS != nil {
-		fmt.Fprintf(w, "Quantum Readiness Score: %d/100 (Grade: %s)\n", result.QRS.Score, result.QRS.Grade)
+		gradeColor := "0"
+		switch {
+		case result.QRS.Score >= 85:
+			gradeColor = "1;32" // bold green
+		case result.QRS.Score >= 70:
+			gradeColor = "34" // blue
+		case result.QRS.Score >= 50:
+			gradeColor = "33" // yellow
+		case result.QRS.Score >= 30:
+			gradeColor = "1;33" // bold yellow
+		default:
+			gradeColor = "1;31" // bold red
+		}
+		fmt.Fprintf(w, "Quantum Readiness Score: %s (Grade: %s)\n",
+			colorize(gradeColor, fmt.Sprintf("%d/100", result.QRS.Score)),
+			colorize(gradeColor, result.QRS.Grade))
+
+		if result.Summary.QuantumVulnerable > 0 {
+			fmt.Fprintf(w, "\n%s\n", colorize("90", "Tip: run with --format html for a detailed report, or --compliance cnsa-2.0 to evaluate CNSA 2.0 posture."))
+		}
 	}
 
 	return nil
@@ -170,15 +221,15 @@ func truncate(s string, maxLen int) string {
 func riskBadge(risk string) string {
 	switch risk {
 	case "quantum-vulnerable":
-		return "[QV]"
+		return colorize("1;31", "[QV]") // bold red
 	case "quantum-weakened":
-		return "[QW]"
+		return colorize("33", "[QW]") // yellow
 	case "quantum-safe":
-		return "[QS]"
+		return colorize("32", "[QS]") // green
 	case "quantum-resistant":
-		return "[QR]"
+		return colorize("34", "[QR]") // blue
 	case "deprecated":
-		return "[DEP]"
+		return colorize("90", "[DEP]") // gray
 	default:
 		return ""
 	}
@@ -187,11 +238,11 @@ func riskBadge(risk string) string {
 func effortBadge(effort string) string {
 	switch effort {
 	case "simple":
-		return "[EFFORT:S]"
+		return colorize("32", "[EFFORT:S]")
 	case "moderate":
-		return "[EFFORT:M]"
+		return colorize("33", "[EFFORT:M]")
 	case "complex":
-		return "[EFFORT:C]"
+		return colorize("1;31", "[EFFORT:C]")
 	}
 	return ""
 }
