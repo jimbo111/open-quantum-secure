@@ -102,15 +102,32 @@ The scanner is an **orchestrator** — it coordinates external tools and merges 
    │  Built-in   │    │   Optional    │    │      Optional           │
    │  (embedded) │    │   (install)   │    │      (install)          │
    ├─────────────┤    ├───────────────┤    ├─────────────────────────┤
-   │config-scanner│   │ ast-grep      │    │ semgrep (taint/flow)    │
-   │binary-scanner│   │ syft          │    │ cdxgen (SBOM)           │
-   │             │    │ cryptodeps    │    │ cbomkit-theia(artifacts)│
+   │config-scanner│   │ cipherscope   │    │ semgrep (taint/flow)    │
+   │binary-scanner│   │ cryptoscan    │    │ cdxgen (SBOM)           │
+   │             │    │ ast-grep      │    │ cbomkit-theia(artifacts)│
+   │             │    │ syft          │    │                         │
+   │             │    │ cryptodeps    │    │                         │
    └─────────────┘    └───────────────┘    └─────────────────────────┘
 ```
 
 Each engine is a separate project with its own license. The scanner never bundles or redistributes them — it discovers them from PATH or `~/.oqs/cache/engines/` at runtime.
 
 ---
+
+## Understanding the Quantum Readiness Score (QRS)
+
+The QRS ranges from 0 to 100:
+
+| Score | Grade | Meaning |
+|-------|-------|---------|
+| 95-100 | A+ | Fully quantum-ready, no vulnerable algorithms |
+| 85-94 | A | Minimal quantum risk |
+| 70-84 | B | Some vulnerable algorithms, migration in progress |
+| 50-69 | C | Significant quantum risk, migration needed |
+| 30-49 | D | High quantum risk, many vulnerable algorithms |
+| 0-29 | F | Critical quantum risk, immediate action required |
+
+Penalties are applied per finding based on quantum risk category and severity. Corroborated findings (detected by multiple engines) receive higher penalties. PQC-safe algorithms contribute a small bonus.
 
 ## Output formats
 
@@ -226,6 +243,7 @@ oqs-scanner scan --path . --format cbom --sign-cbom --output signed-cbom.json
 | `--scan-type binary` | Scan binary artifacts only |
 | `--incremental` | Skip unchanged files using local cache |
 | `--exclude "vendor/**"` | Skip directories by glob pattern |
+| `--remote-cache` | Share scan cache across CI runs (requires platform) |
 
 ## Other commands
 
@@ -233,7 +251,7 @@ oqs-scanner scan --path . --format cbom --sign-cbom --output signed-cbom.json
 oqs-scanner diff --path . --base main            # Scan only changed files (PR mode)
 oqs-scanner trends --project my-org/my-repo       # QRS trend analysis
 oqs-scanner history --project my-org/my-repo      # Scan history
-oqs-scanner compliance-report --path . -o report.md  # CNSA 2.0 report
+oqs-scanner compliance-report --path . --output report.md  # CNSA 2.0 report
 oqs-scanner engines list                          # List all engines
 oqs-scanner engines doctor                        # Check engine availability
 oqs-scanner version                               # Version and engine status
