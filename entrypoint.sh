@@ -31,27 +31,18 @@ if [ "$NO_CONFIG" = "true" ]; then
   NO_CONFIG_FLAG="--no-config"
 fi
 
-# Build optional flags for Phase 17 features
-COMPLIANCE_FLAG=""
-if [ -n "$COMPLIANCE" ]; then COMPLIANCE_FLAG="--compliance $COMPLIANCE"; fi
-CI_MODE_FLAG=""
-if [ "$CI_MODE" != "blocking" ] && [ -n "$CI_MODE" ]; then CI_MODE_FLAG="--ci-mode $CI_MODE"; fi
-LIFETIME_FLAG=""
-if [ "$DATA_LIFETIME" != "0" ] && [ -n "$DATA_LIFETIME" ]; then LIFETIME_FLAG="--data-lifetime-years $DATA_LIFETIME"; fi
-WEBHOOK_FLAG=""
-if [ -n "$WEBHOOK_URL" ]; then WEBHOOK_FLAG="--webhook-url $WEBHOOK_URL"; fi
-
-# Run the scanner with JSON output for metric extraction
+# Run the scanner with JSON output for metric extraction.
+# All flag values are properly quoted to prevent word-splitting/glob injection.
 SCAN_EXIT=0
 oqs-scanner "$SCAN_CMD" --path "$PATH_ARG" --format json --output "${OUTPUT_DIR}.json" \
   --incremental --cache-path /tmp/oqs-ci-cache.json \
   ${NO_CONFIG_FLAG:+"$NO_CONFIG_FLAG"} \
   ${FAIL_ON:+--fail-on "$FAIL_ON"} \
   ${DIFF_BASE_VAL:+--base "$DIFF_BASE_VAL"} \
-  ${COMPLIANCE_FLAG:+$COMPLIANCE_FLAG} \
-  ${CI_MODE_FLAG:+$CI_MODE_FLAG} \
-  ${LIFETIME_FLAG:+$LIFETIME_FLAG} \
-  ${WEBHOOK_FLAG:+$WEBHOOK_FLAG} \
+  ${COMPLIANCE:+--compliance "$COMPLIANCE"} \
+  ${CI_MODE:+--ci-mode "$CI_MODE"} \
+  ${DATA_LIFETIME:+--data-lifetime-years "$DATA_LIFETIME"} \
+  ${WEBHOOK_URL:+--webhook-url "$WEBHOOK_URL"} \
   || SCAN_EXIT=$?
 
 # Parse outputs from JSON result using correct field names
@@ -78,9 +69,9 @@ if [ "$FORMAT" != "json" ]; then
     ${NO_CONFIG_FLAG:+"$NO_CONFIG_FLAG"} \
     ${FAIL_ON:+--fail-on "$FAIL_ON"} \
     ${DIFF_BASE_VAL:+--base "$DIFF_BASE_VAL"} \
-    ${COMPLIANCE_FLAG:+$COMPLIANCE_FLAG} \
-    ${CI_MODE_FLAG:+$CI_MODE_FLAG} \
-    ${LIFETIME_FLAG:+$LIFETIME_FLAG} 2>&1; then
+    ${COMPLIANCE:+--compliance "$COMPLIANCE"} \
+    ${CI_MODE:+--ci-mode "$CI_MODE"} \
+    ${DATA_LIFETIME:+--data-lifetime-years "$DATA_LIFETIME"} 2>&1; then
     echo "::warning::Secondary format ($FORMAT) generation failed"
   fi
 fi
