@@ -93,6 +93,25 @@ func classicalAlgFamily(alg string) string {
 	}
 }
 
+// extractBaseAlg strips key-size or curve suffixes from compound algorithm names.
+// "RSA-2048" → "RSA", "ECDSA-P256" → "ECDSA", "AES-256-GCM" → "AES",
+// "X25519" → "X25519" (no hyphen-digit boundary).
+func extractBaseAlg(alg string) string {
+	// Find the first hyphen followed by a digit — everything before it is the base.
+	for i := 0; i < len(alg)-1; i++ {
+		if alg[i] == '-' && alg[i+1] >= '0' && alg[i+1] <= '9' {
+			return alg[:i]
+		}
+	}
+	// Also handle "ECDSA-P256" — hyphen followed by 'P' + digits
+	for i := 0; i < len(alg)-2; i++ {
+		if alg[i] == '-' && (alg[i+1] == 'P' || alg[i+1] == 'p') && alg[i+2] >= '0' && alg[i+2] <= '9' {
+			return alg[:i]
+		}
+	}
+	return alg
+}
+
 // langFromExt maps a file extension (dot included, lower-cased) to a language
 // token. Config-like extensions all collapse to "config".
 func langFromExt(ext string) string {
@@ -139,7 +158,10 @@ func GenerateSnippet(filePath, classicalAlg, primitive, targetAlg string) *Snipp
 		return nil
 	}
 
-	family := classicalAlgFamily(classicalAlg)
+	// Normalize compound names like "RSA-2048" or "ECDSA-P256" to base form
+	// for family lookup. Take first segment before any hyphen-digit boundary.
+	baseAlg := extractBaseAlg(classicalAlg)
+	family := classicalAlgFamily(baseAlg)
 	if family == "" {
 		// Resolve ambiguity using the primitive hint when the algorithm name
 		// alone is not enough (e.g. generic "RSA" used for encryption vs.
@@ -204,7 +226,7 @@ signer := oqs.Signature{}
 _ = signer.Init("` + targetAlg + `", nil)
 pub, _ := signer.GenerateKeyPair()
 sig, _ := signer.Sign(message)
-_ = signer.VerifySignature(message, sig, pub)`
+isValid, _ := signer.Verify(message, sig, pub)`
 
 		return &Snippet{
 			Language:    "go",

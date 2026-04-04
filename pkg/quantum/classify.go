@@ -131,7 +131,7 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 
 	// 1. Check deprecated first (classically broken)
 	if deprecatedAlgorithms[baseName] || deprecatedAlgorithms[name] {
-		t := LookupTarget(baseName)
+		t := LookupTargetForKeySize(baseName, keySize)
 		return Classification{
 			Risk:            RiskDeprecated,
 			Severity:        SeverityCritical,
@@ -172,7 +172,7 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 
 	// 3. Check quantum-vulnerable asymmetric algorithms (Shor's)
 	if quantumVulnerableFamilies[baseName] {
-		return classifyVulnerable(baseName, primitive)
+		return classifyVulnerable(baseName, primitive, keySize)
 	}
 
 	// 4. Check by primitive type
@@ -224,9 +224,14 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 }
 
 // classifyVulnerable returns classification for known quantum-vulnerable algorithms.
-func classifyVulnerable(baseName, primitive string) Classification {
+func classifyVulnerable(baseName, primitive string, keySize int) Classification {
 	p := normalizePrimitive(primitive)
-	t := LookupTarget(baseName)
+	t := LookupTargetForKeySize(baseName, keySize)
+	// Override target when algorithm is used for encryption/KEM — LookupTarget
+	// defaults RSA to signing, but RSA encryption should target ML-KEM.
+	if (p == "key-agree" || p == "kem" || p == "pke") && t.Standard == "FIPS 204" {
+		t = MigrationTarget{Algorithm: "ML-KEM-768", Standard: "FIPS 203"}
+	}
 	switch p {
 	case "key-agree", "kem", "pke":
 		return Classification{

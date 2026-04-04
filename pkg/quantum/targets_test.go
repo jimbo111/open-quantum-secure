@@ -90,14 +90,14 @@ func TestClassifyAlgorithmTargetPopulation(t *testing.T) {
 		wantNonEmpty  bool   // true if TargetAlgorithm should be set
 		wantTargetAlg string // exact value when wantNonEmpty is true
 	}{
-		// RSA-2048 signature → vulnerable → TargetAlgorithm must be set
+		// RSA-2048 signature → vulnerable → ML-DSA-44 (NIST Level 2 for 2048-bit)
 		{
 			name:          "RSA-2048 signature",
 			alg:           "RSA-2048",
 			primitive:     "signature",
 			keySize:       2048,
 			wantNonEmpty:  true,
-			wantTargetAlg: "ML-DSA-65",
+			wantTargetAlg: "ML-DSA-44",
 		},
 		// AES-256 symmetric → quantum-resistant → no target
 		{
