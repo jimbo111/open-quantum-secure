@@ -962,7 +962,8 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version and detected engines",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("oqs-scanner v%s\n\n", version)
+			v := strings.TrimPrefix(version, "v")
+			fmt.Printf("oqs-scanner v%s\n\n", v)
 
 			orch := buildOrchestrator()
 			fmt.Println("Engines:")
