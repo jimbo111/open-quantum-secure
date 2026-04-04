@@ -449,6 +449,19 @@ Example with data lifetime adjustment for healthcare:
 			if len(selected) == 0 {
 				return fmt.Errorf("no scanner engines found — run 'oqs-scanner engines install --all' or ensure binaries are in PATH")
 			}
+			// Warn if only embedded engines are available (no source code scanning).
+			hasSourceEngine := false
+			for _, e := range selected {
+				if e.Name() != "config-scanner" && e.Name() != "binary-scanner" {
+					hasSourceEngine = true
+					break
+				}
+			}
+			if !hasSourceEngine {
+				fmt.Fprintf(os.Stderr, "WARNING: No source code engines available — only config and binary files will be scanned.\n")
+				fmt.Fprintf(os.Stderr, "  Install engines: oqs-scanner engines install --all\n\n")
+			}
+
 			fmt.Fprintf(os.Stderr, "Scanning %s with %d engine(s)...\n", absPath, len(selected))
 			for _, e := range selected {
 				fmt.Fprintf(os.Stderr, "  • %s (tier %s, %s)\n", e.Name(), e.Tier(), strings.Join(e.SupportedLanguages(), ", "))
@@ -744,6 +757,19 @@ Example:
 			if len(selected) == 0 {
 				return fmt.Errorf("no scanner engines found — run 'oqs-scanner engines install --all' or ensure binaries are in PATH")
 			}
+
+			hasSourceEngine := false
+			for _, e := range selected {
+				if e.Name() != "config-scanner" && e.Name() != "binary-scanner" {
+					hasSourceEngine = true
+					break
+				}
+			}
+			if !hasSourceEngine {
+				fmt.Fprintf(os.Stderr, "WARNING: No source code engines available — only config and binary files will be scanned.\n")
+				fmt.Fprintf(os.Stderr, "  Install engines: oqs-scanner engines install --all\n\n")
+			}
+
 			fmt.Fprintf(os.Stderr, "Running %d Tier 1 engine(s) on changed files...\n", len(selected))
 
 			// Remote cache pre-scan: download cache if authenticated and enabled.
