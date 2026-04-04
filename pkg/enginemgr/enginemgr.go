@@ -42,7 +42,7 @@ var registry = []EngineInfo{
 		Languages:   []string{"c", "cpp", "java", "python", "go", "swift", "php", "objc", "rust", "javascript", "typescript"},
 		BinaryName:  "cipherscope",
 		BuildTool:   "cargo",
-		InstallHint: "cargo build --release in OQS/cipherscope-main",
+		InstallHint: "oqs-scanner engines install cipherscope",
 	},
 	{
 		Name:        "cryptoscan",
@@ -51,7 +51,7 @@ var registry = []EngineInfo{
 		Languages:   []string{"c", "cpp", "java", "python", "go", "swift", "php", "rust", "javascript", "typescript", "ruby", "csharp", "kotlin", "scala"},
 		BinaryName:  "cryptoscan",
 		BuildTool:   "go",
-		InstallHint: "go build ./cmd/cryptoscan in OQS/cryptoscan-main",
+		InstallHint: "oqs-scanner engines install cryptoscan",
 	},
 	{
 		Name:        "astgrep",
@@ -78,7 +78,7 @@ var registry = []EngineInfo{
 		Languages:   []string{"go", "java", "python", "javascript", "rust", "ruby", "dotnet", "php"},
 		BinaryName:  "cryptodeps",
 		BuildTool:   "go",
-		InstallHint: "go build ./cmd/cryptodeps in OQS/cryptodeps-main",
+		InstallHint: "oqs-scanner engines install cryptodeps",
 	},
 	{
 		Name:        "cdxgen",
@@ -105,7 +105,7 @@ var registry = []EngineInfo{
 		Languages:   []string{"(artifacts)"},
 		BinaryName:  "cbomkit-theia",
 		BuildTool:   "go",
-		InstallHint: "go build -o cbomkit-theia . in OQS/cbomkit-theia-main",
+		InstallHint: "oqs-scanner engines install cbomkit-theia",
 	},
 	{
 		Name:        "binary-scanner",
