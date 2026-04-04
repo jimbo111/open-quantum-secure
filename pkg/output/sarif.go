@@ -219,6 +219,20 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 	if f.MigrationEffort != "" {
 		props["migrationEffort"] = f.MigrationEffort
 	}
+	if f.TargetAlgorithm != "" {
+		props["targetAlgorithm"] = f.TargetAlgorithm
+	}
+	if f.TargetStandard != "" {
+		props["targetStandard"] = f.TargetStandard
+	}
+	if f.MigrationSnippet != nil {
+		props["migrationSnippet"] = map[string]string{
+			"language":    f.MigrationSnippet.Language,
+			"before":      f.MigrationSnippet.Before,
+			"after":       f.MigrationSnippet.After,
+			"explanation": f.MigrationSnippet.Explanation,
+		}
+	}
 	result.Properties = props
 
 	return result

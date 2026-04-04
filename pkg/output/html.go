@@ -25,6 +25,7 @@ func WriteHTML(w io.Writer, result ScanResult) error {
 		"sevColor":     sevColorFunc,
 		"now":          func() string { return time.Now().Format("2006-01-02 15:04:05 MST") },
 		"hasFlowPath":  func(path []findings.FlowStep) bool { return len(path) > 0 },
+		"hasSnippet":   func(s *findings.MigrationSnippet) bool { return s != nil },
 		"reachBadge": reachBadgeFunc,
 		"reachLabel": reachLabelFunc,
 		"reachSort":  reachSortFunc,

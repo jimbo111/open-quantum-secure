@@ -12,7 +12,7 @@ import (
 // Snippet holds a generated migration code example for a single finding.
 type Snippet struct {
 	// Language is the target language or config format: "go", "python", "java",
-	// "rust", or "config".
+	// "rust", "javascript", "typescript", "c", "cpp", "csharp", or "config".
 	Language string
 
 	// Before contains a short classical-algorithm code example (3-5 lines).
@@ -124,6 +124,16 @@ func langFromExt(ext string) string {
 		return "java"
 	case ".rs":
 		return "rust"
+	case ".js":
+		return "javascript"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".c", ".h":
+		return "c"
+	case ".cpp", ".cc", ".cxx", ".hpp":
+		return "cpp"
+	case ".cs":
+		return "csharp"
 	case ".yml", ".yaml", ".conf", ".nginx", ".cnf", ".cfg",
 		".properties", ".toml", ".json", ".xml", ".ini", ".hcl", ".env":
 		return "config"
@@ -195,8 +205,14 @@ func GenerateSnippet(filePath, classicalAlg, primitive, targetAlg string) *Snipp
 		return javaSnippet(family, target)
 	case "rust":
 		return rustSnippet(family, target)
+	case "javascript", "typescript":
+		return jsSnippet(lang, family, target)
+	case "c", "cpp":
+		return cSnippet(lang, family, target)
+	case "csharp":
+		return csharpSnippet(family, target)
 	case "config":
-		return configSnippet(classicalAlg, family)
+		return configSnippet(filePath, classicalAlg, family)
 	}
 	return nil
 }
@@ -246,8 +262,8 @@ isValid, _ := signer.Verify(message, sig, pub)`
 priv, _ := ecdh.P256().GenerateKey(rand.Reader)
 shared, _ := priv.ECDH(peerPub)`
 
-		after := `import "github.com/open-quantum-safe/liboqs-go/oqs"
-` + note + `
+		after := `import "github.com/open-quantum-safe/liboqs-go/oqs"` + note + `
+
 kem := oqs.KeyEncapsulation{}
 _ = kem.Init("` + targetAlg + `", nil)
 pub, _ := kem.GenerateKeyPair()
@@ -469,47 +485,270 @@ func toOQSVariant(alg string) string {
 // Config snippets
 // ---------------------------------------------------------------------------
 
-func configSnippet(classicalAlg, family string) *Snippet {
-	algUpper := strings.ToUpper(classicalAlg)
+// configServerType returns one of "nginx", "apache", "haproxy" based on
+// whether the file name or path contains a recognisable keyword (case-insensitive).
+// Falls back to "nginx" for unrecognised paths.
+func configServerType(filePath string) string {
+	lower := strings.ToLower(filePath)
+	switch {
+	case strings.Contains(lower, "haproxy"):
+		return "haproxy"
+	case strings.Contains(lower, "apache") || strings.Contains(lower, "httpd"):
+		return "apache"
+	default:
+		return "nginx"
+	}
+}
+
+// configSnippet generates a server-specific PQC migration snippet for config
+// files. The filePath is used to detect whether the target is nginx, Apache,
+// or HAProxy; all other paths default to nginx-style directives.
+func configSnippet(filePath, classicalAlg, family string) *Snippet {
+	_ = strings.ToUpper(classicalAlg) // kept for future per-alg branching
+
+	server := configServerType(filePath)
 
 	// Signing certificate / key config — checked first so that RSA (which is
 	// also a TLS algorithm) maps to the certificate snippet, not the curve
 	// snippet.
 	if family == "sign" {
-		_ = algUpper // suppress unused warning; kept for future per-alg branching
-		before := `# Certificate key type (classical RSA)
+		switch server {
+		case "apache":
+			before := `# Apache TLS curves (classical only)
+SSLCertificateFile    /etc/ssl/certs/server-rsa.crt
+SSLCertificateKeyFile /etc/ssl/private/server-rsa.key`
+
+			after := `SSLCertificateFile    /etc/ssl/certs/server-mldsa.crt
+SSLCertificateKeyFile /etc/ssl/private/server-mldsa.key
+# Generate with: openssl genpkey -algorithm ML-DSA-65`
+
+			return &Snippet{
+				Language:    "config",
+				Before:      before,
+				After:       after,
+				Explanation: "Replace RSA/ECDSA TLS certificate with an ML-DSA-65 certificate (FIPS 204).",
+			}
+
+		default: // nginx and haproxy fall back to nginx-style for signing
+			before := `# Certificate key type (classical RSA)
 ssl_certificate     /etc/ssl/certs/server-rsa.crt;
 ssl_certificate_key /etc/ssl/private/server-rsa.key;`
 
-		after := `# Certificate key type — replace RSA cert with ML-DSA certificate
+			after := `# Certificate key type — replace RSA cert with ML-DSA certificate
 ssl_certificate     /etc/ssl/certs/server-mldsa.crt;
 ssl_certificate_key /etc/ssl/private/server-mldsa.key;
 # Generate with: openssl genpkey -algorithm ML-DSA-65`
 
-		return &Snippet{
-			Language:    "config",
-			Before:      before,
-			After:       after,
-			Explanation: "Replace RSA/ECDSA TLS certificate with an ML-DSA-65 certificate (FIPS 204).",
+			return &Snippet{
+				Language:    "config",
+				Before:      before,
+				After:       after,
+				Explanation: "Replace RSA/ECDSA TLS certificate with an ML-DSA-65 certificate (FIPS 204).",
+			}
 		}
 	}
 
 	// TLS cipher / curve configuration for key-exchange algorithms.
 	if family == "kem" {
-		_ = algUpper
-		before := `# TLS curve preference (classical only)
+		switch server {
+		case "apache":
+			before := `# Apache TLS curves (classical only)
+SSLOpenSSLConfCmd Curves prime256v1:secp384r1`
+
+			after := `# Apache TLS curves — add PQC hybrid key exchange
+SSLOpenSSLConfCmd Curves X25519MLKEM768:prime256v1:secp384r1`
+
+			return &Snippet{
+				Language:    "config",
+				Before:      before,
+				After:       after,
+				Explanation: "Add X25519MLKEM768 to Apache TLS curve list to enable PQC hybrid key exchange (FIPS 203).",
+			}
+
+		case "haproxy":
+			before := `bind *:443 ssl crt /etc/haproxy/certs/ curves secp256r1:secp384r1`
+
+			after := `bind *:443 ssl crt /etc/haproxy/certs/ curves X25519MLKEM768:secp256r1:secp384r1`
+
+			return &Snippet{
+				Language:    "config",
+				Before:      before,
+				After:       after,
+				Explanation: "Add X25519MLKEM768 to HAProxy TLS curve list to enable PQC hybrid key exchange (FIPS 203).",
+			}
+
+		default: // nginx
+			before := `# TLS curve preference (classical only)
 ssl_ecdh_curve secp384r1:prime256v1;`
 
-		after := `# TLS curve preference — add X25519MLKEM768 for PQC hybrid key exchange
+			after := `# TLS curve preference — add X25519MLKEM768 for PQC hybrid key exchange
 ssl_ecdh_curve X25519MLKEM768:secp384r1:prime256v1;`
 
-		return &Snippet{
-			Language:    "config",
-			Before:      before,
-			After:       after,
-			Explanation: "Add X25519MLKEM768 to TLS curve list to enable PQC hybrid key exchange (FIPS 203).",
+			return &Snippet{
+				Language:    "config",
+				Before:      before,
+				After:       after,
+				Explanation: "Add X25519MLKEM768 to TLS curve list to enable PQC hybrid key exchange (FIPS 203).",
+			}
 		}
 	}
 
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// JavaScript / TypeScript snippets
+// ---------------------------------------------------------------------------
+
+// jsSnippet returns Node.js migration snippets for the given family.
+// lang is "javascript" or "typescript" and is reflected in Snippet.Language.
+func jsSnippet(lang, family, targetAlg string) *Snippet {
+	switch family {
+	case "sign":
+		before := `const { createSign } = require('crypto');
+
+const sign = createSign('RSA-SHA256');
+sign.update(message);
+const signature = sign.sign(privateKey);`
+
+		after := `// Node.js has no native PQC signing yet.
+// Use liboqs-node (npm install liboqs-node) as an interim solution,
+// or wait for a future Node.js release with OpenSSL 3.5+ PQC support.
+const { Signature } = require('liboqs-node');
+const sig = new Signature('` + targetAlg + `');
+const publicKey = sig.generateKeypair();
+const signature = sig.sign(message);`
+
+		return &Snippet{
+			Language:    lang,
+			Before:      before,
+			After:       after,
+			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + " (FIPS 204) via liboqs-node.",
+		}
+
+	case "kem":
+		before := `const { createECDH } = require('crypto');
+
+const ecdh = createECDH('prime256v1');
+ecdh.generateKeys();
+const sharedSecret = ecdh.computeSecret(peerPublicKey);`
+
+		after := `// Node.js 21+ with OpenSSL 3.x: X25519MLKEM768 hybrid is available for
+// TLS automatically — no code changes needed when using the https module.
+// For explicit KEM operations, use liboqs-node (npm install liboqs-node):
+const { KeyEncapsulation } = require('liboqs-node');
+const kem = new KeyEncapsulation('` + targetAlg + `');
+const publicKey = kem.generateKeypair();
+const { ciphertext, sharedSecret } = kem.encapSecret(publicKey);`
+
+		return &Snippet{
+			Language:    lang,
+			Before:      before,
+			After:       after,
+			Explanation: "Replace ECDH key exchange with " + targetAlg + " (FIPS 203) via liboqs-node.",
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// C / C++ snippets
+// ---------------------------------------------------------------------------
+
+// cSnippet returns OpenSSL-based C/C++ migration snippets for the given family.
+// lang is "c" or "cpp" and is reflected in Snippet.Language.
+func cSnippet(lang, family, targetAlg string) *Snippet {
+	switch family {
+	case "sign":
+		before := `EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+EVP_PKEY_keygen_init(ctx);
+EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 2048);
+EVP_PKEY *pkey = NULL;
+EVP_PKEY_keygen(ctx, &pkey);`
+
+		after := `/* OpenSSL 3.5+: ML-DSA is available natively. */
+/* For OpenSSL < 3.5, load oqs-provider: OSSL_PROVIDER_load(NULL, "oqsprovider") */
+EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(NULL, "` + targetAlg + `", NULL);
+EVP_PKEY_keygen_init(ctx);
+EVP_PKEY *pkey = NULL;
+EVP_PKEY_keygen(ctx, &pkey);`
+
+		return &Snippet{
+			Language:    lang,
+			Before:      before,
+			After:       after,
+			Explanation: "Replace RSA/ECDSA key generation with " + targetAlg + " (FIPS 204) via OpenSSL 3.5+ or oqs-provider.",
+		}
+
+	case "kem":
+		before := `EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+EVP_PKEY_keygen_init(ctx);
+EVP_PKEY_CTX_set_ec_paramgen_curve_nid(ctx, NID_X9_62_prime256v1);
+EVP_PKEY *pkey = NULL;
+EVP_PKEY_keygen(ctx, &pkey);`
+
+		after := `/* OpenSSL 3.5+: ML-KEM and X25519MLKEM768 hybrid are available natively. */
+/* For OpenSSL < 3.5, load oqs-provider: OSSL_PROVIDER_load(NULL, "oqsprovider") */
+/* Use "X25519MLKEM768" as the name for the hybrid key exchange variant. */
+EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(NULL, "` + targetAlg + `", NULL);
+EVP_PKEY_keygen_init(ctx);
+EVP_PKEY *pkey = NULL;
+EVP_PKEY_keygen(ctx, &pkey);`
+
+		return &Snippet{
+			Language:    lang,
+			Before:      before,
+			After:       after,
+			Explanation: "Replace ECDH/X25519 key exchange with " + targetAlg + " (FIPS 203) via OpenSSL 3.5+ or oqs-provider.",
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// C# snippets
+// ---------------------------------------------------------------------------
+
+func csharpSnippet(family, targetAlg string) *Snippet {
+	switch family {
+	case "sign":
+		before := `using var rsa = RSA.Create(2048);
+byte[] signature = rsa.SignData(
+    message, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);`
+
+		after := `// .NET has no built-in PQC support yet; use BouncyCastle for .NET.
+// Install: dotnet add package BouncyCastle.Cryptography
+using Org.BouncyCastle.Pqc.Crypto.MLDsa;
+var keyGen = new MLDsaKeyPairGenerator();
+keyGen.Init(new MLDsaKeyGenerationParameters(new SecureRandom(), MLDsaParameters.ml_dsa_65));
+var keyPair = keyGen.GenerateKeyPair();`
+
+		return &Snippet{
+			Language:    "csharp",
+			Before:      before,
+			After:       after,
+			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + " (FIPS 204) via BouncyCastle for .NET.",
+		}
+
+	case "kem":
+		before := `using var ecdh = ECDiffieHellman.Create();
+byte[] publicKey = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
+byte[] sharedSecret = ecdh.DeriveKeyFromHash(
+    peerPublicKey, HashAlgorithmName.SHA256);`
+
+		after := `// .NET has no built-in PQC KEM support yet; use BouncyCastle for .NET.
+// Install: dotnet add package BouncyCastle.Cryptography
+using Org.BouncyCastle.Pqc.Crypto.MLKem;
+var keyGen = new MLKemKeyPairGenerator();
+keyGen.Init(new MLKemKeyGenerationParameters(new SecureRandom(), MLKemParameters.ml_kem_768));
+var keyPair = keyGen.GenerateKeyPair();`
+
+		return &Snippet{
+			Language:    "csharp",
+			Before:      before,
+			After:       after,
+			Explanation: "Replace ECDH key exchange with " + targetAlg + " (FIPS 203) via BouncyCastle for .NET.",
+		}
+	}
 	return nil
 }

@@ -101,6 +101,61 @@ func TestGenerateSnippet(t *testing.T) {
 			targetAlg:    "",
 			wantNil:      true,
 		},
+		// 9. JS file + RSA → JavaScript snippet
+		{
+			name:         "js RSA signing",
+			filePath:     "src/auth/signer.js",
+			classicalAlg: "RSA",
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-65",
+			wantLang:     "javascript",
+			wantBefore:   "createSign",
+			wantAfter:    "liboqs-node",
+		},
+		// 10. TS file + ECDH → TypeScript snippet
+		{
+			name:         "ts ECDH key exchange",
+			filePath:     "src/transport/exchange.ts",
+			classicalAlg: "ECDH",
+			primitive:    "key-exchange",
+			targetAlg:    "ML-KEM-768",
+			wantLang:     "typescript",
+			wantBefore:   "createECDH",
+			wantAfter:    "liboqs-node",
+		},
+		// 11. C file + ECDSA → C snippet
+		{
+			name:         "c ECDSA signing",
+			filePath:     "src/crypto/sign.c",
+			classicalAlg: "ECDSA",
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-65",
+			wantLang:     "c",
+			wantBefore:   "EVP_PKEY_RSA",
+			wantAfter:    "EVP_PKEY_CTX_new_from_name",
+		},
+		// 12. CPP file + X25519 → C++ snippet
+		{
+			name:         "cpp X25519 key exchange",
+			filePath:     "src/tls/handshake.cpp",
+			classicalAlg: "X25519",
+			primitive:    "key-exchange",
+			targetAlg:    "ML-KEM-768",
+			wantLang:     "cpp",
+			wantBefore:   "EVP_PKEY_EC",
+			wantAfter:    "EVP_PKEY_CTX_new_from_name",
+		},
+		// 13. CS file + RSA → C# snippet
+		{
+			name:         "csharp RSA signing",
+			filePath:     "Crypto/Signer.cs",
+			classicalAlg: "RSA",
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-65",
+			wantLang:     "csharp",
+			wantBefore:   "RSA.Create",
+			wantAfter:    "BouncyCastle",
+		},
 	}
 
 	for _, tc := range tests {
@@ -162,10 +217,20 @@ func TestLangFromExt(t *testing.T) {
 		{".ini", "config"},
 		{".hcl", "config"},
 		{".env", "config"},
+		// new languages added
+		{".js", "javascript"},
+		{".ts", "typescript"},
+		{".tsx", "typescript"},
+		{".c", "c"},
+		{".h", "c"},
+		{".cpp", "cpp"},
+		{".cc", "cpp"},
+		{".cxx", "cpp"},
+		{".hpp", "cpp"},
+		{".cs", "csharp"},
 		// unknown
 		{".swift", ""},
 		{".kt", ""},
-		{".ts", ""},
 		{"", ""},
 	}
 
@@ -325,6 +390,76 @@ func TestConfigExtensions(t *testing.T) {
 				t.Errorf("Language: want %q, got %q", "config", s.Language)
 			}
 		})
+	}
+}
+
+// TestConfigServerTypeSnippets verifies that configSnippet detects nginx,
+// Apache (httpd), and HAProxy paths and emits the appropriate directives.
+func TestConfigServerTypeSnippets(t *testing.T) {
+	tests := []struct {
+		name         string
+		filePath     string
+		classicalAlg string
+		primitive    string
+		wantBefore   string // substring expected in Before field
+		wantAfter    string // substring expected in After field
+	}{
+		{
+			name:         "nginx.conf ECDH -> nginx KEM snippet",
+			filePath:     "/etc/nginx/nginx.conf",
+			classicalAlg: "ECDH",
+			primitive:    "key-exchange",
+			wantBefore:   "ssl_ecdh_curve",
+			wantAfter:    "X25519MLKEM768",
+		},
+		{
+			name:         "httpd.conf RSA -> Apache sign snippet",
+			filePath:     "/etc/httpd/conf/httpd.conf",
+			classicalAlg: "RSA",
+			primitive:    "signature",
+			wantBefore:   "SSLCertificateFile",
+			wantAfter:    "server-mldsa.crt",
+		},
+		{
+			name:         "haproxy.cfg ECDH -> HAProxy KEM snippet",
+			filePath:     "/etc/haproxy/haproxy.cfg",
+			classicalAlg: "ECDH",
+			primitive:    "key-exchange",
+			wantBefore:   "bind *:443",
+			wantAfter:    "X25519MLKEM768",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := GenerateSnippet(tc.filePath, tc.classicalAlg, tc.primitive, "")
+			if s == nil {
+				t.Fatal("want non-nil snippet, got nil")
+			}
+			if s.Language != "config" {
+				t.Errorf("Language: want %q, got %q", "config", s.Language)
+			}
+			if !strings.Contains(s.Before, tc.wantBefore) {
+				t.Errorf("Before: want substring %q in:\n%s", tc.wantBefore, s.Before)
+			}
+			if !strings.Contains(s.After, tc.wantAfter) {
+				t.Errorf("After: want substring %q in:\n%s", tc.wantAfter, s.After)
+			}
+		})
+	}
+}
+
+// TestGoKEMNoStrayBlankLine verifies that a non-TLS Go KEM snippet does not
+// contain a triple newline (\n\n\n) caused by an empty note prefix.
+func TestGoKEMNoStrayBlankLine(t *testing.T) {
+	// ECDH without any TLS primitive hint → note is empty, so the template
+	// must not produce an extra blank line.
+	s := GenerateSnippet("internal/crypto/exchange.go", "ECDH", "key-agree", "ML-KEM-768")
+	if s == nil {
+		t.Fatal("want snippet, got nil")
+	}
+	if strings.Contains(s.After, "\n\n\n") {
+		t.Errorf("After contains stray triple newline:\n%q", s.After)
 	}
 }
 

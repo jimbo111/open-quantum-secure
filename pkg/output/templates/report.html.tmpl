@@ -308,6 +308,7 @@ summary:hover { text-decoration: underline; }
             <th data-col="3">Quantum Risk</th>
             <th data-col="4">Severity</th>
             <th data-col="5">Recommendation</th>
+            <th data-col="5b">Migration</th>
             <th data-col="6">Confidence</th>
             <th data-col="7">Engine</th>
             <th data-col="8">Corroborated By</th>
@@ -338,6 +339,19 @@ summary:hover { text-decoration: underline; }
             <td><span class="badge badge-{{riskColor .QuantumRisk}}" aria-label="Quantum risk: {{riskLabel .QuantumRisk}}">{{riskLabel .QuantumRisk}}</span></td>
             <td><span class="badge badge-{{sevColor .Severity}}">{{.Severity}}</span></td>
             <td data-sort="{{if .Recommendation}}{{.Recommendation}}{{end}}" title="{{if .Recommendation}}{{.Recommendation}}{{end}}">{{if .Recommendation}}{{.Recommendation}}{{else}}&mdash;{{end}}</td>
+            <td>
+              {{if .MigrationSnippet}}
+              <details>
+                <summary>{{.MigrationSnippet.Language}}: {{.MigrationSnippet.Explanation}}</summary>
+                <div style="margin-top:0.5rem;">
+                  <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem;">Before:</div>
+                  <pre style="background:#1e293b;color:#e2e8f0;padding:0.5rem;border-radius:4px;font-size:0.75rem;overflow-x:auto;">{{.MigrationSnippet.Before}}</pre>
+                  <div style="font-size:0.75rem;color:#94a3b8;margin:0.25rem 0;">After:</div>
+                  <pre style="background:#022c22;color:#6ee7b7;padding:0.5rem;border-radius:4px;font-size:0.75rem;overflow-x:auto;">{{.MigrationSnippet.After}}</pre>
+                </div>
+              </details>
+              {{else}}&mdash;{{end}}
+            </td>
             <td>{{.Confidence}}</td>
             <td>{{.SourceEngine}}</td>
             <td data-sort="{{if .CorroboratedBy}}{{joinStrings .CorroboratedBy ","}}{{end}}">{{if .CorroboratedBy}}{{joinStrings .CorroboratedBy ", "}}{{else}}&mdash;{{end}}</td>
