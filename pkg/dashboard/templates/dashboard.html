@@ -519,7 +519,7 @@ function renderFindingsTable(el,findings){
   sec.innerHTML='<div class="section-title">Finding Details (Top '+findings.length+')</div>';
   // Search filter
   sec.innerHTML+='<div style="margin-bottom:12px"><input id="findings-search" type="text" placeholder="Filter by file, algorithm, risk..." style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--card-border);border-radius:8px;color:var(--text);font-size:12px;outline:none" oninput="filterFindings(this.value)"></div>';
-  var html='<div class="table-scroll"><table id="findings-tbl"><thead><tr><th>File</th><th>Line</th><th>Algorithm</th><th>Target</th><th>Risk</th><th>Severity</th><th>Effort</th><th>HNDL</th><th>Engine</th></tr></thead><tbody>';
+  var html='<div class="table-scroll"><table id="findings-tbl"><thead><tr><th>File</th><th>Line</th><th>Algorithm</th><th title="Recommended PQC replacement algorithm">Target</th><th>Risk</th><th>Severity</th><th title="Migration effort: S=Simple, M=Moderate, C=Complex">Effort</th><th title="Harvest Now, Decrypt Later \u2014 urgency classification">HNDL</th><th>Engine</th></tr></thead><tbody>';
   findings.forEach(function(f,i){
     var riskColor={"quantum-vulnerable":"var(--red)","quantum-weakened":"var(--orange)","quantum-safe":"var(--green)","quantum-resistant":"var(--blue)","deprecated":"var(--muted)"}[f.quantumRisk]||"var(--dim)";
     var sevColor={"critical":"var(--red)","high":"var(--orange)","medium":"var(--amber)","low":"var(--blue)","info":"var(--dim)"}[f.severity]||"var(--dim)";
@@ -527,7 +527,7 @@ function renderFindingsTable(el,findings){
     var hndlBadge={"immediate":'<span style="color:var(--red);font-weight:600">IMM</span>',"deferred":'<span style="color:var(--amber);font-weight:600">DEF</span>'}[f.hndlRisk]||'<span style="color:var(--dim)">\u2014</span>';
     html+='<tr class="finding-row" data-idx="'+i+'" style="cursor:pointer" onclick="toggleFindingDetail(this)">';
     html+='<td style="font-family:monospace;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(f.file)+'">'+esc(f.file)+'</td>';
-    html+='<td style="font-family:monospace;font-size:11px;color:var(--dim)">'+(f.line||"\u2014")+'</td>';
+    html+='<td style="font-family:monospace;font-size:11px;color:var(--dim)">'+esc(''+(f.line||"\u2014"))+'</td>';
     html+='<td style="font-weight:600">'+esc(f.algorithm)+'</td>';
     var targetCell=f.targetAlgorithm
       ?'<span style="color:var(--cyan);font-weight:600">'+esc(f.targetAlgorithm)+'</span>'
@@ -546,13 +546,13 @@ function renderFindingsTable(el,findings){
       if(f.recommendation){
         detailContent+='<div style="margin-bottom:8px">'+esc(f.recommendation)+'</div>';
       }
-      if(f.migrationSnippet){
+      if(f.migrationSnippet && (f.migrationSnippet.before || f.migrationSnippet.after)){
         var s=f.migrationSnippet;
         detailContent+='<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--card-border)">';
         detailContent+='<div style="font-size:11px;font-weight:600;color:var(--cyan);margin-bottom:6px">\u21C4 Migration: '+esc(s.language)+' \u2014 '+esc(s.explanation)+'</div>';
         detailContent+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
-        detailContent+='<div><div style="font-size:10px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Before</div><pre style="background:var(--bg);padding:8px 10px;border-radius:6px;font-size:11px;overflow-x:auto;color:var(--muted);border:1px solid var(--card-border);white-space:pre-wrap;word-break:break-all">'+esc(s.before)+'</pre></div>';
-        detailContent+='<div><div style="font-size:10px;color:var(--green);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">After</div><pre style="background:rgba(34,197,94,.05);padding:8px 10px;border-radius:6px;font-size:11px;overflow-x:auto;color:var(--green);border:1px solid rgba(34,197,94,.15);white-space:pre-wrap;word-break:break-all">'+esc(s.after)+'</pre></div>';
+        detailContent+='<div><div style="font-size:10px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Before</div><pre style="background:var(--bg);padding:8px 10px;border-radius:6px;font-size:11px;overflow-x:auto;color:var(--muted);border:1px solid var(--card-border);white-space:pre;overflow-x:auto">'+esc(s.before)+'</pre></div>';
+        detailContent+='<div><div style="font-size:10px;color:var(--green);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">After</div><pre style="background:rgba(34,197,94,.05);padding:8px 10px;border-radius:6px;font-size:11px;overflow-x:auto;color:var(--green);border:1px solid rgba(34,197,94,.15);white-space:pre;overflow-x:auto">'+esc(s.after)+'</pre></div>';
         detailContent+='</div></div>';
       }
       html+='<tr class="finding-detail" style="display:none" data-parent="'+i+'"><td colspan="9" style="padding:10px 16px 14px 32px;background:rgba(99,102,241,.03);font-size:12px;color:var(--muted);line-height:1.6;border-left:2px solid var(--accent)">'+detailContent+'</td></tr>';
@@ -601,7 +601,11 @@ function attachSort(tblEl){
         var an=parseFloat(av),bn=parseFloat(bv);
         return(!isNaN(an)&&!isNaN(bn)?an-bn:av.localeCompare(bv))*state.dir;
       });
-      rows.forEach(function(r){tbody.appendChild(r)});
+      rows.forEach(function(r){
+        tbody.appendChild(r);
+        var detail=tbody.querySelector('.finding-detail[data-parent="'+r.dataset.idx+'"]');
+        if(detail) tbody.appendChild(detail);
+      });
     });
   });
 }

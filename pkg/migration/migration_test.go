@@ -74,14 +74,17 @@ func TestGenerateSnippet(t *testing.T) {
 			wantBefore:   "ssl_certificate",
 			wantAfter:    "ML-DSA",
 		},
-		// 6. Unknown extension → nil
+		// 6. Swift file + RSA → Swift signing snippet
 		{
-			name:         "unknown extension",
+			name:         "swift RSA signing",
 			filePath:     "src/crypto/sign.swift",
 			classicalAlg: "RSA",
 			primitive:    "signature",
 			targetAlg:    "ML-DSA-65",
-			wantNil:      true,
+			wantNil:      false,
+			wantLang:     "swift",
+			wantBefore:   "Curve25519.Signing",
+			wantAfter:    "ML-DSA-65",
 		},
 		// 7. Unknown / unrecognised algorithm + no primitive hint → nil
 		{
@@ -156,6 +159,18 @@ func TestGenerateSnippet(t *testing.T) {
 			wantBefore:   "RSA.Create",
 			wantAfter:    "BouncyCastle",
 		},
+		// 14. Swift file + Ed25519 → Swift signing snippet
+		{
+			name:         "swift_Ed25519_signing",
+			filePath:     "Sources/Crypto/Signer.swift",
+			classicalAlg: "Ed25519",
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-44",
+			wantNil:      false,
+			wantLang:     "swift",
+			wantBefore:   "Curve25519.Signing",
+			wantAfter:    "ML-DSA-44",
+		},
 	}
 
 	for _, tc := range tests {
@@ -228,8 +243,9 @@ func TestLangFromExt(t *testing.T) {
 		{".cxx", "cpp"},
 		{".hpp", "cpp"},
 		{".cs", "csharp"},
+		// swift
+		{".swift", "swift"},
 		// unknown
-		{".swift", ""},
 		{".kt", ""},
 		{"", ""},
 	}

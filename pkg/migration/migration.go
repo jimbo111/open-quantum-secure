@@ -12,7 +12,7 @@ import (
 // Snippet holds a generated migration code example for a single finding.
 type Snippet struct {
 	// Language is the target language or config format: "go", "python", "java",
-	// "rust", "javascript", "typescript", "c", "cpp", "csharp", or "config".
+	// "rust", "javascript", "typescript", "c", "cpp", "csharp", "swift", or "config".
 	Language string
 
 	// Before contains a short classical-algorithm code example (3-5 lines).
@@ -134,6 +134,8 @@ func langFromExt(ext string) string {
 		return "cpp"
 	case ".cs":
 		return "csharp"
+	case ".swift":
+		return "swift"
 	case ".yml", ".yaml", ".conf", ".nginx", ".cnf", ".cfg",
 		".properties", ".toml", ".json", ".xml", ".ini", ".hcl", ".env":
 		return "config"
@@ -211,6 +213,8 @@ func GenerateSnippet(filePath, classicalAlg, primitive, targetAlg string) *Snipp
 		return cSnippet(lang, family, target)
 	case "csharp":
 		return csharpSnippet(family, target)
+	case "swift":
+		return swiftSnippet(family, target)
 	case "config":
 		return configSnippet(filePath, classicalAlg, family)
 	}
@@ -748,6 +752,75 @@ var keyPair = keyGen.GenerateKeyPair();`
 			Before:      before,
 			After:       after,
 			Explanation: "Replace ECDH key exchange with " + targetAlg + " (FIPS 203) via BouncyCastle for .NET.",
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Swift snippets
+// ---------------------------------------------------------------------------
+
+// pqcStandard returns the FIPS standard label for a target algorithm name.
+// "ML-DSA-*" → "FIPS 204", "ML-KEM-*" → "FIPS 203", others → "".
+func pqcStandard(targetAlg string) string {
+	upper := strings.ToUpper(targetAlg)
+	switch {
+	case strings.HasPrefix(upper, "ML-DSA") || strings.HasPrefix(upper, "SLH-DSA"):
+		return "FIPS 204"
+	case strings.HasPrefix(upper, "ML-KEM"):
+		return "FIPS 203"
+	default:
+		return ""
+	}
+}
+
+// swiftSnippet returns Apple CryptoKit migration snippets for the given family.
+// Swift has no native PQC support yet; the snippets explain the gap and point
+// to liboqs-swift or system TLS updates as interim paths.
+func swiftSnippet(family, targetAlg string) *Snippet {
+	switch family {
+	case "sign":
+		before := `import CryptoKit
+
+let privateKey = Curve25519.Signing.PrivateKey()
+let signature = try privateKey.signature(for: data)
+let isValid = publicKey.isValidSignature(signature, for: data)`
+
+		standard := pqcStandard(targetAlg)
+		standardSuffix := ""
+		if standard != "" {
+			standardSuffix = " (" + standard + ")"
+		}
+
+		after := `// Swift has no native PQC signing yet.
+// Use liboqs-swift (SPM package) or OpenSSL via CCryptoBoringSSL.
+// Monitor Apple CryptoKit for future PQC support.
+// Target algorithm: ` + targetAlg + standardSuffix
+
+		return &Snippet{
+			Language:    "swift",
+			Before:      before,
+			After:       after,
+			Explanation: "Replace Curve25519 signing with " + targetAlg + " — Swift PQC support pending.",
+		}
+
+	case "kem":
+		before := `import CryptoKit
+
+let privateKey = Curve25519.KeyAgreement.PrivateKey()
+let sharedSecret = try privateKey.sharedSecretFromKeyAgreement(with: peerPublicKey)`
+
+		after := `// Swift has no native PQC key exchange yet.
+// For TLS: App Transport Security uses the system TLS stack.
+// macOS 15+ / iOS 18+ may support X25519MLKEM768 via system updates.
+// Target algorithm: ` + targetAlg
+
+		return &Snippet{
+			Language:    "swift",
+			Before:      before,
+			After:       after,
+			Explanation: "Replace Curve25519 key agreement with " + targetAlg + " — monitor Apple CryptoKit for PQC.",
 		}
 	}
 	return nil
