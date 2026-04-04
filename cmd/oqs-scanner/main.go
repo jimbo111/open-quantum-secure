@@ -1575,16 +1575,19 @@ func buildScanRecordFromInfo(sr output.ScanResult, projInfo *gitutil.ProjectInfo
 			file = ".../" + strings.Join(parts[len(parts)-2:], "/")
 		}
 		topFindings = append(topFindings, store.FindingDetail{
-			File:            file,
-			Line:            f.Location.Line,
-			Algorithm:       alg,
-			Primitive:       prim,
-			QuantumRisk:     string(f.QuantumRisk),
-			Severity:        string(f.Severity),
-			MigrationEffort: f.MigrationEffort,
-			HNDLRisk:        f.HNDLRisk,
-			Recommendation:  f.Recommendation,
-			SourceEngine:    f.SourceEngine,
+			File:             file,
+			Line:             f.Location.Line,
+			Algorithm:        alg,
+			Primitive:        prim,
+			QuantumRisk:      string(f.QuantumRisk),
+			Severity:         string(f.Severity),
+			MigrationEffort:  f.MigrationEffort,
+			HNDLRisk:         f.HNDLRisk,
+			Recommendation:   f.Recommendation,
+			TargetAlgorithm:  f.TargetAlgorithm,
+			TargetStandard:   f.TargetStandard,
+			MigrationSnippet: toStoreSnippet(f.MigrationSnippet),
+			SourceEngine:     f.SourceEngine,
 		})
 	}
 
@@ -1600,6 +1603,20 @@ func buildScanRecordFromInfo(sr output.ScanResult, projInfo *gitutil.ProjectInfo
 		Duration:              duration.Round(time.Millisecond).String(),
 		DataLifetimeYears:     dataLifetimeYears,
 		TopFindings:           topFindings,
+	}
+}
+
+// toStoreSnippet converts a findings.MigrationSnippet to a store.FindingSnippet.
+// Returns nil when the input is nil so callers can use omitempty serialization.
+func toStoreSnippet(s *findings.MigrationSnippet) *store.FindingSnippet {
+	if s == nil {
+		return nil
+	}
+	return &store.FindingSnippet{
+		Language:    s.Language,
+		Before:      s.Before,
+		After:       s.After,
+		Explanation: s.Explanation,
 	}
 }
 

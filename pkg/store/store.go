@@ -43,7 +43,18 @@ type FindingDetail struct {
 	MigrationEffort string `json:"migrationEffort,omitempty"`
 	HNDLRisk        string `json:"hndlRisk,omitempty"`
 	Recommendation  string `json:"recommendation,omitempty"`
+	TargetAlgorithm string `json:"targetAlgorithm,omitempty"`
+	TargetStandard  string `json:"targetStandard,omitempty"`
+	MigrationSnippet *FindingSnippet `json:"migrationSnippet,omitempty"`
 	SourceEngine    string `json:"sourceEngine,omitempty"`
+}
+
+// FindingSnippet is a lightweight migration snippet stored with findings.
+type FindingSnippet struct {
+	Language    string `json:"language"`
+	Before      string `json:"before"`
+	After       string `json:"after"`
+	Explanation string `json:"explanation"`
 }
 
 // MaxTopFindings caps the number of individual findings stored per scan record.

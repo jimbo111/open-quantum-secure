@@ -519,7 +519,7 @@ function renderFindingsTable(el,findings){
   sec.innerHTML='<div class="section-title">Finding Details (Top '+findings.length+')</div>';
   // Search filter
   sec.innerHTML+='<div style="margin-bottom:12px"><input id="findings-search" type="text" placeholder="Filter by file, algorithm, risk..." style="width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--card-border);border-radius:8px;color:var(--text);font-size:12px;outline:none" oninput="filterFindings(this.value)"></div>';
-  var html='<div class="table-scroll"><table id="findings-tbl"><thead><tr><th>File</th><th>Line</th><th>Algorithm</th><th>Risk</th><th>Severity</th><th>Effort</th><th>HNDL</th><th>Engine</th></tr></thead><tbody>';
+  var html='<div class="table-scroll"><table id="findings-tbl"><thead><tr><th>File</th><th>Line</th><th>Algorithm</th><th>Target</th><th>Risk</th><th>Severity</th><th>Effort</th><th>HNDL</th><th>Engine</th></tr></thead><tbody>';
   findings.forEach(function(f,i){
     var riskColor={"quantum-vulnerable":"var(--red)","quantum-weakened":"var(--orange)","quantum-safe":"var(--green)","quantum-resistant":"var(--blue)","deprecated":"var(--muted)"}[f.quantumRisk]||"var(--dim)";
     var sevColor={"critical":"var(--red)","high":"var(--orange)","medium":"var(--amber)","low":"var(--blue)","info":"var(--dim)"}[f.severity]||"var(--dim)";
@@ -529,6 +529,11 @@ function renderFindingsTable(el,findings){
     html+='<td style="font-family:monospace;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(f.file)+'">'+esc(f.file)+'</td>';
     html+='<td style="font-family:monospace;font-size:11px;color:var(--dim)">'+(f.line||"\u2014")+'</td>';
     html+='<td style="font-weight:600">'+esc(f.algorithm)+'</td>';
+    var targetCell=f.targetAlgorithm
+      ?'<span style="color:var(--cyan);font-weight:600">'+esc(f.targetAlgorithm)+'</span>'
+        +(f.targetStandard?' <span style="color:var(--dim);font-size:10px">'+esc(f.targetStandard)+'</span>':'')
+      :'<span style="color:var(--dim)">\u2014</span>';
+    html+='<td>'+targetCell+'</td>';
     html+='<td style="color:'+riskColor+';font-size:11px;font-weight:600">'+esc(f.quantumRisk||"unknown")+'</td>';
     html+='<td style="color:'+sevColor+';font-size:11px;font-weight:600">'+esc(f.severity||"\u2014")+'</td>';
     html+='<td style="text-align:center">'+effortBadge+'</td>';
@@ -536,8 +541,21 @@ function renderFindingsTable(el,findings){
     html+='<td style="font-size:10px;color:var(--dim)">'+esc(f.sourceEngine||"")+'</td>';
     html+='</tr>';
     // Expandable recommendation row
-    if(f.recommendation){
-      html+='<tr class="finding-detail" style="display:none" data-parent="'+i+'"><td colspan="8" style="padding:10px 16px 14px 32px;background:rgba(99,102,241,.03);font-size:12px;color:var(--muted);line-height:1.6;border-left:2px solid var(--accent)">'+esc(f.recommendation)+'</td></tr>';
+    if(f.recommendation||f.migrationSnippet){
+      var detailContent='';
+      if(f.recommendation){
+        detailContent+='<div style="margin-bottom:8px">'+esc(f.recommendation)+'</div>';
+      }
+      if(f.migrationSnippet){
+        var s=f.migrationSnippet;
+        detailContent+='<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--card-border)">';
+        detailContent+='<div style="font-size:11px;font-weight:600;color:var(--cyan);margin-bottom:6px">\u21C4 Migration: '+esc(s.language)+' \u2014 '+esc(s.explanation)+'</div>';
+        detailContent+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+        detailContent+='<div><div style="font-size:10px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Before</div><pre style="background:var(--bg);padding:8px 10px;border-radius:6px;font-size:11px;overflow-x:auto;color:var(--muted);border:1px solid var(--card-border);white-space:pre-wrap;word-break:break-all">'+esc(s.before)+'</pre></div>';
+        detailContent+='<div><div style="font-size:10px;color:var(--green);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">After</div><pre style="background:rgba(34,197,94,.05);padding:8px 10px;border-radius:6px;font-size:11px;overflow-x:auto;color:var(--green);border:1px solid rgba(34,197,94,.15);white-space:pre-wrap;word-break:break-all">'+esc(s.after)+'</pre></div>';
+        detailContent+='</div></div>';
+      }
+      html+='<tr class="finding-detail" style="display:none" data-parent="'+i+'"><td colspan="9" style="padding:10px 16px 14px 32px;background:rgba(99,102,241,.03);font-size:12px;color:var(--muted);line-height:1.6;border-left:2px solid var(--accent)">'+detailContent+'</td></tr>';
     }
   });
   html+='</tbody></table></div>';
