@@ -1306,3 +1306,125 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// ---------------------------------------------------------------------------
+// 8. PQC migration data across all output formats
+// ---------------------------------------------------------------------------
+
+// TestIntegration_MigrationAcrossFormats creates a single finding with full
+// migration data (TargetAlgorithm, TargetStandard, MigrationSnippet) and
+// verifies that each of JSON, SARIF, and HTML surfaces the migration fields.
+func TestIntegration_MigrationAcrossFormats(t *testing.T) {
+	snippet := &findings.MigrationSnippet{
+		Language:    "go",
+		Before:      `rsa.GenerateKey(rand.Reader, 2048)`,
+		After:       `kemkem.GenerateKey()`,
+		Explanation: "Replace RSA key exchange with ML-KEM-768",
+	}
+	ff := []findings.UnifiedFinding{
+		{
+			Location:        findings.Location{File: "/repo/src/auth/login.go", Line: 42, Column: 8},
+			Algorithm:       &findings.Algorithm{Name: "RSA-2048", Primitive: "asymmetric", KeySize: 2048},
+			Confidence:      findings.ConfidenceHigh,
+			SourceEngine:    "cipherscope",
+			QuantumRisk:     findings.QRVulnerable,
+			Severity:        findings.SevCritical,
+			TargetAlgorithm: "ML-KEM-768",
+			TargetStandard:  "NIST FIPS 203",
+			MigrationSnippet: snippet,
+		},
+	}
+	result := BuildResult("1.0.0", "/repo", []string{"cipherscope"}, ff)
+
+	// --- JSON ---
+	var jsonBuf bytes.Buffer
+	if err := WriteJSON(&jsonBuf, result); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	if !json.Valid(jsonBuf.Bytes()) {
+		t.Fatal("WriteJSON: output is not valid JSON")
+	}
+	var jsonParsed map[string]interface{}
+	if err := json.Unmarshal(jsonBuf.Bytes(), &jsonParsed); err != nil {
+		t.Fatalf("WriteJSON unmarshal: %v", err)
+	}
+	jsonFindings, ok := jsonParsed["findings"].([]interface{})
+	if !ok || len(jsonFindings) == 0 {
+		t.Fatal("JSON: findings array is missing or empty")
+	}
+	jf := jsonFindings[0].(map[string]interface{})
+	if got, ok := jf["targetAlgorithm"].(string); !ok || got != "ML-KEM-768" {
+		t.Errorf("JSON: findings[0].targetAlgorithm = %v, want ML-KEM-768", jf["targetAlgorithm"])
+	}
+	if got, ok := jf["targetStandard"].(string); !ok || got != "NIST FIPS 203" {
+		t.Errorf("JSON: findings[0].targetStandard = %v, want NIST FIPS 203", jf["targetStandard"])
+	}
+	jSnippet, ok := jf["migrationSnippet"].(map[string]interface{})
+	if !ok {
+		t.Fatal("JSON: findings[0].migrationSnippet is missing or not an object")
+	}
+	if got, ok := jSnippet["language"].(string); !ok || got != "go" {
+		t.Errorf("JSON: migrationSnippet.language = %v, want go", jSnippet["language"])
+	}
+
+	// --- SARIF ---
+	var sarifBuf bytes.Buffer
+	if err := WriteSARIF(&sarifBuf, result); err != nil {
+		t.Fatalf("WriteSARIF: %v", err)
+	}
+	if !json.Valid(sarifBuf.Bytes()) {
+		t.Fatal("WriteSARIF: output is not valid JSON")
+	}
+	var sarifRaw map[string]interface{}
+	if err := json.Unmarshal(sarifBuf.Bytes(), &sarifRaw); err != nil {
+		t.Fatalf("WriteSARIF unmarshal: %v", err)
+	}
+	sarifRuns := sarifRaw["runs"].([]interface{})
+	sarifRun := sarifRuns[0].(map[string]interface{})
+	sarifResults := sarifRun["results"].([]interface{})
+	if len(sarifResults) != 1 {
+		t.Fatalf("SARIF: results count = %d, want 1", len(sarifResults))
+	}
+	sarifResult := sarifResults[0].(map[string]interface{})
+	sarifProps, ok := sarifResult["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("SARIF: result.properties is missing or not an object")
+	}
+	if got, ok := sarifProps["targetAlgorithm"].(string); !ok || got != "ML-KEM-768" {
+		t.Errorf("SARIF: properties.targetAlgorithm = %v, want ML-KEM-768", sarifProps["targetAlgorithm"])
+	}
+	if got, ok := sarifProps["targetStandard"].(string); !ok || got != "NIST FIPS 203" {
+		t.Errorf("SARIF: properties.targetStandard = %v, want NIST FIPS 203", sarifProps["targetStandard"])
+	}
+	sarifSnippet, ok := sarifProps["migrationSnippet"].(map[string]interface{})
+	if !ok {
+		t.Fatal("SARIF: properties.migrationSnippet is missing or not an object")
+	}
+	if got, ok := sarifSnippet["language"].(string); !ok || got != "go" {
+		t.Errorf("SARIF: migrationSnippet.language = %v, want go", sarifSnippet["language"])
+	}
+
+	// --- HTML ---
+	var htmlBuf bytes.Buffer
+	if err := WriteHTML(&htmlBuf, result); err != nil {
+		t.Fatalf("WriteHTML: %v", err)
+	}
+	htmlOut := htmlBuf.String()
+
+	// Migration column header
+	if !strings.Contains(htmlOut, "Migration") {
+		t.Error("HTML: missing Migration column header")
+	}
+	// Target algorithm visible in the report (appears via Recommendation or snippet summary)
+	if !strings.Contains(htmlOut, "ML-KEM-768") {
+		t.Error("HTML: missing target algorithm ML-KEM-768")
+	}
+	// Collapsible snippet block
+	if !strings.Contains(htmlOut, "<details>") {
+		t.Error("HTML: missing <details> element for migration snippet")
+	}
+	// Snippet language in the summary line
+	if !strings.Contains(htmlOut, "go") {
+		t.Error("HTML: missing snippet language 'go' in Migration column")
+	}
+}

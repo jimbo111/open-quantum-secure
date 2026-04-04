@@ -1189,3 +1189,125 @@ func TestWriteSARIF_RulesDedup(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// 8. PQC migration properties in SARIF result.properties
+// ---------------------------------------------------------------------------
+
+// TestSARIF_MigrationProperties verifies that TargetAlgorithm, TargetStandard,
+// and MigrationSnippet on a finding are emitted as structured properties on the
+// corresponding SARIF result.
+func TestSARIF_MigrationProperties(t *testing.T) {
+	ff := []findings.UnifiedFinding{
+		{
+			Location:        findings.Location{File: "/project/auth.go", Line: 12},
+			Algorithm:       &findings.Algorithm{Name: "RSA-2048", Primitive: "asymmetric", KeySize: 2048},
+			Confidence:      findings.ConfidenceHigh,
+			SourceEngine:    "cipherscope",
+			QuantumRisk:     findings.QRVulnerable,
+			Severity:        findings.SevCritical,
+			TargetAlgorithm: "ML-KEM-768",
+			TargetStandard:  "NIST FIPS 203",
+			MigrationSnippet: &findings.MigrationSnippet{
+				Language:    "go",
+				Before:      `rsa.GenerateKey(rand.Reader, 2048)`,
+				After:       `kemkem.GenerateKey()`,
+				Explanation: "Replace RSA key exchange with ML-KEM-768",
+			},
+		},
+	}
+	buf := writeSARIFFor(t, ff, "/project")
+
+	// Parse via the raw map so we can inspect the dynamic properties sub-object
+	// without needing a typed wrapper for map[string]any.
+	var raw map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	runs := raw["runs"].([]interface{})
+	run := runs[0].(map[string]interface{})
+	results := run["results"].([]interface{})
+	if len(results) != 1 {
+		t.Fatalf("results count = %d, want 1", len(results))
+	}
+	result := results[0].(map[string]interface{})
+
+	props, ok := result["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result.properties is missing or not an object")
+	}
+
+	// targetAlgorithm
+	if got, ok := props["targetAlgorithm"].(string); !ok || got != "ML-KEM-768" {
+		t.Errorf("properties.targetAlgorithm = %v, want ML-KEM-768", props["targetAlgorithm"])
+	}
+
+	// targetStandard
+	if got, ok := props["targetStandard"].(string); !ok || got != "NIST FIPS 203" {
+		t.Errorf("properties.targetStandard = %v, want NIST FIPS 203", props["targetStandard"])
+	}
+
+	// migrationSnippet must be a nested object
+	snippet, ok := props["migrationSnippet"].(map[string]interface{})
+	if !ok {
+		t.Fatal("properties.migrationSnippet is missing or not an object")
+	}
+
+	if got, ok := snippet["language"].(string); !ok || got != "go" {
+		t.Errorf("migrationSnippet.language = %v, want go", snippet["language"])
+	}
+	if before, ok := snippet["before"].(string); !ok || before == "" {
+		t.Errorf("migrationSnippet.before must be non-empty, got %v", snippet["before"])
+	}
+	if after, ok := snippet["after"].(string); !ok || after == "" {
+		t.Errorf("migrationSnippet.after must be non-empty, got %v", snippet["after"])
+	}
+}
+
+// TestSARIF_NoMigrationWhenEmpty verifies that findings with no migration data
+// do NOT produce targetAlgorithm or migrationSnippet keys in result.properties.
+func TestSARIF_NoMigrationWhenEmpty(t *testing.T) {
+	ff := []findings.UnifiedFinding{
+		{
+			Location:    findings.Location{File: "/project/crypto.go", Line: 5},
+			Algorithm:   &findings.Algorithm{Name: "AES-256-GCM", Primitive: "ae"},
+			Confidence:  findings.ConfidenceHigh,
+			SourceEngine: "cipherscope",
+			QuantumRisk: findings.QRResistant,
+			Severity:    findings.SevInfo,
+			// TargetAlgorithm: "" (zero value)
+			// TargetStandard:  "" (zero value)
+			// MigrationSnippet: nil
+		},
+	}
+	buf := writeSARIFFor(t, ff, "/project")
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	runs := raw["runs"].([]interface{})
+	run := runs[0].(map[string]interface{})
+	results := run["results"].([]interface{})
+	if len(results) != 1 {
+		t.Fatalf("results count = %d, want 1", len(results))
+	}
+	result := results[0].(map[string]interface{})
+
+	props, ok := result["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result.properties is missing or not an object")
+	}
+
+	if _, present := props["targetAlgorithm"]; present {
+		t.Error("properties.targetAlgorithm must be absent when TargetAlgorithm is empty")
+	}
+	if _, present := props["targetStandard"]; present {
+		t.Error("properties.targetStandard must be absent when TargetStandard is empty")
+	}
+	if _, present := props["migrationSnippet"]; present {
+		t.Error("properties.migrationSnippet must be absent when MigrationSnippet is nil")
+	}
+}
+

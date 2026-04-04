@@ -1,6 +1,7 @@
 package quantum
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,116 @@ func TestLookupTargetForKeySize(t *testing.T) {
 			}
 			if got.Standard != tt.wantStd {
 				t.Errorf("LookupTargetForKeySize(%q, %d).Standard = %q, want %q", tt.alg, tt.keySize, got.Standard, tt.wantStd)
+			}
+		})
+	}
+}
+
+// TestLookupTarget_EdgeCases exercises boundary and adversarial inputs for
+// LookupTarget: empty string, lowercase, completely unknown names, names that
+// look like known ones but are not in the map, and very long inputs.
+func TestLookupTarget_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantAlg string
+		wantStd string
+	}{
+		// Empty string: ToUpper("") == "" — not in map → zero value.
+		{
+			name:    "empty string",
+			input:   "",
+			wantAlg: "",
+			wantStd: "",
+		},
+		// Lowercase "rsa": ToUpper → "RSA" which is in the map.
+		{
+			name:    "rsa lowercase maps to ML-DSA-65",
+			input:   "rsa",
+			wantAlg: "ML-DSA-65",
+			wantStd: "FIPS 204",
+		},
+		// Completely unknown algorithm name.
+		{
+			name:    "unknown algorithm",
+			input:   "UNKNOWN-ALGO",
+			wantAlg: "",
+			wantStd: "",
+		},
+		// "RSA-OAEP" is not in the map (only "RSAES-OAEP" is); must return empty.
+		{
+			name:    "RSA-OAEP not in map",
+			input:   "RSA-OAEP",
+			wantAlg: "",
+			wantStd: "",
+		},
+		// Very long string (500 chars): must not panic, must return empty.
+		{
+			name:    "500-char string no panic",
+			input:   strings.Repeat("X", 500),
+			wantAlg: "",
+			wantStd: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("LookupTarget panicked: input=%q panic=%v", tt.input, r)
+				}
+			}()
+			got := LookupTarget(tt.input)
+			if got.Algorithm != tt.wantAlg {
+				t.Errorf("LookupTarget(%q).Algorithm = %q, want %q", tt.input, got.Algorithm, tt.wantAlg)
+			}
+			if got.Standard != tt.wantStd {
+				t.Errorf("LookupTarget(%q).Standard = %q, want %q", tt.input, got.Standard, tt.wantStd)
+			}
+		})
+	}
+}
+
+// TestLookupTargetForKeySize_Boundaries probes the exact threshold values for
+// RSA (3072, 4096), ECDSA (384), and AES (256), plus zero and negative keySizes.
+func TestLookupTargetForKeySize_Boundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		alg     string
+		keySize int
+		wantAlg string
+		wantStd string
+	}{
+		// RSA thresholds at 3072 and 4096 (both are >= comparisons).
+		{name: "RSA keySize=3071 below 3072 threshold", alg: "RSA", keySize: 3071, wantAlg: "ML-DSA-44", wantStd: "FIPS 204"},
+		{name: "RSA keySize=3072 at 3072 threshold", alg: "RSA", keySize: 3072, wantAlg: "ML-DSA-65", wantStd: "FIPS 204"},
+		{name: "RSA keySize=3073 above 3072 threshold", alg: "RSA", keySize: 3073, wantAlg: "ML-DSA-65", wantStd: "FIPS 204"},
+		{name: "RSA keySize=4095 just below 4096 threshold", alg: "RSA", keySize: 4095, wantAlg: "ML-DSA-65", wantStd: "FIPS 204"},
+		{name: "RSA keySize=4096 at 4096 threshold", alg: "RSA", keySize: 4096, wantAlg: "ML-DSA-87", wantStd: "FIPS 204"},
+		// RSA at extreme low values: all fall below 3072 → ML-DSA-44.
+		{name: "RSA keySize=0 minimum default", alg: "RSA", keySize: 0, wantAlg: "ML-DSA-44", wantStd: "FIPS 204"},
+		{name: "RSA keySize=-1 negative treated as below all thresholds", alg: "RSA", keySize: -1, wantAlg: "ML-DSA-44", wantStd: "FIPS 204"},
+		// ECDSA threshold at 384.
+		{name: "ECDSA keySize=383 below 384 threshold", alg: "ECDSA", keySize: 383, wantAlg: "ML-DSA-44", wantStd: "FIPS 204"},
+		{name: "ECDSA keySize=384 at 384 threshold", alg: "ECDSA", keySize: 384, wantAlg: "ML-DSA-65", wantStd: "FIPS 204"},
+		// AES: upgrade only when keySize > 0 && keySize < 256.
+		// keySize=255 satisfies both conditions → AES-256.
+		{name: "AES keySize=255 just below 256", alg: "AES", keySize: 255, wantAlg: "AES-256", wantStd: ""},
+		// keySize=256 fails the `< 256` guard → falls through to LookupTarget("AES")
+		// which has no entry → empty.
+		{name: "AES keySize=256 at boundary falls through", alg: "AES", keySize: 256, wantAlg: "", wantStd: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := LookupTargetForKeySize(tt.alg, tt.keySize)
+			if got.Algorithm != tt.wantAlg {
+				t.Errorf("LookupTargetForKeySize(%q, %d).Algorithm = %q, want %q",
+					tt.alg, tt.keySize, got.Algorithm, tt.wantAlg)
+			}
+			if got.Standard != tt.wantStd {
+				t.Errorf("LookupTargetForKeySize(%q, %d).Standard = %q, want %q",
+					tt.alg, tt.keySize, got.Standard, tt.wantStd)
 			}
 		})
 	}

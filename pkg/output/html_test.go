@@ -530,3 +530,55 @@ func TestReachSort(t *testing.T) {
 		}
 	}
 }
+
+// TestHTML_MigrationColumnExists verifies that when a finding carries migration
+// data the HTML report contains the Migration column header, the target
+// algorithm name, a collapsible <details> element, and the snippet language.
+func TestHTML_MigrationColumnExists(t *testing.T) {
+	f := algFinding("RSA-2048", findings.QRVulnerable, findings.SevCritical)
+	f.TargetAlgorithm = "ML-KEM-768"
+	f.TargetStandard = "NIST FIPS 203"
+	f.MigrationSnippet = &findings.MigrationSnippet{
+		Language:    "go",
+		Before:      `rsa.GenerateKey(rand.Reader, 2048)`,
+		After:       `kemkem.GenerateKey()`,
+		Explanation: "Replace RSA key exchange with ML-KEM-768",
+	}
+
+	result := basicResult()
+	result.Findings = []findings.UnifiedFinding{f}
+	result.Summary.TotalFindings = 1
+
+	out := render(t, result)
+
+	checks := []string{
+		"Migration",              // column header in thead
+		"ML-KEM-768",            // target algorithm name appears in output
+		"<details>",             // collapsible snippet element
+		"go",                    // snippet language in summary line
+	}
+	for _, want := range checks {
+		if !strings.Contains(out, want) {
+			t.Errorf("HTML migration output missing %q", want)
+		}
+	}
+}
+
+// TestHTML_MigrationColumnEmptyDash verifies that when a finding has no
+// migration data the Migration column renders the em-dash placeholder.
+func TestHTML_MigrationColumnEmptyDash(t *testing.T) {
+	f := algFinding("AES-256-GCM", findings.QRResistant, findings.SevInfo)
+	// MigrationSnippet is nil — no migration data
+
+	result := basicResult()
+	result.Findings = []findings.UnifiedFinding{f}
+	result.Summary.TotalFindings = 1
+
+	out := render(t, result)
+
+	// The Migration cell must fall through to the &mdash; branch.
+	// The template renders &mdash; for nil MigrationSnippet.
+	if !strings.Contains(out, "&mdash;") {
+		t.Error("expected &mdash; in Migration column when MigrationSnippet is nil")
+	}
+}

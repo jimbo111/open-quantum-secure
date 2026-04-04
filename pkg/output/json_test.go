@@ -232,3 +232,117 @@ func TestWriteJSON_ValidJSON(t *testing.T) {
 		t.Error("missing 'quantumReadinessScore' field")
 	}
 }
+
+// TestJSON_MigrationFields verifies that TargetAlgorithm, TargetStandard, and
+// MigrationSnippet (all four sub-fields) serialize correctly into the JSON
+// findings array.
+func TestJSON_MigrationFields(t *testing.T) {
+	ff := []findings.UnifiedFinding{
+		{
+			Location:        findings.Location{File: "auth.go", Line: 20},
+			Algorithm:       &findings.Algorithm{Name: "RSA-2048", Primitive: "asymmetric"},
+			Confidence:      findings.ConfidenceHigh,
+			SourceEngine:    "cipherscope",
+			QuantumRisk:     findings.QRVulnerable,
+			Severity:        findings.SevCritical,
+			TargetAlgorithm: "ML-KEM-768",
+			TargetStandard:  "NIST FIPS 203",
+			MigrationSnippet: &findings.MigrationSnippet{
+				Language:    "go",
+				Before:      `rsa.GenerateKey(rand.Reader, 2048)`,
+				After:       `kemkem.GenerateKey()`,
+				Explanation: "Replace RSA key exchange with ML-KEM-768",
+			},
+		},
+	}
+	result := BuildResult("0.1.0", "/test", []string{"cipherscope"}, ff)
+
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, result); err != nil {
+		t.Fatalf("WriteJSON error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	findingsArr, ok := parsed["findings"].([]interface{})
+	if !ok || len(findingsArr) == 0 {
+		t.Fatal("findings array is missing or empty")
+	}
+	f0 := findingsArr[0].(map[string]interface{})
+
+	// targetAlgorithm
+	if got, ok := f0["targetAlgorithm"].(string); !ok || got != "ML-KEM-768" {
+		t.Errorf("findings[0].targetAlgorithm = %v, want ML-KEM-768", f0["targetAlgorithm"])
+	}
+
+	// targetStandard
+	if got, ok := f0["targetStandard"].(string); !ok || got != "NIST FIPS 203" {
+		t.Errorf("findings[0].targetStandard = %v, want NIST FIPS 203", f0["targetStandard"])
+	}
+
+	// migrationSnippet — all four fields must be present
+	snippet, ok := f0["migrationSnippet"].(map[string]interface{})
+	if !ok {
+		t.Fatal("findings[0].migrationSnippet is missing or not an object")
+	}
+
+	if got, ok := snippet["language"].(string); !ok || got != "go" {
+		t.Errorf("migrationSnippet.language = %v, want go", snippet["language"])
+	}
+	if got, ok := snippet["before"].(string); !ok || got == "" {
+		t.Errorf("migrationSnippet.before must be non-empty, got %v", snippet["before"])
+	}
+	if got, ok := snippet["after"].(string); !ok || got == "" {
+		t.Errorf("migrationSnippet.after must be non-empty, got %v", snippet["after"])
+	}
+	if _, ok := snippet["explanation"]; !ok {
+		t.Error("migrationSnippet.explanation field is absent")
+	}
+}
+
+// TestJSON_MigrationFieldsOmittedWhenEmpty verifies that targetAlgorithm and
+// migrationSnippet keys are absent from JSON output when not set on a finding
+// (omitempty semantics on the struct tags).
+func TestJSON_MigrationFieldsOmittedWhenEmpty(t *testing.T) {
+	ff := []findings.UnifiedFinding{
+		{
+			Location:    findings.Location{File: "crypto.go", Line: 5},
+			Algorithm:   &findings.Algorithm{Name: "AES-256-GCM", Primitive: "ae"},
+			Confidence:  findings.ConfidenceHigh,
+			SourceEngine: "cipherscope",
+			QuantumRisk: findings.QRResistant,
+			Severity:    findings.SevInfo,
+			// TargetAlgorithm, TargetStandard, MigrationSnippet all zero/nil
+		},
+	}
+	result := BuildResult("0.1.0", "/test", []string{"cipherscope"}, ff)
+
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, result); err != nil {
+		t.Fatalf("WriteJSON error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	findingsArr, ok := parsed["findings"].([]interface{})
+	if !ok || len(findingsArr) == 0 {
+		t.Fatal("findings array is missing or empty")
+	}
+	f0 := findingsArr[0].(map[string]interface{})
+
+	if _, present := f0["targetAlgorithm"]; present {
+		t.Error("findings[0].targetAlgorithm must be absent when TargetAlgorithm is empty (omitempty)")
+	}
+	if _, present := f0["targetStandard"]; present {
+		t.Error("findings[0].targetStandard must be absent when TargetStandard is empty (omitempty)")
+	}
+	if _, present := f0["migrationSnippet"]; present {
+		t.Error("findings[0].migrationSnippet must be absent when MigrationSnippet is nil (omitempty)")
+	}
+}

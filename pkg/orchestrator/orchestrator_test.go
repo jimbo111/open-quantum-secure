@@ -1006,6 +1006,369 @@ func TestScan_EmptyDirectory_ReturnsNoFindings(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// PQC migration wiring: classifyFindings and attachMigrationSnippets
+// ---------------------------------------------------------------------------
+
+// TestClassifyFindingsPopulatesTargets verifies that classifyFindings sets
+// TargetAlgorithm and TargetStandard to the correct NIST PQC values (or
+// leaves them empty) for a representative set of algorithm inputs.
+func TestClassifyFindingsPopulatesTargets(t *testing.T) {
+	tests := []struct {
+		name            string
+		finding         findings.UnifiedFinding
+		wantRisk        findings.QuantumRisk
+		wantTarget      string
+		wantStandard    string
+	}{
+		{
+			name: "RSA-2048 signature → ML-DSA-44 FIPS 204",
+			finding: findings.UnifiedFinding{
+				Algorithm: &findings.Algorithm{Name: "RSA-2048", Primitive: "signature", KeySize: 2048},
+			},
+			wantRisk:     findings.QRVulnerable,
+			wantTarget:   "ML-DSA-44",
+			wantStandard: "FIPS 204",
+		},
+		{
+			name: "ECDH key-agree → ML-KEM-768 FIPS 203",
+			finding: findings.UnifiedFinding{
+				Algorithm: &findings.Algorithm{Name: "ECDH", Primitive: "key-agree"},
+			},
+			wantRisk:     findings.QRVulnerable,
+			wantTarget:   "ML-KEM-768",
+			wantStandard: "FIPS 203",
+		},
+		{
+			name: "AES-256 symmetric → resistant, no target",
+			finding: findings.UnifiedFinding{
+				Algorithm: &findings.Algorithm{Name: "AES-256-GCM", Primitive: "ae", KeySize: 256},
+			},
+			wantRisk:     findings.QRResistant,
+			wantTarget:   "",
+			wantStandard: "",
+		},
+		{
+			name: "ML-KEM-768 → safe, no target",
+			finding: findings.UnifiedFinding{
+				Algorithm: &findings.Algorithm{Name: "ML-KEM-768", Primitive: "kem"},
+			},
+			wantRisk:     findings.QRSafe,
+			wantTarget:   "",
+			wantStandard: "",
+		},
+		{
+			name: "MD5 hash → SHA-256 deprecated, no FIPS standard",
+			finding: findings.UnifiedFinding{
+				Algorithm: &findings.Algorithm{Name: "MD5", Primitive: "hash"},
+			},
+			wantRisk:     findings.QRDeprecated,
+			wantTarget:   "SHA-256",
+			wantStandard: "",
+		},
+		{
+			name: "nil Algorithm → no panic, TargetAlgorithm stays empty",
+			finding: findings.UnifiedFinding{
+				Algorithm: nil,
+			},
+			wantRisk:     "",
+			wantTarget:   "",
+			wantStandard: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ff := []findings.UnifiedFinding{tt.finding}
+
+			// Must not panic even with nil Algorithm.
+			classifyFindings(ff)
+
+			f := ff[0]
+			if tt.wantRisk != "" && f.QuantumRisk != tt.wantRisk {
+				t.Errorf("QuantumRisk = %q, want %q", f.QuantumRisk, tt.wantRisk)
+			}
+			if f.TargetAlgorithm != tt.wantTarget {
+				t.Errorf("TargetAlgorithm = %q, want %q", f.TargetAlgorithm, tt.wantTarget)
+			}
+			if f.TargetStandard != tt.wantStandard {
+				t.Errorf("TargetStandard = %q, want %q", f.TargetStandard, tt.wantStandard)
+			}
+		})
+	}
+}
+
+// TestAttachMigrationSnippets verifies snippet generation for the full matrix
+// of language extensions and algorithm types, including nil/empty/unknown edge cases.
+func TestAttachMigrationSnippets(t *testing.T) {
+	tests := []struct {
+		name          string
+		finding       findings.UnifiedFinding
+		wantLang      string  // expected Snippet.Language; "" means snippet must be nil
+		wantBeforeSub string  // substring that must appear in Before (if lang != "")
+		wantAfterSub  string  // substring that must appear in After (if lang != "")
+	}{
+		{
+			name: ".go RSA signature + ML-DSA-65 → go snippet with rsa/liboqs",
+			finding: findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/auth.go"},
+				Algorithm:       &findings.Algorithm{Name: "RSA", Primitive: "signature"},
+				TargetAlgorithm: "ML-DSA-65",
+			},
+			wantLang:      "go",
+			wantBeforeSub: "rsa",
+			wantAfterSub:  "liboqs",
+		},
+		{
+			name: ".py ECDH key-agree + ML-KEM-768 → python snippet",
+			finding: findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/crypto.py"},
+				Algorithm:       &findings.Algorithm{Name: "ECDH", Primitive: "key-agree"},
+				TargetAlgorithm: "ML-KEM-768",
+			},
+			wantLang:      "python",
+			wantBeforeSub: "",
+			wantAfterSub:  "",
+		},
+		{
+			name: ".swift Ed25519 signature + ML-DSA-44 → swift snippet",
+			finding: findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/Signer.swift"},
+				Algorithm:       &findings.Algorithm{Name: "Ed25519", Primitive: "signature"},
+				TargetAlgorithm: "ML-DSA-44",
+			},
+			wantLang:      "swift",
+			wantBeforeSub: "",
+			wantAfterSub:  "",
+		},
+		{
+			name: "nil Algorithm → MigrationSnippet stays nil",
+			finding: findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/auth.go"},
+				Algorithm:       nil,
+				TargetAlgorithm: "",
+			},
+			wantLang: "",
+		},
+		{
+			name: "empty TargetAlgorithm → MigrationSnippet stays nil",
+			finding: findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/auth.go"},
+				Algorithm:       &findings.Algorithm{Name: "RSA", Primitive: "signature"},
+				TargetAlgorithm: "",
+			},
+			wantLang: "",
+		},
+		{
+			name: ".xyz unknown extension → MigrationSnippet stays nil",
+			finding: findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/auth.xyz"},
+				Algorithm:       &findings.Algorithm{Name: "RSA", Primitive: "signature"},
+				TargetAlgorithm: "ML-DSA-65",
+			},
+			wantLang: "",
+		},
+		{
+			name: "ML-KEM-768 safe algorithm → TargetAlgorithm empty, snippet nil",
+			finding: findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/crypto.go"},
+				Algorithm:       &findings.Algorithm{Name: "ML-KEM-768", Primitive: "kem"},
+				TargetAlgorithm: "", // safe: classifyFindings leaves this empty
+			},
+			wantLang: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ff := []findings.UnifiedFinding{tt.finding}
+
+			// Must not panic.
+			attachMigrationSnippets(ff)
+
+			f := ff[0]
+			if tt.wantLang == "" {
+				if f.MigrationSnippet != nil {
+					t.Errorf("MigrationSnippet = %+v, want nil", f.MigrationSnippet)
+				}
+				return
+			}
+
+			if f.MigrationSnippet == nil {
+				t.Fatalf("MigrationSnippet is nil, want Language=%q", tt.wantLang)
+			}
+			if f.MigrationSnippet.Language != tt.wantLang {
+				t.Errorf("MigrationSnippet.Language = %q, want %q", f.MigrationSnippet.Language, tt.wantLang)
+			}
+			if tt.wantBeforeSub != "" {
+				found := false
+				s := f.MigrationSnippet.Before
+				sub := tt.wantBeforeSub
+				for i := 0; i+len(sub) <= len(s); i++ {
+					if s[i:i+len(sub)] == sub {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("MigrationSnippet.Before does not contain %q; got:\n%s", sub, s)
+				}
+			}
+			if tt.wantAfterSub != "" {
+				found := false
+				s := f.MigrationSnippet.After
+				sub := tt.wantAfterSub
+				for i := 0; i+len(sub) <= len(s); i++ {
+					if s[i:i+len(sub)] == sub {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("MigrationSnippet.After does not contain %q; got:\n%s", sub, s)
+				}
+			}
+		})
+	}
+}
+
+// TestClassifyThenAttachSnippets is an integration test for the two-stage
+// migration pipeline: classifyFindings followed by attachMigrationSnippets.
+// It verifies that the TargetAlgorithm written by the first stage is correctly
+// consumed by the second stage to produce a populated snippet.
+func TestClassifyThenAttachSnippets(t *testing.T) {
+	ff := []findings.UnifiedFinding{
+		{
+			Location:  findings.Location{File: "/repo/auth.go", Line: 10},
+			Algorithm: &findings.Algorithm{Name: "RSA-2048", Primitive: "signature", KeySize: 2048},
+		},
+	}
+
+	// Stage 1: quantum risk classification must set TargetAlgorithm.
+	classifyFindings(ff)
+
+	f := ff[0]
+	if f.QuantumRisk != findings.QRVulnerable {
+		t.Errorf("stage 1: QuantumRisk = %q, want %q", f.QuantumRisk, findings.QRVulnerable)
+	}
+	if f.TargetAlgorithm != "ML-DSA-44" {
+		t.Errorf("stage 1: TargetAlgorithm = %q, want ML-DSA-44", f.TargetAlgorithm)
+	}
+
+	// Stage 2: snippet generation must consume the TargetAlgorithm set above.
+	attachMigrationSnippets(ff)
+
+	f = ff[0]
+	if f.MigrationSnippet == nil {
+		t.Fatalf("stage 2: MigrationSnippet is nil after attachMigrationSnippets")
+	}
+	if f.MigrationSnippet.Language != "go" {
+		t.Errorf("stage 2: MigrationSnippet.Language = %q, want go", f.MigrationSnippet.Language)
+	}
+	// The Go RSA signing snippet's Before must reference the rsa package.
+	found := false
+	for i := 0; i+len("rsa") <= len(f.MigrationSnippet.Before); i++ {
+		if f.MigrationSnippet.Before[i:i+3] == "rsa" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("MigrationSnippet.Before does not contain 'rsa':\n%s", f.MigrationSnippet.Before)
+	}
+}
+
+// TestAttachMigrationSnippets_LargeSet is a performance/sanity test that runs
+// attachMigrationSnippets over 500 findings. It verifies no panic occurs and
+// that the expected distribution of nil vs non-nil snippets is maintained.
+func TestAttachMigrationSnippets_LargeSet(t *testing.T) {
+	const n = 500
+
+	// Build a deterministic mix of findings cycling through four patterns:
+	//   0 mod 4 — RSA in .go → snippet expected
+	//   1 mod 4 — ECDH in .py → snippet expected
+	//   2 mod 4 — AES-256 (safe) → snippet nil (TargetAlgorithm empty)
+	//   3 mod 4 — ML-KEM-768 (safe) → snippet nil (TargetAlgorithm empty)
+	ff := make([]findings.UnifiedFinding, n)
+	for i := range ff {
+		switch i % 4 {
+		case 0:
+			ff[i] = findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/auth.go", Line: i},
+				Algorithm:       &findings.Algorithm{Name: "RSA-2048", Primitive: "signature", KeySize: 2048},
+				TargetAlgorithm: "ML-DSA-44",
+			}
+		case 1:
+			ff[i] = findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/crypto.py", Line: i},
+				Algorithm:       &findings.Algorithm{Name: "ECDH", Primitive: "key-agree"},
+				TargetAlgorithm: "ML-KEM-768",
+			}
+		case 2:
+			ff[i] = findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/sym.go", Line: i},
+				Algorithm:       &findings.Algorithm{Name: "AES-256-GCM", Primitive: "ae", KeySize: 256},
+				TargetAlgorithm: "", // resistant — no target
+			}
+		case 3:
+			ff[i] = findings.UnifiedFinding{
+				Location:        findings.Location{File: "/repo/safe.go", Line: i},
+				Algorithm:       &findings.Algorithm{Name: "ML-KEM-768", Primitive: "kem"},
+				TargetAlgorithm: "", // safe — no target
+			}
+		}
+	}
+
+	// Must not panic regardless of input size.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("attachMigrationSnippets panicked on large set: %v", r)
+		}
+	}()
+
+	attachMigrationSnippets(ff)
+
+	var withSnippet, withoutSnippet int
+	for i := range ff {
+		if ff[i].MigrationSnippet != nil {
+			withSnippet++
+		} else {
+			withoutSnippet++
+		}
+	}
+
+	// Patterns 0 and 1 (half the set) should have snippets; patterns 2 and 3 should not.
+	wantWith := n / 2
+	wantWithout := n / 2
+	if withSnippet != wantWith {
+		t.Errorf("findings with snippet = %d, want %d", withSnippet, wantWith)
+	}
+	if withoutSnippet != wantWithout {
+		t.Errorf("findings without snippet = %d, want %d", withoutSnippet, wantWithout)
+	}
+
+	// Spot-check: every pattern-0 finding (RSA .go) must have Language="go".
+	for i := 0; i < n; i += 4 {
+		if ff[i].MigrationSnippet == nil {
+			t.Errorf("finding[%d] (RSA .go): snippet is nil", i)
+			continue
+		}
+		if ff[i].MigrationSnippet.Language != "go" {
+			t.Errorf("finding[%d]: Language = %q, want go", i, ff[i].MigrationSnippet.Language)
+		}
+	}
+	// Spot-check: every pattern-1 finding (ECDH .py) must have Language="python".
+	for i := 1; i < n; i += 4 {
+		if ff[i].MigrationSnippet == nil {
+			t.Errorf("finding[%d] (ECDH .py): snippet is nil", i)
+			continue
+		}
+		if ff[i].MigrationSnippet.Language != "python" {
+			t.Errorf("finding[%d]: Language = %q, want python", i, ff[i].MigrationSnippet.Language)
+		}
+	}
+}
+
 func TestFilterByChangedFiles_CaseSensitive(t *testing.T) {
 	ff := []findings.UnifiedFinding{
 		{Location: findings.Location{File: "/repo/src/Main.go", Line: 10}, Algorithm: &findings.Algorithm{Name: "RSA"}},

@@ -483,9 +483,9 @@ func TestGoKEMNoStrayBlankLine(t *testing.T) {
 // Bouncy Castle's getInstance call (ML-KEM-768 → ML-KEM, ML-DSA-65 → ML-DSA).
 func TestJavaBCAlgStrip(t *testing.T) {
 	tests := []struct {
-		alg      string
-		family   string
-		wantAlg  string // expected in After snippet
+		alg     string
+		family  string
+		wantAlg string // expected in After snippet
 	}{
 		{"ML-KEM-768", "kem", "ML-KEM"},
 		{"ML-DSA-65", "sign", "ML-DSA"},
@@ -510,4 +510,297 @@ func TestJavaBCAlgStrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGenerateSnippet_EdgeCases covers boundary and adversarial inputs for
+// GenerateSnippet, verifying nil-safety and correct nil/non-nil returns.
+func TestGenerateSnippet_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name         string
+		filePath     string
+		classicalAlg string
+		primitive    string
+		targetAlg    string
+		wantNil      bool
+		// When wantNil is false, these must be non-empty in the returned snippet.
+		wantLang string
+	}{
+		// Empty filePath: filepath.Ext("") == "" → langFromExt("") == "" → nil.
+		{
+			name:         "empty filePath",
+			filePath:     "",
+			classicalAlg: "RSA",
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-65",
+			wantNil:      true,
+		},
+		// Empty classicalAlg + empty primitive: classicalAlgFamily("") == "" and
+		// neither isSigning nor isKEM matches "" → nil.
+		{
+			name:         "empty classicalAlg and primitive",
+			filePath:     "internal/auth.go",
+			classicalAlg: "",
+			primitive:    "",
+			targetAlg:    "ML-DSA-65",
+			wantNil:      true,
+		},
+		// Empty targetAlg with a recognized sign algorithm: falls back to ML-DSA-65.
+		{
+			name:         "empty targetAlg defaults for signing",
+			filePath:     "internal/auth.go",
+			classicalAlg: "RSA",
+			primitive:    "signature",
+			targetAlg:    "",
+			wantNil:      false,
+			wantLang:     "go",
+		},
+		// Empty targetAlg with a recognized KEM algorithm: falls back to ML-KEM-768.
+		{
+			name:         "empty targetAlg defaults for kem",
+			filePath:     "transport/exchange.go",
+			classicalAlg: "ECDH",
+			primitive:    "key-exchange",
+			targetAlg:    "",
+			wantNil:      false,
+			wantLang:     "go",
+		},
+		// Special chars in algorithm name: extractBaseAlg("RSA/OAEP") finds no
+		// hyphen-digit boundary, so baseAlg is "RSA/OAEP".
+		// classicalAlgFamily("RSA/OAEP") returns "" (no match).
+		// primitive "signature" → family "sign" via isSigning → snippet produced.
+		// Must not panic.
+		{
+			name:         "special chars RSA/OAEP with primitive hint",
+			filePath:     "internal/crypto.go",
+			classicalAlg: "RSA/OAEP",
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-65",
+			wantNil:      false,
+			wantLang:     "go",
+		},
+		// Very long algorithm name (200 chars): must not panic.
+		// The 200-char 'A' name: isSafePQC → false, extractBaseAlg returns it
+		// unchanged (no hyphens), classicalAlgFamily → "", but isSigning("signature")
+		// resolves family to "sign" → snippet IS produced.
+		{
+			name:         "very long algorithm name",
+			filePath:     "internal/crypto.go",
+			classicalAlg: strings.Repeat("A", 200),
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-65",
+			wantNil:      false,
+			wantLang:     "go",
+		},
+		// File path with spaces: filepath.Ext resolves correctly; must work.
+		{
+			name:         "file path with spaces",
+			filePath:     "/path to/my file.go",
+			classicalAlg: "RSA",
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-65",
+			wantNil:      false,
+			wantLang:     "go",
+		},
+		// File with no extension: langFromExt("") returns "" → nil.
+		{
+			name:         "file with no extension Makefile",
+			filePath:     "/Makefile",
+			classicalAlg: "RSA",
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-65",
+			wantNil:      true,
+		},
+		// Compound name "ECDSA-P256-SHA256": extractBaseAlg finds "-P256" (hyphen-P-digit)
+		// in the second loop → returns "ECDSA". classicalAlgFamily("ECDSA") == "sign".
+		{
+			name:         "compound ECDSA-P256-SHA256 resolves to ECDSA",
+			filePath:     "internal/sign.go",
+			classicalAlg: "ECDSA-P256-SHA256",
+			primitive:    "signature",
+			targetAlg:    "ML-DSA-44",
+			wantNil:      false,
+			wantLang:     "go",
+		},
+		// Compound name "AES-256-GCM": extractBaseAlg finds "-2" (hyphen-digit) → "AES".
+		// classicalAlgFamily("AES") returns "" and no primitive hint → nil.
+		{
+			name:         "compound AES-256-GCM no family and no primitive",
+			filePath:     "internal/crypto.go",
+			classicalAlg: "AES-256-GCM",
+			primitive:    "",
+			targetAlg:    "",
+			wantNil:      true,
+		},
+		// PQC algorithm "ML-DSA-44": isSafePQC fires → nil.
+		{
+			name:         "PQC name ML-DSA-44 is safe",
+			filePath:     "internal/pqc.go",
+			classicalAlg: "ML-DSA-44",
+			primitive:    "signature",
+			targetAlg:    "",
+			wantNil:      true,
+		},
+		// Pre-standard "DILITHIUM-2": isSafePQC checks HasPrefix("DILITHIUM-2", "DILITHIUM-") → true → nil.
+		{
+			name:         "pre-standard DILITHIUM-2 is safe",
+			filePath:     "internal/pqc.go",
+			classicalAlg: "DILITHIUM-2",
+			primitive:    "signature",
+			targetAlg:    "",
+			wantNil:      true,
+		},
+		// Pre-standard "KYBER-768": isSafePQC checks HasPrefix("KYBER-768", "KYBER-") → true → nil.
+		{
+			name:         "pre-standard KYBER-768 is safe",
+			filePath:     "internal/pqc.go",
+			classicalAlg: "KYBER-768",
+			primitive:    "kem",
+			targetAlg:    "",
+			wantNil:      true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Wrap in a deferred recover so a panic fails the test cleanly
+			// instead of crashing the whole suite.
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("GenerateSnippet panicked: %v", r)
+				}
+			}()
+
+			got := GenerateSnippet(tc.filePath, tc.classicalAlg, tc.primitive, tc.targetAlg)
+
+			if tc.wantNil {
+				if got != nil {
+					t.Fatalf("want nil, got snippet{Language:%q}", got.Language)
+				}
+				return
+			}
+
+			if got == nil {
+				t.Fatal("want non-nil snippet, got nil")
+			}
+			if tc.wantLang != "" && got.Language != tc.wantLang {
+				t.Errorf("Language: want %q, got %q", tc.wantLang, got.Language)
+			}
+			if got.Before == "" {
+				t.Error("Before must not be empty for a valid snippet")
+			}
+			if got.After == "" {
+				t.Error("After must not be empty for a valid snippet")
+			}
+			if got.Explanation == "" {
+				t.Error("Explanation must not be empty for a valid snippet")
+			}
+		})
+	}
+}
+
+// TestGenerateSnippet_EdgeCases_LongAlg re-checks the 200-char case with a
+// primitive hint so we confirm the snippet IS produced (covers the sign family
+// resolution path through isSigning, not classicalAlgFamily).
+func TestGenerateSnippet_EdgeCases_LongAlg(t *testing.T) {
+	longAlg := strings.Repeat("A", 200)
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("GenerateSnippet panicked on 200-char alg: %v", r)
+		}
+	}()
+	// The 200-char name passes isSafePQC (none of the PQC prefixes match),
+	// extractBaseAlg returns the full 200-char string (no hyphen-digit boundary),
+	// classicalAlgFamily returns "" because the name is not in the switch,
+	// but isSigning("signature") → family "sign" → snippet is produced.
+	got := GenerateSnippet("internal/crypto.go", longAlg, "signature", "ML-DSA-65")
+	if got == nil {
+		t.Fatal("want snippet for long alg with primitive hint, got nil")
+	}
+	if got.Language != "go" {
+		t.Errorf("Language: want %q, got %q", "go", got.Language)
+	}
+}
+
+// TestExtractBaseAlg is a dedicated table-driven test for extractBaseAlg.
+func TestExtractBaseAlg(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// Hyphen followed immediately by a digit — first loop fires.
+		{"RSA-2048", "RSA"},
+		{"AES-256-GCM", "AES"},   // first hyphen+digit wins; "GCM" is never reached
+		{"SHA-256", "SHA"},        // hyphen at 3, next char '2' (digit)
+		{"ML-DSA-44", "ML-DSA"},   // hyphen at 2 is before 'D' (not digit); hyphen at 6 before '4' (digit) → "ML-DSA"
+		{"3DES", "3DES"},          // no hyphen at all
+		{"RSA", "RSA"},            // no hyphen at all
+		// Hyphen followed by P+digit — second loop fires.
+		{"ECDSA-P256", "ECDSA"},
+		{"ECDSA-P256-SHA256", "ECDSA"}, // first loop finds no hyphen+digit in "ECDSA-P256"; second loop finds "-P2" → "ECDSA"
+		// No hyphen-digit boundary of either kind.
+		{"X25519", "X25519"},      // '2' is part of the name with no preceding hyphen
+		{"Ed25519", "Ed25519"},    // same: no hyphen before any digit
+		// Empty input must not panic and returns itself.
+		{"", ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got := extractBaseAlg(tc.input)
+			if got != tc.want {
+				t.Errorf("extractBaseAlg(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// FuzzGenerateSnippet verifies that GenerateSnippet never panics on arbitrary
+// inputs and that any non-nil result has all three text fields populated.
+func FuzzGenerateSnippet(f *testing.F) {
+	// Seed corpus: known-good inputs that exercise all major code paths.
+	type seed struct {
+		filePath, classicalAlg, primitive, targetAlg string
+	}
+	seeds := []seed{
+		{"internal/auth/signer.go", "RSA", "signature", "ML-DSA-65"},
+		{"keys.py", "ECDH", "key-agree", "ML-KEM-768"},
+		{"Crypto.java", "ECDSA", "signature", "ML-DSA-44"},
+		{"src/transport/handshake.rs", "X25519", "key-exchange", "ML-KEM-768"},
+		{"deploy/nginx.yaml", "RSA", "signature", ""},
+		{"internal/pqc.go", "ML-DSA-65", "signature", ""},
+		{"internal/pqc.go", "KYBER-768", "kem", ""},
+		{"", "RSA", "signature", "ML-DSA-65"},
+		{"/Makefile", "RSA", "signature", "ML-DSA-65"},
+		{"internal/crypto.go", "AES-256-GCM", "", ""},
+	}
+	for _, s := range seeds {
+		f.Add(s.filePath, s.classicalAlg, s.primitive, s.targetAlg)
+	}
+
+	f.Fuzz(func(t *testing.T, filePath, classicalAlg, primitive, targetAlg string) {
+		// Must never panic.
+		var got *Snippet
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("GenerateSnippet panicked: filePath=%q classicalAlg=%q primitive=%q targetAlg=%q panic=%v",
+						filePath, classicalAlg, primitive, targetAlg, r)
+				}
+			}()
+			got = GenerateSnippet(filePath, classicalAlg, primitive, targetAlg)
+		}()
+
+		// When a snippet is returned all three text fields must be non-empty.
+		if got != nil {
+			if got.Language == "" {
+				t.Errorf("non-nil snippet has empty Language: filePath=%q classicalAlg=%q", filePath, classicalAlg)
+			}
+			if got.Before == "" {
+				t.Errorf("non-nil snippet has empty Before: filePath=%q classicalAlg=%q", filePath, classicalAlg)
+			}
+			if got.After == "" {
+				t.Errorf("non-nil snippet has empty After: filePath=%q classicalAlg=%q", filePath, classicalAlg)
+			}
+		}
+	})
 }
