@@ -35,6 +35,8 @@ type Classification struct {
 	Recommendation  string   `json:"recommendation,omitempty"`
 	HNDLRisk        string   `json:"hndlRisk,omitempty"`        // "immediate", "deferred", or "" for non-asymmetric
 	MigrationEffort string   `json:"migrationEffort,omitempty"` // "simple", "moderate", or "complex"
+	TargetAlgorithm string   `json:"targetAlgorithm,omitempty"` // PQC replacement (e.g. "ML-DSA-65", "ML-KEM-768")
+	TargetStandard  string   `json:"targetStandard,omitempty"`  // NIST standard (e.g. "FIPS 204", "FIPS 203")
 }
 
 // HNDL risk levels for Harvest Now, Decrypt Later attacks.
@@ -129,10 +131,13 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 
 	// 1. Check deprecated first (classically broken)
 	if deprecatedAlgorithms[baseName] || deprecatedAlgorithms[name] {
+		t := LookupTarget(baseName)
 		return Classification{
-			Risk:           RiskDeprecated,
-			Severity:       SeverityCritical,
-			Recommendation: deprecatedRecommendation(baseName),
+			Risk:            RiskDeprecated,
+			Severity:        SeverityCritical,
+			Recommendation:  deprecatedRecommendation(baseName),
+			TargetAlgorithm: t.Algorithm,
+			TargetStandard:  t.Standard,
 		}
 	}
 
@@ -155,10 +160,13 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 
 	// 2a. Check K-PQC eliminated candidates (quantum-vulnerable)
 	if kpqcEliminatedCandidates[baseName] {
+		t := LookupTarget(baseName)
 		return Classification{
-			Risk:           RiskVulnerable,
-			Severity:       SeverityMedium,
-			Recommendation: "K-PQC eliminated candidate. Migrate to SMAUG-T (KEM) or HAETAE (signature).",
+			Risk:            RiskVulnerable,
+			Severity:        SeverityMedium,
+			Recommendation:  "K-PQC eliminated candidate. Migrate to SMAUG-T (KEM) or HAETAE (signature).",
+			TargetAlgorithm: t.Algorithm,
+			TargetStandard:  t.Standard,
 		}
 	}
 
@@ -171,20 +179,26 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 	switch normalizePrimitive(primitive) {
 	case "signature":
 		if !pqcSafeFamilies[baseName] {
+			t := LookupTarget(baseName)
 			return Classification{
-				Risk:           RiskVulnerable,
-				Severity:       SeverityHigh,
-				HNDLRisk:       HNDLDeferred,
-				Recommendation: "HNDL risk: DEFERRED — unrecognized signature algorithm. Review for quantum safety.",
+				Risk:            RiskVulnerable,
+				Severity:        SeverityHigh,
+				HNDLRisk:        HNDLDeferred,
+				Recommendation:  "HNDL risk: DEFERRED — unrecognized signature algorithm. Review for quantum safety.",
+				TargetAlgorithm: t.Algorithm,
+				TargetStandard:  t.Standard,
 			}
 		}
 	case "pke", "key-agree", "kem":
 		if !pqcSafeFamilies[baseName] {
+			t := LookupTarget(baseName)
 			return Classification{
-				Risk:           RiskVulnerable,
-				Severity:       SeverityCritical,
-				HNDLRisk:       HNDLImmediate,
-				Recommendation: "HNDL risk: IMMEDIATE — unrecognized key exchange algorithm. Review for quantum safety.",
+				Risk:            RiskVulnerable,
+				Severity:        SeverityCritical,
+				HNDLRisk:        HNDLImmediate,
+				Recommendation:  "HNDL risk: IMMEDIATE — unrecognized key exchange algorithm. Review for quantum safety.",
+				TargetAlgorithm: t.Algorithm,
+				TargetStandard:  t.Standard,
 			}
 		}
 	case "rng":
@@ -212,28 +226,35 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 // classifyVulnerable returns classification for known quantum-vulnerable algorithms.
 func classifyVulnerable(baseName, primitive string) Classification {
 	p := normalizePrimitive(primitive)
+	t := LookupTarget(baseName)
 	switch p {
 	case "key-agree", "kem", "pke":
 		return Classification{
-			Risk:           RiskVulnerable,
-			Severity:       SeverityCritical,
-			HNDLRisk:       HNDLImmediate,
-			Recommendation: "HNDL risk: IMMEDIATE — encrypted data can be harvested now and decrypted when quantum computers arrive. Migrate to ML-KEM (FIPS 203). Transition: use a classical+ML-KEM-768 hybrid key exchange (deployed in TLS 1.3). CNSA 2.0 deadline: 2030.",
+			Risk:            RiskVulnerable,
+			Severity:        SeverityCritical,
+			HNDLRisk:        HNDLImmediate,
+			Recommendation:  "HNDL risk: IMMEDIATE — encrypted data can be harvested now and decrypted when quantum computers arrive. Migrate to ML-KEM (FIPS 203). Transition: use a classical+ML-KEM-768 hybrid key exchange (deployed in TLS 1.3). CNSA 2.0 deadline: 2030.",
+			TargetAlgorithm: t.Algorithm,
+			TargetStandard:  t.Standard,
 		}
 	case "signature":
 		return Classification{
-			Risk:           RiskVulnerable,
-			Severity:       SeverityHigh,
-			HNDLRisk:       HNDLDeferred,
-			Recommendation: "HNDL risk: DEFERRED — only future signatures are at risk (past signatures remain valid). Migrate to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205). Transition: use a composite classical+ML-DSA-65 signature (IETF draft) for backward compatibility. CNSA 2.0 deadline: 2035.",
+			Risk:            RiskVulnerable,
+			Severity:        SeverityHigh,
+			HNDLRisk:        HNDLDeferred,
+			Recommendation:  "HNDL risk: DEFERRED — only future signatures are at risk (past signatures remain valid). Migrate to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205). Transition: use a composite classical+ML-DSA-65 signature (IETF draft) for backward compatibility. CNSA 2.0 deadline: 2035.",
+			TargetAlgorithm: t.Algorithm,
+			TargetStandard:  t.Standard,
 		}
 	default:
 		// Unknown primitive for vulnerable algorithm — assume immediate (conservative).
 		return Classification{
-			Risk:           RiskVulnerable,
-			Severity:       SeverityHigh,
-			HNDLRisk:       HNDLImmediate,
-			Recommendation: vulnerableRecommendation(baseName),
+			Risk:            RiskVulnerable,
+			Severity:        SeverityHigh,
+			HNDLRisk:        HNDLImmediate,
+			Recommendation:  vulnerableRecommendation(baseName),
+			TargetAlgorithm: t.Algorithm,
+			TargetStandard:  t.Standard,
 		}
 	}
 }
@@ -298,9 +319,10 @@ func classifySymmetric(baseName, upperName string, keySize int, isHash bool) Cla
 		effectiveSize := hashOutputSize(baseName, upperName, keySize)
 		if effectiveSize > 0 && effectiveSize < 256 {
 			return Classification{
-				Risk:           RiskWeakened,
-				Severity:       SeverityLow,
-				Recommendation: "Consider upgrading to SHA-256+ or SHA-3 for quantum margin",
+				Risk:            RiskWeakened,
+				Severity:        SeverityLow,
+				Recommendation:  "Consider upgrading to SHA-256+ or SHA-3 for quantum margin",
+				TargetAlgorithm: "SHA-256",
 			}
 		}
 		if quantumResistantHash[strings.ToUpper(baseName)] {
@@ -332,16 +354,18 @@ func classifySymmetric(baseName, upperName string, keySize int, isHash bool) Cla
 	if effectiveKeySize > 0 {
 		if effectiveKeySize < 128 {
 			return Classification{
-				Risk:           RiskWeakened,
-				Severity:       SeverityMedium,
-				Recommendation: "Key size too small. Upgrade to 256-bit key for quantum safety.",
+				Risk:            RiskWeakened,
+				Severity:        SeverityMedium,
+				Recommendation:  "Key size too small. Upgrade to 256-bit key for quantum safety.",
+				TargetAlgorithm: "AES-256",
 			}
 		}
 		if effectiveKeySize < 256 {
 			return Classification{
-				Risk:           RiskWeakened,
-				Severity:       SeverityLow,
-				Recommendation: "128-bit symmetric is weakened by Grover's algorithm (~64-bit effective). Consider 256-bit.",
+				Risk:            RiskWeakened,
+				Severity:        SeverityLow,
+				Recommendation:  "128-bit symmetric is weakened by Grover's algorithm (~64-bit effective). Consider 256-bit.",
+				TargetAlgorithm: "AES-256",
 			}
 		}
 		// 256-bit+ is quantum-resistant

@@ -19,6 +19,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 	"github.com/jimbo111/open-quantum-secure/pkg/impact"
 	"github.com/jimbo111/open-quantum-secure/pkg/impact/forward"
+	"github.com/jimbo111/open-quantum-secure/pkg/migration"
 	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
 	"github.com/jimbo111/open-quantum-secure/pkg/registry"
 	"github.com/jimbo111/open-quantum-secure/pkg/suppress"
@@ -599,6 +600,7 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 	// Classify quantum risk for each finding
 	classifyStart := time.Now()
 	classifyFindings(allFindings)
+	attachMigrationSnippets(allFindings)
 	metrics.ClassifyDur = time.Since(classifyStart)
 
 	// Run impact analysis when requested and mode is full (not diff/quick).
@@ -804,10 +806,36 @@ func classifyFindings(ff []findings.UnifiedFinding) {
 			f.Recommendation = c.Recommendation
 			f.HNDLRisk = c.HNDLRisk
 			f.MigrationEffort = quantum.ClassifyEffort(c, f.Algorithm.Primitive, f.SourceEngine == "config-scanner")
+			f.TargetAlgorithm = c.TargetAlgorithm
+			f.TargetStandard = c.TargetStandard
 		} else if f.Dependency != nil {
 			// Dependencies get unknown classification (need deeper analysis)
 			f.QuantumRisk = findings.QRUnknown
 			f.Severity = findings.SevInfo
+		}
+	}
+}
+
+// attachMigrationSnippets generates language-specific PQC migration code for each finding.
+func attachMigrationSnippets(ff []findings.UnifiedFinding) {
+	for i := range ff {
+		f := &ff[i]
+		if f.Algorithm == nil || f.TargetAlgorithm == "" {
+			continue
+		}
+		snippet := migration.GenerateSnippet(
+			f.Location.File,
+			f.Algorithm.Name,
+			f.Algorithm.Primitive,
+			f.TargetAlgorithm,
+		)
+		if snippet != nil {
+			f.MigrationSnippet = &findings.MigrationSnippet{
+				Language:    snippet.Language,
+				Before:      snippet.Before,
+				After:       snippet.After,
+				Explanation: snippet.Explanation,
+			}
 		}
 	}
 }

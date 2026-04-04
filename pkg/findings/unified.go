@@ -100,7 +100,18 @@ type UnifiedFinding struct {
 	BlastRadius    int          `json:"blastRadius,omitempty"`    // 0-100, copied from impact analysis
 	TestFile        bool         `json:"testFile,omitempty"`        // true when finding is from a test file
 	GeneratedFile   bool         `json:"generatedFile,omitempty"`   // true when finding is from generated code
-	MigrationEffort string       `json:"migrationEffort,omitempty"` // "simple", "moderate", or "complex"
+	MigrationEffort  string            `json:"migrationEffort,omitempty"`  // "simple", "moderate", or "complex"
+	TargetAlgorithm  string            `json:"targetAlgorithm,omitempty"`  // PQC replacement algorithm
+	TargetStandard   string            `json:"targetStandard,omitempty"`   // NIST standard reference
+	MigrationSnippet *MigrationSnippet `json:"migrationSnippet,omitempty"` // language-specific PQC migration example
+}
+
+// MigrationSnippet holds a language-specific PQC migration code example.
+type MigrationSnippet struct {
+	Language    string `json:"language"`
+	Before      string `json:"before"`
+	After       string `json:"after"`
+	Explanation string `json:"explanation"`
 }
 
 // DedupeKey returns a string key for deduplication. Findings with the same key
