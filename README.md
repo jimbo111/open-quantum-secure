@@ -199,7 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: jimbo111/open-quantum-secure@main  # pin to a release tag when available
+      - uses: jimbo111/open-quantum-secure@v2.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

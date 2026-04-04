@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # OQS Scanner — Cross-platform install script
-# Usage: curl -sSL https://install.oqs.dev | sh
+# Usage: curl -sSL https://raw.githubusercontent.com/jimbo111/open-quantum-secure/main/install.sh | sh
 #
 # Detects OS and architecture, downloads the correct binary from GitHub Releases,
 # verifies SHA-256 checksum, and installs to /usr/local/bin (or ~/bin if no root).
