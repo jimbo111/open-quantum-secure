@@ -19,6 +19,10 @@ const (
 	Tier4Binary                  // Binary artifact scanning
 )
 
+// Tier5Network is for engines that probe live network endpoints (e.g., TLS).
+// Defined outside the iota block to avoid shifting existing tier values.
+const Tier5Network Tier = 5
+
 // Tier3SCA is an alias for Tier3Formal used by SCA/supply-chain engines.
 const Tier3SCA = Tier3Formal
 
@@ -32,6 +36,8 @@ func (t Tier) String() string {
 		return "formal"
 	case Tier4Binary:
 		return "binary"
+	case Tier5Network:
+		return "network"
 	default:
 		return "unknown"
 	}
@@ -68,6 +74,13 @@ type ScanOptions struct {
 
 	// Suppression options (Phase 13).
 	NoSuppress bool // disable oqs:ignore and .oqs-ignore filtering (for audits)
+
+	// TLS probe options (Phase: TLS Network Scan).
+	TLSTargets     []string // host:port targets to probe (empty = skip tls-probe engine)
+	TLSInsecure    bool     // skip manual certificate verification after capture
+	TLSDenyPrivate bool     // reject RFC 1918 / loopback / link-local target IPs
+	TLSTimeout     int      // per-target dial+handshake timeout in seconds (0 = default 10s)
+	TLSCACert      string   // path to custom CA cert PEM for manual verification
 }
 
 // Engine is the interface every scanner engine must implement.

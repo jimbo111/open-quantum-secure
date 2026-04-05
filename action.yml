@@ -55,6 +55,18 @@ inputs:
     description: 'HTTPS URL to POST scan results to on completion (ServiceNow, Jira, etc.)'
     required: false
     default: ''
+  tls-targets:
+    description: 'Comma-separated host:port TLS endpoints to probe for quantum-vulnerable crypto (e.g. api.example.com:443)'
+    required: false
+    default: ''
+  tls-insecure:
+    description: 'Skip TLS certificate verification when probing endpoints'
+    required: false
+    default: 'false'
+  tls-strict:
+    description: 'Deny TLS probe connections to private/loopback IPs (recommended for CI)'
+    required: false
+    default: 'true'
 
 outputs:
   quantum-readiness-score:
@@ -86,3 +98,6 @@ runs:
     - ${{ inputs.ci-mode }}
     - ${{ inputs.data-lifetime-years }}
     - ${{ inputs.webhook-url }}
+    - ${{ inputs.tls-targets }}
+    - ${{ inputs.tls-insecure }}
+    - ${{ inputs.tls-strict }}

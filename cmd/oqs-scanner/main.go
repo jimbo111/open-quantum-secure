@@ -34,6 +34,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/binaryscanner"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cbomkit"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/configscanner"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cdxgen"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cipherscope"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cryptodeps"
@@ -124,7 +125,10 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 	// Tier 1: Config file scanner (pure Go, always available)
 	cfgs := configscanner.New()
 
-	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs)
+	// Tier 5: TLS probe engine (pure Go, always available)
+	tlsp := tlsprobe.New()
+
+	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp)
 }
 
 // engineVersionsHash computes a stable SHA-256 hex digest over the
@@ -339,6 +343,9 @@ func scanCmd() *cobra.Command {
 		webhookURL        string
 		dataLifetimeYears int
 		signCBOM          bool
+		tlsTargets        []string
+		tlsInsecure       bool
+		tlsStrict         bool
 	)
 
 	cmd := &cobra.Command{
@@ -413,6 +420,17 @@ Example with data lifetime adjustment for healthcare:
 				incremental = true
 			}
 
+			// Apply config fallbacks for TLS probe (global config only).
+			if !cmd.Flags().Changed("tls-targets") && len(cfg.TLS.Targets) > 0 {
+				tlsTargets = cfg.TLS.Targets
+			}
+			if !cmd.Flags().Changed("tls-insecure") && cfg.TLS.Insecure {
+				tlsInsecure = true
+			}
+			if !cmd.Flags().Changed("tls-strict") && cfg.TLS.Strict {
+				tlsStrict = true
+			}
+
 			orch := buildOrchestrator()
 
 			ctx := context.Background()
@@ -420,6 +438,11 @@ Example with data lifetime adjustment for healthcare:
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 				defer cancel()
+			}
+
+			tlsTimeout := cfg.TLS.Timeout
+			if tlsTimeout == 0 {
+				tlsTimeout = 10
 			}
 
 			opts := engines.ScanOptions{
@@ -436,6 +459,11 @@ Example with data lifetime adjustment for healthcare:
 				Incremental:     incremental,
 				CachePath:       cachePath,
 				NoCache:         noCache,
+				TLSTargets:      tlsTargets,
+				TLSInsecure:     tlsInsecure,
+				TLSDenyPrivate:  tlsStrict,
+				TLSTimeout:      tlsTimeout,
+				TLSCACert:       cfg.TLS.CACert,
 			}
 
 			if incremental && noCache {
@@ -615,6 +643,11 @@ Industry guidelines: healthcare/medical=30, government/classified=25,
 financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 0 = disabled (default). Values >10 amplify penalties, <5 reduce them.`)
 
+	// TLS probe flags
+	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
+	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
+	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", false, "Deny TLS probe connections to private/loopback IPs")
+
 	return cmd
 }
 
@@ -640,6 +673,9 @@ func diffCmd() *cobra.Command {
 		ciMode            string
 		webhookURL        string
 		dataLifetimeYears int
+		tlsTargets        []string
+		tlsInsecure       bool
+		tlsStrict         bool
 	)
 
 	cmd := &cobra.Command{
@@ -740,6 +776,17 @@ Example:
 				fmt.Fprintln(os.Stderr, "WARNING: --incremental with --no-cache: performing normal diff scan (--no-cache overrides)")
 			}
 
+			// Apply config fallbacks for TLS probe in diff mode.
+			if !cmd.Flags().Changed("tls-targets") && len(cfg.TLS.Targets) > 0 {
+				tlsTargets = cfg.TLS.Targets
+			}
+			if !cmd.Flags().Changed("tls-insecure") && cfg.TLS.Insecure {
+				tlsInsecure = true
+			}
+			if !cmd.Flags().Changed("tls-strict") && cfg.TLS.Strict {
+				tlsStrict = true
+			}
+
 			opts := engines.ScanOptions{
 				TargetPath:      absPath,
 				Timeout:         timeout,
@@ -751,6 +798,11 @@ Example:
 				Incremental:     incremental,
 				CachePath:       cachePath,
 				NoCache:         noCache,
+				TLSTargets:      tlsTargets,
+				TLSInsecure:     tlsInsecure,
+				TLSDenyPrivate:  tlsStrict,
+				TLSTimeout:      cfg.TLS.Timeout,
+				TLSCACert:       cfg.TLS.CACert,
 			}
 
 			selected := orch.EffectiveEngines(opts)
@@ -888,6 +940,11 @@ Example:
 Industry guidelines: healthcare/medical=30, government/classified=25,
 financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 0 = disabled (default). Values >10 amplify penalties, <5 reduce them.`)
+
+	// TLS probe flags (same as scan command)
+	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
+	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
+	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", false, "Deny TLS probe connections to private/loopback IPs")
 
 	return cmd
 }

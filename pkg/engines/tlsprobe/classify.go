@@ -1,0 +1,319 @@
+package tlsprobe
+
+import (
+	"crypto/tls"
+	"strings"
+
+	"github.com/jimbo111/open-quantum-secure/pkg/findings"
+)
+
+// CipherComponent represents one cryptographic primitive extracted from a cipher suite.
+type CipherComponent struct {
+	Name      string // "ECDHE", "RSA", "AES", "SHA-256", etc.
+	Primitive string // "key-exchange", "signature", "symmetric", "hash"
+	KeySize   int    // 128, 256, etc. (0 if not applicable)
+	Mode      string // "GCM", "CBC", etc. (empty if not applicable)
+}
+
+// cipherRegistry maps Go TLS cipher suite IDs to their decomposed components.
+var cipherRegistry = map[uint16][]CipherComponent{
+	// TLS 1.2 suites
+	tls.TLS_RSA_WITH_AES_128_CBC_SHA: {
+		{Name: "RSA", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "CBC"},
+		{Name: "SHA-1", Primitive: "hash"},
+	},
+	tls.TLS_RSA_WITH_AES_256_CBC_SHA: {
+		{Name: "RSA", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 256, Mode: "CBC"},
+		{Name: "SHA-1", Primitive: "hash"},
+	},
+	tls.TLS_RSA_WITH_AES_128_GCM_SHA256: {
+		{Name: "RSA", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "GCM"},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+	tls.TLS_RSA_WITH_AES_256_GCM_SHA384: {
+		{Name: "RSA", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 256, Mode: "GCM"},
+		{Name: "SHA-384", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "CBC"},
+		{Name: "SHA-1", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 256, Mode: "CBC"},
+		{Name: "SHA-1", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "GCM"},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 256, Mode: "GCM"},
+		{Name: "SHA-384", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "ECDSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "GCM"},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "ECDSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 256, Mode: "GCM"},
+		{Name: "SHA-384", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "ChaCha20-Poly1305", Primitive: "symmetric", KeySize: 256},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "ECDSA", Primitive: "signature"},
+		{Name: "ChaCha20-Poly1305", Primitive: "symmetric", KeySize: 256},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+	// Additional TLS 1.2 suites
+	tls.TLS_RSA_WITH_AES_128_CBC_SHA256: {
+		{Name: "RSA", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "CBC"},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "ECDSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "CBC"},
+		{Name: "SHA-1", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "ECDSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 256, Mode: "CBC"},
+		{Name: "SHA-1", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "3DES", Primitive: "symmetric", KeySize: 168, Mode: "CBC"},
+		{Name: "SHA-1", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "ECDSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "CBC"},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+	tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256: {
+		{Name: "ECDHE", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "CBC"},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+	// Deprecated suites
+	tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA: {
+		{Name: "RSA", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "3DES", Primitive: "symmetric", KeySize: 168, Mode: "CBC"},
+		{Name: "SHA-1", Primitive: "hash"},
+	},
+	tls.TLS_RSA_WITH_RC4_128_SHA: {
+		{Name: "RSA", Primitive: "key-exchange"},
+		{Name: "RSA", Primitive: "signature"},
+		{Name: "RC4", Primitive: "symmetric", KeySize: 128},
+		{Name: "SHA-1", Primitive: "hash"},
+	},
+	// TLS 1.3 suites (key exchange is implicit ECDHE/X25519, not in suite name)
+	tls.TLS_AES_128_GCM_SHA256: {
+		{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "GCM"},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+	tls.TLS_AES_256_GCM_SHA384: {
+		{Name: "AES", Primitive: "symmetric", KeySize: 256, Mode: "GCM"},
+		{Name: "SHA-384", Primitive: "hash"},
+	},
+	tls.TLS_CHACHA20_POLY1305_SHA256: {
+		{Name: "ChaCha20-Poly1305", Primitive: "symmetric", KeySize: 256},
+		{Name: "SHA-256", Primitive: "hash"},
+	},
+}
+
+// decomposeCipherSuite breaks a cipher suite ID into its algorithm components.
+// Falls back to string parsing of the IANA name if the ID is not in the registry.
+func decomposeCipherSuite(id uint16) []CipherComponent {
+	if comps, ok := cipherRegistry[id]; ok {
+		return comps
+	}
+	// Fallback: parse the IANA name string.
+	name := tls.CipherSuiteName(id)
+	return parseCipherSuiteName(name)
+}
+
+// parseCipherSuiteName parses an IANA cipher suite name into components.
+// Example: "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+func parseCipherSuiteName(name string) []CipherComponent {
+	if name == "" {
+		return nil
+	}
+	name = strings.TrimPrefix(name, "TLS_")
+
+	// TLS 1.3 format: no _WITH_ separator
+	if !strings.Contains(name, "_WITH_") {
+		return parseTLS13Name(name)
+	}
+
+	// TLS 1.2 format: <KEX>_<AUTH>_WITH_<CIPHER>_<MAC>
+	parts := strings.SplitN(name, "_WITH_", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+
+	var comps []CipherComponent
+
+	// Parse key exchange and auth.
+	// RSA-only suites (e.g., TLS_RSA_WITH_AES_128_CBC_SHA) use RSA for both
+	// key exchange and authentication. When the left side has only one part,
+	// emit RSA as both roles.
+	kexAuth := parts[0]
+	kexAuthParts := strings.SplitN(kexAuth, "_", 2)
+	if len(kexAuthParts) == 1 {
+		comps = append(comps, CipherComponent{Name: kexAuthParts[0], Primitive: "key-exchange"})
+		comps = append(comps, CipherComponent{Name: kexAuthParts[0], Primitive: "signature"})
+	} else {
+		comps = append(comps, CipherComponent{Name: kexAuthParts[0], Primitive: "key-exchange"})
+		comps = append(comps, CipherComponent{Name: kexAuthParts[1], Primitive: "signature"})
+	}
+
+	// Parse cipher and MAC from right side
+	comps = append(comps, parseBulkAndMAC(parts[1])...)
+
+	return comps
+}
+
+// parseTLS13Name handles TLS 1.3 cipher suite names (no KEX/Auth).
+func parseTLS13Name(name string) []CipherComponent {
+	return parseBulkAndMAC(name)
+}
+
+// parseBulkAndMAC extracts the bulk cipher and MAC from a cipher suite fragment.
+func parseBulkAndMAC(s string) []CipherComponent {
+	var comps []CipherComponent
+
+	// Common patterns: AES_128_GCM_SHA256, CHACHA20_POLY1305_SHA256, 3DES_EDE_CBC_SHA
+	switch {
+	case strings.HasPrefix(s, "AES_128_GCM"):
+		comps = append(comps, CipherComponent{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "GCM"})
+	case strings.HasPrefix(s, "AES_256_GCM"):
+		comps = append(comps, CipherComponent{Name: "AES", Primitive: "symmetric", KeySize: 256, Mode: "GCM"})
+	case strings.HasPrefix(s, "AES_128_CBC"):
+		comps = append(comps, CipherComponent{Name: "AES", Primitive: "symmetric", KeySize: 128, Mode: "CBC"})
+	case strings.HasPrefix(s, "AES_256_CBC"):
+		comps = append(comps, CipherComponent{Name: "AES", Primitive: "symmetric", KeySize: 256, Mode: "CBC"})
+	case strings.HasPrefix(s, "CHACHA20_POLY1305"):
+		comps = append(comps, CipherComponent{Name: "ChaCha20-Poly1305", Primitive: "symmetric", KeySize: 256})
+	case strings.HasPrefix(s, "3DES_EDE_CBC"):
+		comps = append(comps, CipherComponent{Name: "3DES", Primitive: "symmetric", KeySize: 168, Mode: "CBC"})
+	case strings.HasPrefix(s, "RC4_128"):
+		comps = append(comps, CipherComponent{Name: "RC4", Primitive: "symmetric", KeySize: 128})
+	}
+
+	// Extract MAC hash from the end
+	switch {
+	case strings.HasSuffix(s, "_SHA256"):
+		comps = append(comps, CipherComponent{Name: "SHA-256", Primitive: "hash"})
+	case strings.HasSuffix(s, "_SHA384"):
+		comps = append(comps, CipherComponent{Name: "SHA-384", Primitive: "hash"})
+	case strings.HasSuffix(s, "_SHA"):
+		comps = append(comps, CipherComponent{Name: "SHA-1", Primitive: "hash"})
+	}
+
+	return comps
+}
+
+// observationToFindings converts a ProbeResult into UnifiedFinding entries.
+// One finding is emitted per cryptographic component identified.
+func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
+	if result.Error != nil {
+		return nil
+	}
+
+	loc := findings.Location{
+		File:         "(tls-probe)/" + result.Target,
+		Line:         0,
+		ArtifactType: "tls-endpoint",
+	}
+
+	var ff []findings.UnifiedFinding
+
+	// Findings from cipher suite components.
+	comps := decomposeCipherSuite(result.CipherSuiteID)
+	for _, comp := range comps {
+		f := findings.UnifiedFinding{
+			Location: loc,
+			Algorithm: &findings.Algorithm{
+				Name:      comp.Name,
+				Primitive: comp.Primitive,
+				KeySize:   comp.KeySize,
+				Mode:      comp.Mode,
+			},
+			Confidence:   findings.ConfidenceHigh,
+			SourceEngine: "tls-probe",
+			Reachable:    findings.ReachableYes,
+			RawIdentifier: result.CipherSuiteName + "|" + result.Target,
+		}
+		ff = append(ff, f)
+	}
+
+	// Finding for the leaf certificate signing key.
+	if result.LeafCertKeyAlgo != "" {
+		f := findings.UnifiedFinding{
+			Location: loc,
+			Algorithm: &findings.Algorithm{
+				Name:      result.LeafCertKeyAlgo,
+				Primitive: "signature",
+				KeySize:   result.LeafCertKeySize,
+			},
+			Confidence:   findings.ConfidenceHigh,
+			SourceEngine: "tls-probe",
+			Reachable:    findings.ReachableYes,
+			RawIdentifier: "cert:" + result.LeafCertKeyAlgo + "|" + result.Target,
+		}
+		ff = append(ff, f)
+	}
+
+	// For TLS 1.3, the key exchange is implicit (ECDHE with X25519 or P-256).
+	// Add a key-exchange finding since it's not in the cipher suite name.
+	if result.TLSVersion == tls.VersionTLS13 {
+		f := findings.UnifiedFinding{
+			Location: loc,
+			Algorithm: &findings.Algorithm{
+				Name:      "ECDHE",
+				Primitive: "key-exchange",
+			},
+			Confidence:   findings.ConfidenceHigh,
+			SourceEngine: "tls-probe",
+			Reachable:    findings.ReachableYes,
+			RawIdentifier: "kex:ECDHE|" + result.Target,
+		}
+		ff = append(ff, f)
+	}
+
+	return ff
+}

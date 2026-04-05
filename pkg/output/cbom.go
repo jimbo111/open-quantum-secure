@@ -325,10 +325,17 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 	}
 	if f.Location.ArtifactType != "" {
 		props = append(props, cdxProperty{Name: "oqs:artifactType", Value: f.Location.ArtifactType})
-		props = append(props, cdxProperty{Name: "oqs:detectionMethod", Value: "binary-analysis"})
+		if f.SourceEngine == "tls-probe" {
+			props = append(props, cdxProperty{Name: "oqs:detectionMethod", Value: "network-probe"})
+		} else {
+			props = append(props, cdxProperty{Name: "oqs:detectionMethod", Value: "binary-analysis"})
+		}
 	}
 	if f.SourceEngine == "config-scanner" {
 		props = append(props, cdxProperty{Name: "oqs:sourceType", Value: "config"})
+	}
+	if f.SourceEngine == "tls-probe" {
+		props = append(props, cdxProperty{Name: "oqs:sourceType", Value: "tls-endpoint"})
 	}
 
 	if len(f.DataFlowPath) > 0 {

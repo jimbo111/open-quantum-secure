@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -16,6 +17,18 @@ type Config struct {
 	Cache    CacheConfig  `yaml:"cache"`
 	Endpoint string       `yaml:"endpoint"`
 	CACert   string       `yaml:"caCert"`
+	TLS      TLSConfig    `yaml:"tls,omitempty"`
+}
+
+// TLSConfig controls TLS probe engine behavior. For security, TLS targets are
+// blocked from project config (.oqs-scanner.yaml) and only loaded from global
+// config (~/.oqs/config.yaml) or CLI flags.
+type TLSConfig struct {
+	Targets  []string `yaml:"targets,omitempty"`
+	Insecure bool     `yaml:"insecure,omitempty"`
+	Strict   bool     `yaml:"strict,omitempty"`
+	Timeout  int      `yaml:"timeout,omitempty"`
+	CACert   string   `yaml:"caCert,omitempty"`
 }
 
 // CacheConfig controls remote scan cache behaviour.
@@ -112,5 +125,20 @@ func Load(targetPath string) (Config, error) {
 		return Config{}, err
 	}
 
-	return MergeConfigs(global, project), nil
+	// TLS config from project config is blocked for security (prevents SSRF
+	// via malicious .oqs-scanner.yaml in PRs). Only global config and CLI flags
+	// can set TLS targets.
+	projectHadTLS := len(project.TLS.Targets) > 0 || project.TLS.Insecure || project.TLS.Strict || project.TLS.Timeout != 0 || project.TLS.CACert != ""
+	if projectHadTLS {
+		project.TLS = TLSConfig{} // zero out before merge
+	}
+
+	merged := MergeConfigs(global, project)
+
+	if projectHadTLS {
+		fmt.Fprintf(os.Stderr, "WARNING: tls config in .oqs-scanner.yaml ignored for security. Use ~/.oqs/config.yaml or CLI flags.\n")
+		merged.TLS = global.TLS // restore global TLS only
+	}
+
+	return merged, nil
 }
