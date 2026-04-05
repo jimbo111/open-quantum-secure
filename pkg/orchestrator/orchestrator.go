@@ -62,7 +62,8 @@ func (o *Orchestrator) AvailableEngines() []engines.Engine {
 
 // EffectiveEngines returns the engines that would actually execute for the given options.
 // This applies the same filtering as Scan: engine name filter + tier filter for diff/quick mode
-// + ScanType gating for Tier 4 binary engines.
+// + ScanType gating for Tier 4 binary and Tier 5 network engines.
+// When TLSTargets are explicitly provided, the tls-probe engine is included regardless of mode.
 func (o *Orchestrator) EffectiveEngines(opts engines.ScanOptions) []engines.Engine {
 	available := o.AvailableEngines()
 	if len(opts.EngineNames) > 0 {
@@ -71,10 +72,28 @@ func (o *Orchestrator) EffectiveEngines(opts engines.ScanOptions) []engines.Engi
 	if opts.Mode == engines.ModeDiff || opts.Mode == engines.ModeQuick {
 		available = filterByTier(available, engines.Tier1Pattern)
 	} else {
-		// Apply ScanType gating for Tier 4 binary engines.
 		available = applyScanTypeFilter(available, opts.ScanType)
 	}
+	// Include Tier5Network engines when TLS targets are explicitly provided,
+	// even if they were excluded by tier/scanType filtering above.
+	if len(opts.TLSTargets) > 0 {
+		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
+	}
 	return available
+}
+
+// appendNetworkEnginesIfAbsent adds Tier5Network engines from all to dst if not already present.
+func appendNetworkEnginesIfAbsent(dst, all []engines.Engine) []engines.Engine {
+	has := make(map[string]bool, len(dst))
+	for _, e := range dst {
+		has[e.Name()] = true
+	}
+	for _, e := range all {
+		if e.Tier() == engines.Tier5Network && !has[e.Name()] {
+			dst = append(dst, e)
+		}
+	}
+	return dst
 }
 
 // Scan runs available engines, deduplicates, and boosts confidence.
@@ -425,24 +444,41 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 	if opts.Mode == engines.ModeDiff || opts.Mode == engines.ModeQuick {
 		available = filterByTier(available, engines.Tier1Pattern)
 	} else {
-		// Apply ScanType gating for Tier 4 binary engines.
+		// Apply ScanType gating for Tier 4 binary and Tier 5 network engines.
 		available = applyScanTypeFilter(available, opts.ScanType)
 	}
 
-	if len(available) == 0 {
+	// Include Tier5Network engines when TLS targets are explicitly provided,
+	// overriding tier/scanType filtering (even in diff/quick mode).
+	if len(opts.TLSTargets) > 0 {
+		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
+	}
+
+	// Split file-based and network engines. Network engines (Tier5Network) run
+	// outside the incremental cache loop since they don't operate on files.
+	var fileEngines, networkEngines []engines.Engine
+	for _, e := range available {
+		if e.Tier() == engines.Tier5Network {
+			networkEngines = append(networkEngines, e)
+		} else {
+			fileEngines = append(fileEngines, e)
+		}
+	}
+
+	if len(fileEngines) == 0 && len(networkEngines) == 0 {
 		return nil, nil, metrics, fmt.Errorf("no engines available")
 	}
 
 	var allFindings []findings.UnifiedFinding
 
-	// -- Incremental path --
+	// -- Incremental path (file engines only) --
 	// When Incremental=true and NoCache=false, use the file hash cache to skip
 	// unchanged files. Supported in both ModeFull (all files) and ModeDiff
 	// (only git-changed files). The merged findings flow through the same
 	// post-processing stages below.
-	if opts.Incremental && !opts.NoCache && (opts.Mode == engines.ModeFull || opts.Mode == engines.ModeDiff) {
+	if len(fileEngines) > 0 && opts.Incremental && !opts.NoCache && (opts.Mode == engines.ModeFull || opts.Mode == engines.ModeDiff) {
 		var err error
-		allFindings, err = o.runIncremental(ctx, opts, available, pkgScannerVersion.Load().(string))
+		allFindings, err = o.runIncremental(ctx, opts, fileEngines, pkgScannerVersion.Load().(string))
 		if err != nil {
 			metrics.TotalDuration = time.Since(totalStart)
 			return nil, nil, metrics, err
@@ -458,13 +494,13 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 			err     error
 			metrics EngineMetrics
 		}
-		perEngine := make([]engineResult, len(available))
+		perEngine := make([]engineResult, len(fileEngines))
 
 		var wg sync.WaitGroup
 		var mu sync.Mutex
 		var errs []error
 
-		for i, eng := range available {
+		for i, eng := range fileEngines {
 			i, eng := i, eng // capture loop vars
 			wg.Add(1)
 			go func() {
@@ -505,7 +541,7 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 		wg.Wait()
 
 		// Collect engine metrics in order.
-		metrics.Engines = make([]EngineMetrics, len(available))
+		metrics.Engines = make([]EngineMetrics, len(fileEngines))
 		for i := range perEngine {
 			metrics.Engines[i] = perEngine[i].metrics
 		}
@@ -531,6 +567,44 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 		if len(errs) > 0 {
 			for _, e := range errs {
 				fmt.Fprintf(os.Stderr, "WARNING: engine error (partial results): %s\n", e)
+			}
+		}
+	}
+
+	// -- Network engines (Tier5Network) run outside the file-based pipeline --
+	// They do not participate in incremental caching or file-based filtering.
+	var networkErrs []error
+	for _, eng := range networkEngines {
+		if ctx.Err() != nil {
+			break
+		}
+		engStart := time.Now()
+		res, err := eng.Scan(ctx, opts)
+		dur := time.Since(engStart)
+		em := EngineMetrics{Name: eng.Name(), Duration: dur, Findings: len(res)}
+		if err != nil {
+			em.Error = err.Error()
+			fmt.Fprintf(os.Stderr, "WARNING: %s: %v\n", eng.Name(), err)
+			networkErrs = append(networkErrs, fmt.Errorf("%s: %w", eng.Name(), err))
+		}
+		metrics.Engines = append(metrics.Engines, em)
+		allFindings = append(allFindings, res...)
+	}
+	// Propagate network engine errors when all network engines failed and
+	// produced no findings (prevents silent pass in CI when TLS targets
+	// are all unreachable).
+	if len(networkErrs) > 0 && len(networkEngines) > 0 {
+		hasNetworkFindings := false
+		for _, eng := range networkEngines {
+			for _, em := range metrics.Engines {
+				if em.Name == eng.Name() && em.Findings > 0 {
+					hasNetworkFindings = true
+				}
+			}
+		}
+		if !hasNetworkFindings {
+			for _, e := range networkErrs {
+				fmt.Fprintf(os.Stderr, "WARNING: network engine error (no results): %s\n", e)
 			}
 		}
 	}
@@ -805,7 +879,8 @@ func classifyFindings(ff []findings.UnifiedFinding) {
 			f.Severity = findings.Severity(c.Severity)
 			f.Recommendation = c.Recommendation
 			f.HNDLRisk = c.HNDLRisk
-			f.MigrationEffort = quantum.ClassifyEffort(c, f.Algorithm.Primitive, f.SourceEngine == "config-scanner")
+			isConfig := f.SourceEngine == "config-scanner" || f.SourceEngine == "tls-probe"
+			f.MigrationEffort = quantum.ClassifyEffort(c, f.Algorithm.Primitive, isConfig)
 			f.TargetAlgorithm = c.TargetAlgorithm
 			f.TargetStandard = c.TargetStandard
 		} else if f.Dependency != nil {
@@ -992,8 +1067,8 @@ func applyScanTypeFilter(all []engines.Engine, scanType string) []engines.Engine
 	case "all":
 		return all // no filtering
 	default:
-		// "" or "source" → exclude Tier 4
-		return excludeTier(all, engines.Tier4Binary)
+		// "" or "source" → exclude Tier 4 (binary) and Tier 5 (network)
+		return excludeTier(excludeTier(all, engines.Tier4Binary), engines.Tier5Network)
 	}
 }
 

@@ -327,7 +327,7 @@ summary:hover { text-decoration: underline; }
           {{range .Findings}}
           <tr>
             <td title="{{.Location.File}}">{{shortPath .Location.File}}</td>
-            <td>{{.Location.Line}}</td>
+            <td>{{if gt .Location.Line 0}}{{.Location.Line}}{{else}}-{{end}}</td>
             <td data-sort="{{if .Algorithm}}{{.Algorithm.Name}}{{else if .Dependency}}{{.Dependency.Library}}{{else}}{{.RawIdentifier}}{{end}}">
               {{if .Algorithm}}{{.Algorithm.Name}}{{else if .Dependency}}{{.Dependency.Library}}{{else}}{{.RawIdentifier}}{{end}}
               {{if hasFlowPath .DataFlowPath}}

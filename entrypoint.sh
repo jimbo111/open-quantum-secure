@@ -16,6 +16,9 @@ shift 9 2>/dev/null || true
 CI_MODE="${1:-blocking}"
 DATA_LIFETIME="${2:-0}"
 WEBHOOK_URL="${3:-}"
+TLS_TARGETS="${4:-}"
+TLS_INSECURE=$(echo "${5:-false}" | tr '[:upper:]' '[:lower:]')
+TLS_STRICT=$(echo "${6:-true}" | tr '[:upper:]' '[:lower:]')
 
 # Select command based on mode
 SCAN_CMD="scan"
@@ -31,6 +34,16 @@ if [ "$NO_CONFIG" = "true" ]; then
   NO_CONFIG_FLAG="--no-config"
 fi
 
+# Build TLS flags
+TLS_INSECURE_FLAG=""
+if [ "$TLS_INSECURE" = "true" ]; then
+  TLS_INSECURE_FLAG="--tls-insecure"
+fi
+TLS_STRICT_FLAG=""
+if [ "$TLS_STRICT" = "true" ]; then
+  TLS_STRICT_FLAG="--tls-strict"
+fi
+
 # Run the scanner with JSON output for metric extraction.
 # All flag values are properly quoted to prevent word-splitting/glob injection.
 SCAN_EXIT=0
@@ -43,6 +56,9 @@ oqs-scanner "$SCAN_CMD" --path "$PATH_ARG" --format json --output "${OUTPUT_DIR}
   ${CI_MODE:+--ci-mode "$CI_MODE"} \
   ${DATA_LIFETIME:+--data-lifetime-years "$DATA_LIFETIME"} \
   ${WEBHOOK_URL:+--webhook-url "$WEBHOOK_URL"} \
+  ${TLS_TARGETS:+--tls-targets "$TLS_TARGETS"} \
+  ${TLS_INSECURE_FLAG:+"$TLS_INSECURE_FLAG"} \
+  ${TLS_STRICT_FLAG:+"$TLS_STRICT_FLAG"} \
   || SCAN_EXIT=$?
 
 # Initialize metric variables with sane defaults (used by PR comment even if JSON fails)

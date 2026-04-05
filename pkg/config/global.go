@@ -145,6 +145,11 @@ func MergeConfigs(global, project Config) Config {
 		merged.Cache.RemoteBranch = project.Cache.RemoteBranch
 	}
 
+	// NOTE: TLS config is intentionally NOT merged here. For security, TLS targets
+	// are blocked from project config to prevent SSRF via malicious .oqs-scanner.yaml.
+	// The Load() function in config.go handles TLS separately: it zeros project TLS
+	// before merge and restores only global TLS afterward.
+
 	// Top-level
 	if project.Endpoint != "" {
 		merged.Endpoint = project.Endpoint
