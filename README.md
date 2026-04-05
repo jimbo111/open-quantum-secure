@@ -22,7 +22,7 @@ cd open-quantum-secure && go build -o oqs-scanner ./cmd/oqs-scanner/
 oqs-scanner scan --path .
 ```
 
-You get 2 engines out of the box — **config-scanner** (YAML, JSON, .env, TOML, XML, INI, HCL) and **binary-scanner** (JAR, Go binaries, Python wheels, ELF/PE/Mach-O, .NET). These are compiled into the binary, no setup needed.
+You get 3 engines out of the box — **config-scanner** (YAML, JSON, .env, TOML, XML, INI, HCL), **binary-scanner** (JAR, Go binaries, Python wheels, ELF/PE/Mach-O, .NET), and **tls-probe** (live TLS endpoint scanning). These are compiled into the binary, no setup needed.
 
 For source code scanning, install the engines that match your stack:
 
@@ -122,7 +122,7 @@ The scanner is an orchestrator. It calls external tools, collects their output, 
    ├─────────────┤    ├───────────────┤    ├─────────────────────────┤
    │config-scanner│   │ cipherscope   │    │ semgrep (taint/flow)    │
    │binary-scanner│   │ cryptoscan    │    │ cdxgen (SBOM)           │
-   │             │    │ ast-grep      │    │ cbomkit-theia(artifacts)│
+   │tls-probe     │   │ ast-grep      │    │ cbomkit-theia(artifacts)│
    │             │    │ syft          │    │                         │
    │             │    │ cryptodeps    │    │                         │
    └─────────────┘    └───────────────┘    └─────────────────────────┘
@@ -131,6 +131,26 @@ The scanner is an orchestrator. It calls external tools, collects their output, 
 Each engine is a separate project with its own license. The scanner never bundles them — it discovers them from PATH at runtime.
 
 When multiple engines find the same algorithm at the same location, the finding gets corroborated — higher confidence, bigger penalty on the QRS.
+
+---
+
+## TLS Probe (Dynamic Analysis)
+
+Probe live TLS endpoints for quantum-vulnerable cipher suites and certificate algorithms:
+
+```bash
+oqs-scanner scan --path . --tls-targets api.example.com:443,db.internal:8443
+```
+
+The `tls-probe` engine connects to each target, inspects the TLS handshake, and reports vulnerable key exchange (ECDHE, RSA), signature algorithms (RSA, ECDSA), and weak symmetric ciphers (AES-128). Findings include the negotiated cipher suite and leaf certificate key type.
+
+**Security:** DNS pinning prevents rebinding attacks. RFC 1918/loopback IPs are blocked with `--tls-strict`. TLS targets cannot be set via project config (`.oqs-scanner.yaml`) to prevent SSRF in CI.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tls-targets` | (none) | Comma-separated `host:port` endpoints |
+| `--tls-insecure` | false | Skip certificate verification |
+| `--tls-strict` | false (CLI) / true (Action) | Block private IP connections |
 
 ---
 
@@ -209,6 +229,8 @@ jobs:
           pr-comment: 'true'       # posts results as a PR comment
           compliance: 'cnsa-2.0'
           ci-mode: 'advisory'      # won't block merges — use 'blocking' when ready
+          tls-targets: 'api.staging.example.com:443'  # optional: probe TLS endpoints
+          tls-strict: 'true'       # block private IP probing (CI default)
 ```
 
 The Docker-based action ships with ast-grep and semgrep pre-installed, so CI scans cover more languages than a bare local install.
