@@ -967,6 +967,13 @@ func filterByChangedFiles(ff []findings.UnifiedFinding, targetPath string, chang
 	for _, f := range ff {
 		filePath := f.Location.File
 
+		// Preserve network engine findings (synthetic paths like "(tls-probe)/host:443#kex").
+		// These are not tied to any filesystem path and must not be filtered by changed files.
+		if strings.HasPrefix(filePath, "(") {
+			filtered = append(filtered, f)
+			continue
+		}
+
 		// Try to make the finding path relative to target
 		if rel, err := filepath.Rel(targetPath, filePath); err == nil {
 			filePath = rel

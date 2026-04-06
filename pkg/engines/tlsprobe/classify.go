@@ -247,6 +247,17 @@ func parseBulkAndMAC(s string) []CipherComponent {
 	return comps
 }
 
+// primitiveToSuffix maps a cryptographic primitive to a short suffix appended
+// to the synthetic Location.File path. This prevents DedupeKey collisions when
+// the same algorithm name (e.g., "RSA") appears in multiple roles (key-exchange
+// vs signature) for the same target — without modifying the global DedupeKey().
+var primitiveToSuffix = map[string]string{
+	"key-exchange": "#kex",
+	"signature":    "#sig",
+	"symmetric":    "#sym",
+	"hash":         "#mac",
+}
+
 // observationToFindings converts a ProbeResult into UnifiedFinding entries.
 // One finding is emitted per cryptographic component identified.
 func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
@@ -254,19 +265,20 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 		return nil
 	}
 
-	loc := findings.Location{
-		File:         "(tls-probe)/" + result.Target,
-		Line:         0,
-		ArtifactType: "tls-endpoint",
-	}
+	basePath := "(tls-probe)/" + result.Target
 
 	var ff []findings.UnifiedFinding
 
 	// Findings from cipher suite components.
 	comps := decomposeCipherSuite(result.CipherSuiteID)
 	for _, comp := range comps {
+		suffix := primitiveToSuffix[comp.Primitive]
 		f := findings.UnifiedFinding{
-			Location: loc,
+			Location: findings.Location{
+				File:         basePath + suffix,
+				Line:         0,
+				ArtifactType: "tls-endpoint",
+			},
 			Algorithm: &findings.Algorithm{
 				Name:      comp.Name,
 				Primitive: comp.Primitive,
@@ -276,7 +288,7 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 			Confidence:   findings.ConfidenceHigh,
 			SourceEngine: "tls-probe",
 			Reachable:    findings.ReachableYes,
-			RawIdentifier: result.CipherSuiteName + "|" + result.Target,
+			RawIdentifier: comp.Primitive + ":" + comp.Name + "|" + result.CipherSuiteName + "|" + result.Target,
 		}
 		ff = append(ff, f)
 	}
@@ -284,7 +296,11 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 	// Finding for the leaf certificate signing key.
 	if result.LeafCertKeyAlgo != "" {
 		f := findings.UnifiedFinding{
-			Location: loc,
+			Location: findings.Location{
+				File:         basePath + "#cert",
+				Line:         0,
+				ArtifactType: "tls-endpoint",
+			},
 			Algorithm: &findings.Algorithm{
 				Name:      result.LeafCertKeyAlgo,
 				Primitive: "signature",
@@ -302,7 +318,11 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 	// Add a key-exchange finding since it's not in the cipher suite name.
 	if result.TLSVersion == tls.VersionTLS13 {
 		f := findings.UnifiedFinding{
-			Location: loc,
+			Location: findings.Location{
+				File:         basePath + "#kex",
+				Line:         0,
+				ArtifactType: "tls-endpoint",
+			},
 			Algorithm: &findings.Algorithm{
 				Name:      "ECDHE",
 				Primitive: "key-exchange",

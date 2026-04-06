@@ -646,7 +646,7 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	// TLS probe flags
 	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
-	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", false, "Deny TLS probe connections to private/loopback IPs")
+	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
 
 	return cmd
 }
@@ -944,7 +944,7 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	// TLS probe flags (same as scan command)
 	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
-	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", false, "Deny TLS probe connections to private/loopback IPs")
+	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
 
 	return cmd
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -156,8 +157,8 @@ func TestObservationToFindings_CipherAndCert(t *testing.T) {
 				hasRSACert = true
 			}
 		}
-		// Verify location
-		if f.Location.File != "(tls-probe)/example.com:443" {
+		// Verify location — each finding has a role suffix (#kex, #sig, #sym, #mac, #cert)
+		if !strings.HasPrefix(f.Location.File, "(tls-probe)/example.com:443") {
 			t.Errorf("unexpected Location.File: %s", f.Location.File)
 		}
 		if f.Location.ArtifactType != "tls-endpoint" {
