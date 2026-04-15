@@ -194,9 +194,9 @@ func TestPQCFormat_SARIF_PQCFieldsInProperties(t *testing.T) {
 		t.Fatalf("expected 3 SARIF results, got %d", len(sarifDoc.Runs[0].Results))
 	}
 
-	// RSA finding: pqcPresent, pqcMaturity, negotiatedGroup must be absent.
+	// RSA finding: pqcPresent, pqcMaturity, negotiatedGroupName must be absent.
 	rsaProps := sarifDoc.Runs[0].Results[0].Properties
-	for _, key := range []string{"pqcPresent", "pqcMaturity", "negotiatedGroup"} {
+	for _, key := range []string{"pqcPresent", "pqcMaturity", "negotiatedGroupName"} {
 		if _, ok := rsaProps[key]; ok {
 			t.Errorf("SARIF RSA finding: properties[%q] present, want absent", key)
 		}
@@ -207,8 +207,8 @@ func TestPQCFormat_SARIF_PQCFieldsInProperties(t *testing.T) {
 	if _, ok := hybridProps["pqcPresent"]; !ok {
 		t.Error("SARIF hybrid finding: properties[\"pqcPresent\"] absent")
 	}
-	if _, ok := hybridProps["negotiatedGroup"]; !ok {
-		t.Error("SARIF hybrid finding: properties[\"negotiatedGroup\"] absent")
+	if _, ok := hybridProps["negotiatedGroupName"]; !ok {
+		t.Error("SARIF hybrid finding: properties[\"negotiatedGroupName\"] absent")
 	}
 	var maturity string
 	if v, ok := hybridProps["pqcMaturity"]; ok {

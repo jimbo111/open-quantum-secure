@@ -234,7 +234,7 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 		}
 	}
 	if f.NegotiatedGroupName != "" {
-		props["negotiatedGroup"] = f.NegotiatedGroupName
+		props["negotiatedGroupName"] = f.NegotiatedGroupName
 	}
 	if f.PQCPresent {
 		props["pqcPresent"] = true
