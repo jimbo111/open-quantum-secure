@@ -438,6 +438,30 @@ func extractBaseName(name string) string {
 			return prefix
 		}
 	}
+
+	// Hyphenated hybrid KEM normalization: config files and AST tokenisers sometimes
+	// produce "X25519-MLKEM-768" instead of "X25519MLKEM768". Strip HYPHENS ONLY
+	// from the input and retry the PQC prefix match.
+	//
+	// Underscores are intentionally NOT stripped: underscore-separated identifiers
+	// (ML_KEM_768, SLH_DSA_SHA2_128s) are typically variable/constant names in
+	// source code, not algorithm names, and should continue to be classified by
+	// their first segment ("ML" → unknown). Stripping underscores would silently
+	// misclassify those identifiers as PQC-safe.
+	//
+	// This pass fires ONLY when the input contained hyphens (strippedHyphens != upper)
+	// so that bare classical names like "X25519" are never re-matched against their
+	// hybrid superset, and must run BEFORE the quantumVulnerableFamilies check.
+	strippedHyphens := strings.ReplaceAll(upper, "-", "")
+	if strippedHyphens != upper {
+		for _, prefix := range pqcSafeFamiliesSorted {
+			strippedKey := strings.ReplaceAll(strings.ToUpper(prefix), "-", "")
+			if strings.HasPrefix(strippedHyphens, strippedKey) {
+				return prefix
+			}
+		}
+	}
+
 	for _, alg := range deprecatedAlgorithmsSorted {
 		if strings.EqualFold(name, alg) {
 			return alg
