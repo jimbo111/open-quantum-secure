@@ -58,34 +58,41 @@ func TestClassifyTLSGroup(t *testing.T) {
 	}
 }
 
-func TestClassifyTLSGroup_DraftRiskDeprecated(t *testing.T) {
-	// Draft Kyber codepoints must carry RiskDeprecated despite PQCPresent=true.
+func TestClassifyTLSGroup_DraftMaturity(t *testing.T) {
+	// Draft Kyber codepoints must carry Maturity="draft" and PQCPresent=true.
+	// Risk is derived by callers via ClassifyAlgorithm(groupInfo.Name).
 	for _, id := range []uint16{0x6399, 0x636D} {
 		info, ok := ClassifyTLSGroup(id)
 		if !ok {
 			t.Fatalf("expected known codepoint 0x%04x", id)
 		}
-		if info.RiskLevel != RiskDeprecated {
-			t.Errorf("draft codepoint 0x%04x RiskLevel=%q, want %q", id, info.RiskLevel, RiskDeprecated)
+		if info.Maturity != "draft" {
+			t.Errorf("draft codepoint 0x%04x Maturity=%q, want %q", id, info.Maturity, "draft")
+		}
+		if !info.PQCPresent {
+			t.Errorf("draft codepoint 0x%04x PQCPresent=false, want true", id)
 		}
 	}
 }
 
-func TestClassifyTLSGroup_PQCRiskSafe(t *testing.T) {
-	// Final PQC codepoints must carry RiskSafe.
+func TestClassifyTLSGroup_PQCFinalMaturity(t *testing.T) {
+	// Final PQC codepoints must carry Maturity="final" and PQCPresent=true.
 	pqcFinal := []uint16{0x11EB, 0x11EC, 0x11ED, 0x11EE, 0x0200, 0x0201, 0x0202}
 	for _, id := range pqcFinal {
 		info, ok := ClassifyTLSGroup(id)
 		if !ok {
 			t.Fatalf("expected known codepoint 0x%04x", id)
 		}
-		if info.RiskLevel != RiskSafe {
-			t.Errorf("PQC codepoint 0x%04x RiskLevel=%q, want %q", id, info.RiskLevel, RiskSafe)
+		if !info.PQCPresent {
+			t.Errorf("PQC codepoint 0x%04x PQCPresent=false, want true", id)
+		}
+		if info.Maturity != "final" {
+			t.Errorf("PQC codepoint 0x%04x Maturity=%q, want %q", id, info.Maturity, "final")
 		}
 	}
 }
 
-func TestClassifyTLSGroup_ClassicalRiskVulnerable(t *testing.T) {
+func TestClassifyTLSGroup_ClassicalNoPQC(t *testing.T) {
 	classical := []uint16{0x0017, 0x0018, 0x0019, 0x001d, 0x001e, 0x0100}
 	for _, id := range classical {
 		info, ok := ClassifyTLSGroup(id)
@@ -94,9 +101,6 @@ func TestClassifyTLSGroup_ClassicalRiskVulnerable(t *testing.T) {
 		}
 		if info.PQCPresent {
 			t.Errorf("classical codepoint 0x%04x should not have PQCPresent=true", id)
-		}
-		if info.RiskLevel != RiskVulnerable {
-			t.Errorf("classical codepoint 0x%04x RiskLevel=%q, want %q", id, info.RiskLevel, RiskVulnerable)
 		}
 	}
 }

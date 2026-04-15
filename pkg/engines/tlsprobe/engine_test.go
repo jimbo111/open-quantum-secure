@@ -204,7 +204,7 @@ func TestEngine_Concurrent_RaceDetector(t *testing.T) {
 
 	addr := srv.Listener.Addr().String()
 
-	// 15 targets all pointing to the same server — exceeds the semaphore cap of 10.
+	// 15 targets all pointing to the same server — exceeds the semaphore cap of 5.
 	const numTargets = 15
 	targets := make([]string, numTargets)
 	for i := range targets {
