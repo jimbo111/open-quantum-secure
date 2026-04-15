@@ -378,6 +378,9 @@ func joinEngines(source string, corroboratedBy []string) string {
 }
 
 // sanitizeID converts an algorithm/library name into a valid SARIF rule ID.
+// SARIF 2.1.0 §3.49.3 requires ruleId to be a "stable, opaque identifier",
+// which in practice means no angle brackets or quoting characters that
+// would need XML/HTML escaping in downstream consumers.
 func sanitizeID(name string) string {
 	r := strings.NewReplacer(
 		" ", "-",
@@ -385,6 +388,11 @@ func sanitizeID(name string) string {
 		".", "-",
 		"(", "",
 		")", "",
+		"<", "",
+		">", "",
+		`"`, "",
+		"'", "",
+		"&", "-",
 		"+", "PLUS",
 	)
 	return strings.ToUpper(r.Replace(name))
