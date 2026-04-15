@@ -16,18 +16,19 @@ import (
 
 // ProbeResult captures the TLS handshake data from a single endpoint.
 type ProbeResult struct {
-	Target          string // original host:port
-	ResolvedIP      string // IP used for connection (DNS-pinned)
-	TLSVersion      uint16
-	CipherSuiteID   uint16
-	CipherSuiteName string
-	LeafCertKeyAlgo string // "RSA", "ECDSA", "Ed25519"
-	LeafCertKeySize int    // bits
-	LeafCertSigAlgo string // e.g. "SHA256-RSA"
-	Verified        bool   // true if manual cert verification passed
-	VerifyError     string // non-empty if verification failed
-	Error           error  // non-nil means handshake failed entirely
-	Duration        time.Duration
+	Target            string // original host:port
+	ResolvedIP        string // IP used for connection (DNS-pinned)
+	TLSVersion        uint16
+	CipherSuiteID     uint16
+	CipherSuiteName   string
+	NegotiatedGroupID uint16 // IANA SupportedGroup codepoint from ConnectionState().CurveID; 0 = none/unknown
+	LeafCertKeyAlgo   string // "RSA", "ECDSA", "Ed25519"
+	LeafCertKeySize   int    // bits
+	LeafCertSigAlgo   string // e.g. "SHA256-RSA"
+	Verified          bool   // true if manual cert verification passed
+	VerifyError       string // non-empty if verification failed
+	Error             error  // non-nil means handshake failed entirely
+	Duration          time.Duration
 }
 
 // ProbeOpts configures a single TLS probe.
@@ -122,6 +123,11 @@ func probe(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
 	result.TLSVersion = state.Version
 	result.CipherSuiteID = state.CipherSuite
 	result.CipherSuiteName = tls.CipherSuiteName(state.CipherSuite)
+	// CurveID carries the IANA SupportedGroup codepoint negotiated during the
+	// handshake (e.g., 0x11EC for X25519MLKEM768, 0x001d for X25519). It is 0
+	// for TLS 1.2 sessions that used an RSA KEM (no ECDHE, no named group).
+	// tls.CurveID is a uint16 alias, so the conversion is always safe.
+	result.NegotiatedGroupID = uint16(state.CurveID)
 
 	// Extract leaf cert info.
 	if len(capturedCerts) > 0 {
