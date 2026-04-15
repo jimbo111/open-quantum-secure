@@ -36,12 +36,17 @@ const (
 	HNDLLevelLow HNDLLevel = "low"
 )
 
+// nowFn is the time source for defaultTimeToCRQC. Replaceable in tests to simulate
+// specific years (e.g. 2031 to verify the post-CRQC clamp, 2026 for the reference year).
+// Production code must never override this; use t.Cleanup to restore in tests.
+var nowFn = time.Now
+
 // defaultTimeToCRQC returns the estimated remaining years until a cryptographically
 // relevant quantum computer (CRQC) arrives, based on Mosca's 50% probability estimate
 // of 2031 (from 2022 reference). Returns 0 if the estimate has already elapsed.
 func defaultTimeToCRQC() int {
 	crqcYear := moscaReferenceYear + moscaCRQCWindow
-	remaining := crqcYear - time.Now().Year()
+	remaining := crqcYear - nowFn().Year()
 	if remaining < 0 {
 		return 0
 	}
