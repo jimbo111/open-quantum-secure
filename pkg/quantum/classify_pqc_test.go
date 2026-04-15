@@ -234,7 +234,7 @@ func TestClassifyPQCEdgeCases(t *testing.T) {
 
 		// PQC-like names that don't match any family
 		{"ML-KEM-FAKE unknown", "ML-KEM-FAKE", "kem", RiskSafe, SeverityInfo},   // prefix still matches ML-KEM
-		{"MLKEM768 no hyphen", "MLKEM768", "kem", RiskVulnerable, SeverityCritical}, // no prefix match, kem primitive → vulnerable + HNDL immediate
+		{"MLKEM768 no hyphen", "MLKEM768", "kem", RiskSafe, SeverityInfo}, // added to pqcSafeFamilies (X1 fix)
 		{"Kyber-768 old name", "Kyber-768", "kem", RiskVulnerable, SeverityCritical},
 		{"Dilithium3 old name", "Dilithium3", "signature", RiskVulnerable, SeverityHigh},
 		{"Falcon-512 old name", "Falcon-512", "signature", RiskVulnerable, SeverityHigh},
