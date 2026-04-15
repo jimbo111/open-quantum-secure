@@ -341,11 +341,13 @@ func scanCmd() *cobra.Command {
 		complianceFlag    string
 		ciMode            string
 		webhookURL        string
-		dataLifetimeYears int
-		signCBOM          bool
-		tlsTargets        []string
-		tlsInsecure       bool
-		tlsStrict         bool
+		dataLifetimeYears    int
+		signCBOM             bool
+		tlsTargets           []string
+		tlsInsecure          bool
+		tlsStrict            bool
+		dataSensitivityYears int
+		sector               string
 	)
 
 	cmd := &cobra.Command{
@@ -429,6 +431,22 @@ Example with data lifetime adjustment for healthcare:
 			}
 			if !cmd.Flags().Changed("tls-strict") && cfg.TLS.Strict {
 				tlsStrict = true
+			}
+
+			// Resolve data sensitivity shelf-life for Mosca HNDL calculation.
+			// Precedence: --data-sensitivity-years > --sector > default (10 years).
+			hndlShelfLife := dataSensitivityYears
+			if hndlShelfLife <= 0 && sector != "" {
+				hndlShelfLife = quantum.ShelfLifeForSector(sector)
+			}
+			if hndlShelfLife <= 0 {
+				hndlShelfLife = quantum.DefaultSectorShelfLifeYears
+			}
+			if cmd.Flags().Changed("data-sensitivity-years") || sector != "" {
+				surplus := quantum.ComputeHNDLSurplus(hndlShelfLife, 0, 0)
+				level := quantum.HNDLLevelFromSurplus(surplus)
+				fmt.Fprintf(os.Stderr, "HNDL sensitivity: %d years (Mosca surplus: %+d, level: %s)\n",
+					hndlShelfLife, surplus, level)
 			}
 
 			orch := buildOrchestrator()
@@ -647,6 +665,19 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
+
+	// HNDL Mosca inequality flags
+	cmd.Flags().IntVar(&dataSensitivityYears, "data-sensitivity-years", 0,
+		`Data shelf-life in years for the Mosca HNDL inequality calculation.
+Overrides --sector when both are set. Default: 10 years (or sector preset).
+Mosca inequality: surplus = (shelf_life + migration_lag) - time_to_CRQC
+  surplus > 2  → HNDL HIGH   (migrate now)
+  surplus 0..2 → HNDL MEDIUM (migration underway)
+  surplus < 0  → HNDL LOW    (data expires before CRQC)`)
+	cmd.Flags().StringVar(&sector, "sector", "",
+		`Industry sector for data sensitivity preset (case-insensitive).
+Presets (shelf-life): medical=30y, finance=7y, state=50y, infra=20y, code=5y, generic=10y.
+--data-sensitivity-years takes precedence if both flags are set.`)
 
 	return cmd
 }
