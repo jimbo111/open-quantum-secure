@@ -104,6 +104,12 @@ type UnifiedFinding struct {
 	TargetAlgorithm  string            `json:"targetAlgorithm,omitempty"`  // PQC replacement algorithm
 	TargetStandard   string            `json:"targetStandard,omitempty"`   // NIST standard reference
 	MigrationSnippet *MigrationSnippet `json:"migrationSnippet,omitempty"` // language-specific PQC migration example
+
+	// TLS network probe fields (populated by tls-probe engine, Sprint 1).
+	NegotiatedGroup     uint16 `json:"negotiatedGroup,omitempty"`     // IANA TLS SupportedGroup codepoint (0 = none/unknown)
+	NegotiatedGroupName string `json:"negotiatedGroupName,omitempty"` // human-readable name, e.g. "X25519MLKEM768"
+	PQCPresent          bool   `json:"pqcPresent,omitempty"`          // true when an ML-KEM-based group was negotiated
+	PQCMaturity         string `json:"pqcMaturity,omitempty"`         // "final", "draft", or "" (classical/unknown)
 }
 
 // MigrationSnippet holds a language-specific PQC migration code example.

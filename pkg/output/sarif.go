@@ -233,6 +233,15 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 			"explanation": f.MigrationSnippet.Explanation,
 		}
 	}
+	if f.NegotiatedGroupName != "" {
+		props["negotiatedGroup"] = f.NegotiatedGroupName
+	}
+	if f.PQCPresent {
+		props["pqcPresent"] = true
+	}
+	if f.PQCMaturity != "" {
+		props["pqcMaturity"] = f.PQCMaturity
+	}
 	result.Properties = props
 
 	return result
