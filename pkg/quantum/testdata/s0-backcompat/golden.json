@@ -1,0 +1,190 @@
+{
+  "schemaVersion": "1",
+  "records": [
+    {
+      "specimen": {
+        "algorithm": "RSA-2048",
+        "primitive": "signature",
+        "keySize": 2048
+      },
+      "risk": "quantum-vulnerable",
+      "severity": "high",
+      "hndlRisk": "deferred",
+      "migrationEffort": "moderate"
+    },
+    {
+      "specimen": {
+        "algorithm": "RSA-2048",
+        "primitive": "kem",
+        "keySize": 2048
+      },
+      "risk": "quantum-vulnerable",
+      "severity": "critical",
+      "hndlRisk": "immediate",
+      "migrationEffort": "complex"
+    },
+    {
+      "specimen": {
+        "algorithm": "ECDH",
+        "primitive": "key-exchange"
+      },
+      "risk": "quantum-vulnerable",
+      "severity": "critical",
+      "hndlRisk": "immediate",
+      "migrationEffort": "complex"
+    },
+    {
+      "specimen": {
+        "algorithm": "ECDSA",
+        "primitive": "signature"
+      },
+      "risk": "quantum-vulnerable",
+      "severity": "high",
+      "hndlRisk": "deferred",
+      "migrationEffort": "moderate"
+    },
+    {
+      "specimen": {
+        "algorithm": "X25519",
+        "primitive": "key-exchange"
+      },
+      "risk": "quantum-vulnerable",
+      "severity": "critical",
+      "hndlRisk": "immediate",
+      "migrationEffort": "complex"
+    },
+    {
+      "specimen": {
+        "algorithm": "X25519MLKEM768",
+        "primitive": "kem"
+      },
+      "risk": "quantum-safe",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "X25519-MLKEM-768",
+        "primitive": "kem"
+      },
+      "risk": "quantum-safe",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "SecP256r1MLKEM768",
+        "primitive": "kem"
+      },
+      "risk": "quantum-safe",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "ML-KEM-768",
+        "primitive": "kem"
+      },
+      "risk": "quantum-safe",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "ML-KEM-512",
+        "primitive": "kem"
+      },
+      "risk": "quantum-safe",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "ML-DSA-65",
+        "primitive": "signature"
+      },
+      "risk": "quantum-safe",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "SLH-DSA-128s",
+        "primitive": "signature"
+      },
+      "risk": "quantum-safe",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "SMAUG-T-128",
+        "primitive": "kem"
+      },
+      "risk": "quantum-safe",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "HAETAE-3",
+        "primitive": "signature"
+      },
+      "risk": "quantum-safe",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "AES-256-GCM",
+        "primitive": "symmetric",
+        "keySize": 256
+      },
+      "risk": "quantum-resistant",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "AES-128-CBC",
+        "primitive": "symmetric",
+        "keySize": 128
+      },
+      "risk": "quantum-weakened",
+      "severity": "low",
+      "hndlRisk": "",
+      "migrationEffort": "moderate"
+    },
+    {
+      "specimen": {
+        "algorithm": "SHA-256",
+        "primitive": "hash",
+        "keySize": 256
+      },
+      "risk": "quantum-resistant",
+      "severity": "info",
+      "hndlRisk": ""
+    },
+    {
+      "specimen": {
+        "algorithm": "MD5",
+        "primitive": "hash"
+      },
+      "risk": "deprecated",
+      "severity": "critical",
+      "hndlRisk": "",
+      "migrationEffort": "simple"
+    },
+    {
+      "specimen": {
+        "algorithm": "DES",
+        "primitive": "symmetric",
+        "keySize": 56
+      },
+      "risk": "deprecated",
+      "severity": "critical",
+      "hndlRisk": "",
+      "migrationEffort": "simple"
+    }
+  ]
+}

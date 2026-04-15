@@ -95,7 +95,7 @@ type UnifiedFinding struct {
 	Severity       Severity     `json:"severity,omitempty"`
 	Recommendation string       `json:"recommendation,omitempty"`
 	DataFlowPath   []FlowStep   `json:"dataFlowPath,omitempty"`
-	HNDLRisk       string       `json:"hndlRisk,omitempty"`       // "immediate", "deferred", or "" (HNDL = Harvest Now, Decrypt Later)
+	HNDLRisk       string       `json:"hndlRisk,omitempty"`       // "immediate" (classical KEM), "deferred" (signature), or "" (PQC/symmetric/no risk). PFS/ECDHE does NOT lower this — see pkg/quantum classify.go.
 	Priority       string       `json:"priority,omitempty"`       // P1, P2, P3, P4
 	BlastRadius    int          `json:"blastRadius,omitempty"`    // 0-100, copied from impact analysis
 	TestFile        bool         `json:"testFile,omitempty"`        // true when finding is from a test file

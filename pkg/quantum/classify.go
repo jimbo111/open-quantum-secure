@@ -40,12 +40,27 @@ type Classification struct {
 }
 
 // HNDL risk levels for Harvest Now, Decrypt Later attacks.
+//
+// PFS (ECDHE) does NOT lower HNDL risk when the KEM is classical. The ephemeral
+// ECDH public key is captured in the recorded handshake and is Shor-breakable;
+// PFS protects against long-term key compromise, not quantum decryption of the
+// ephemeral exchange itself. Only a PQ-KEM session (ML-KEM, X25519MLKEM768, etc.)
+// is HNDL-resistant. See: Mosca, IEEE S&P 2018; Blanco-Romero et al., arXiv:2603.01091 (2026).
 const (
-	HNDLImmediate = "immediate" // Key exchange — data encrypted now can be decrypted when quantum computers arrive (2030 deadline)
-	HNDLDeferred  = "deferred"  // Signatures — only future signatures at risk, not past data (2035 deadline)
+	HNDLImmediate = "immediate" // Classical key exchange — recorded data can be decrypted when CRQC arrives (CNSA 2.0: 2030)
+	HNDLDeferred  = "deferred"  // Signatures — only future signatures at risk, not past data (CNSA 2.0: 2035)
 )
 
-// pqcSafeFamilies are NIST post-quantum standard families and K-PQC Round 4 finalists.
+// pqcSafeFamilies are NIST post-quantum standard families, K-PQC Round 4 finalists,
+// and IETF-standardized hybrid KEMs that pair a classical primitive with ML-KEM.
+// Hybrid KEMs must be listed here with their full name so that extractBaseName
+// (longest-prefix-first) returns the full hybrid name rather than the classical
+// component prefix (e.g. "X25519"), which would incorrectly flag them as vulnerable.
+//
+// HNDL safety of hybrids: even though the classical component (X25519, P-256, etc.)
+// is Shor-breakable, the ML-KEM component provides an independent PQ-secure shared
+// secret. An attacker with a CRQC can break X25519 but still cannot break ML-KEM,
+// so the session key remains confidential. HNDL risk is therefore LOW.
 var pqcSafeFamilies = map[string]bool{
 	"ML-KEM":  true, // FIPS 203
 	"ML-DSA":  true, // FIPS 204
@@ -58,6 +73,12 @@ var pqcSafeFamilies = map[string]bool{
 	"HAETAE":  true, // Signature, lattice-based
 	"AIMer":   true, // Signature, AES-based MPC-in-the-head
 	"NTRU+":   true, // KEM, NTRU variant
+	// Hybrid KEMs: classical + ML-KEM (IETF draft-ietf-tls-hybrid-design-16)
+	// TLS codepoint classification is handled in Sprint 1 (S1.3); name-based
+	// classification is added here so source/config findings are correct too.
+	"X25519MLKEM768":    true, // 0x11EC — production dominant (>50% Cloudflare, Oct 2025)
+	"SecP256r1MLKEM768": true, // 0x11EB
+	"SecP384r1MLKEM1024": true, // 0x11ED
 }
 
 // kpqcEliminatedCandidates are K-PQC candidates eliminated in earlier rounds.
@@ -417,6 +438,30 @@ func extractBaseName(name string) string {
 			return prefix
 		}
 	}
+
+	// Hyphenated hybrid KEM normalization: config files and AST tokenisers sometimes
+	// produce "X25519-MLKEM-768" instead of "X25519MLKEM768". Strip HYPHENS ONLY
+	// from the input and retry the PQC prefix match.
+	//
+	// Underscores are intentionally NOT stripped: underscore-separated identifiers
+	// (ML_KEM_768, SLH_DSA_SHA2_128s) are typically variable/constant names in
+	// source code, not algorithm names, and should continue to be classified by
+	// their first segment ("ML" → unknown). Stripping underscores would silently
+	// misclassify those identifiers as PQC-safe.
+	//
+	// This pass fires ONLY when the input contained hyphens (strippedHyphens != upper)
+	// so that bare classical names like "X25519" are never re-matched against their
+	// hybrid superset, and must run BEFORE the quantumVulnerableFamilies check.
+	strippedHyphens := strings.ReplaceAll(upper, "-", "")
+	if strippedHyphens != upper {
+		for _, prefix := range pqcSafeFamiliesSorted {
+			strippedKey := strings.ReplaceAll(strings.ToUpper(prefix), "-", "")
+			if strings.HasPrefix(strippedHyphens, strippedKey) {
+				return prefix
+			}
+		}
+	}
+
 	for _, alg := range deprecatedAlgorithmsSorted {
 		if strings.EqualFold(name, alg) {
 			return alg
