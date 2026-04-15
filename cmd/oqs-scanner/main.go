@@ -442,7 +442,7 @@ Example with data lifetime adjustment for healthcare:
 			// Precedence: --data-lifetime-years (explicit) > --sector > default (10 years).
 			hndlShelfLife := dataLifetimeYears
 			if hndlShelfLife <= 0 && sector != "" {
-				hndlShelfLife = quantum.ShelfLifeForSector(sector)
+				hndlShelfLife = quantum.WarnOnUnknownSector(sector, os.Stderr)
 			}
 			if hndlShelfLife <= 0 {
 				hndlShelfLife = quantum.DefaultSectorShelfLifeYears

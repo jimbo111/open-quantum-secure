@@ -1,6 +1,8 @@
 package quantum
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -81,5 +83,64 @@ func TestSectorShelfLife_AllPresetsConsistentWithMap(t *testing.T) {
 		if got != years {
 			t.Errorf("SectorShelfLife[%q] = %d, want %d", sector, got, years)
 		}
+	}
+}
+
+// ─── WarnOnUnknownSector ─────────────────────────────────────────────────────
+
+func TestWarnOnUnknownSector_KnownSectorNoWarning(t *testing.T) {
+	var buf bytes.Buffer
+	for sector, want := range SectorShelfLife {
+		buf.Reset()
+		got := WarnOnUnknownSector(sector, &buf)
+		if got != want {
+			t.Errorf("WarnOnUnknownSector(%q) = %d, want %d", sector, got, want)
+		}
+		if buf.Len() != 0 {
+			t.Errorf("WarnOnUnknownSector(%q) wrote unexpected output: %q", sector, buf.String())
+		}
+	}
+}
+
+func TestWarnOnUnknownSector_UnknownSectorWarnsAndFallsBack(t *testing.T) {
+	var buf bytes.Buffer
+	got := WarnOnUnknownSector("unicorn", &buf)
+	if got != DefaultSectorShelfLifeYears {
+		t.Errorf("WarnOnUnknownSector(\"unicorn\") = %d, want %d", got, DefaultSectorShelfLifeYears)
+	}
+	warning := buf.String()
+	if !strings.Contains(warning, "WARNING") {
+		t.Errorf("expected WARNING prefix in output, got: %q", warning)
+	}
+	if !strings.Contains(warning, "unicorn") {
+		t.Errorf("warning should echo the unknown sector name, got: %q", warning)
+	}
+	// Warning must list all valid sector names.
+	for sector := range SectorShelfLife {
+		if !strings.Contains(warning, sector) {
+			t.Errorf("warning should list valid sector %q, got: %q", sector, warning)
+		}
+	}
+}
+
+func TestWarnOnUnknownSector_EmptyNoWarning(t *testing.T) {
+	var buf bytes.Buffer
+	got := WarnOnUnknownSector("", &buf)
+	if got != DefaultSectorShelfLifeYears {
+		t.Errorf("WarnOnUnknownSector(\"\") = %d, want %d", got, DefaultSectorShelfLifeYears)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("WarnOnUnknownSector(\"\") should not write output, got: %q", buf.String())
+	}
+}
+
+func TestWarnOnUnknownSector_CaseInsensitiveNoWarning(t *testing.T) {
+	var buf bytes.Buffer
+	got := WarnOnUnknownSector("MEDICAL", &buf)
+	if got != 30 {
+		t.Errorf("WarnOnUnknownSector(\"MEDICAL\") = %d, want 30", got)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("case-insensitive match should not warn, got: %q", buf.String())
 	}
 }

@@ -1,6 +1,11 @@
 package quantum
 
-import "strings"
+import (
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+)
 
 // SectorShelfLife maps industry sector names to their typical data shelf-life in years.
 // Used as the default for --data-lifetime-years when --sector is specified.
@@ -33,7 +38,8 @@ const DefaultSectorShelfLifeYears = 10
 
 // ShelfLifeForSector returns the data shelf-life for the given sector name.
 // Matching is case-insensitive. Returns DefaultSectorShelfLifeYears for an
-// empty or unrecognized sector.
+// empty or unrecognized sector. See WarnOnUnknownSector for a version that
+// emits a diagnostic when the sector name is not recognized.
 func ShelfLifeForSector(sector string) int {
 	if sector == "" {
 		return DefaultSectorShelfLifeYears
@@ -41,5 +47,29 @@ func ShelfLifeForSector(sector string) int {
 	if years, ok := SectorShelfLife[strings.ToLower(sector)]; ok {
 		return years
 	}
+	return DefaultSectorShelfLifeYears
+}
+
+// WarnOnUnknownSector is like ShelfLifeForSector but writes a warning to w when
+// the sector is non-empty and not a recognized preset. The warning lists all valid
+// sector names so the user can correct a typo without consulting the docs.
+//
+// Call this from CLI commands instead of ShelfLifeForSector when user input is
+// involved so that silently falling back to the default is visible in the output.
+func WarnOnUnknownSector(sector string, w io.Writer) int {
+	if sector == "" {
+		return DefaultSectorShelfLifeYears
+	}
+	if years, ok := SectorShelfLife[strings.ToLower(sector)]; ok {
+		return years
+	}
+	// Build a sorted list of valid names for the warning message.
+	valid := make([]string, 0, len(SectorShelfLife))
+	for s := range SectorShelfLife {
+		valid = append(valid, s)
+	}
+	sort.Strings(valid)
+	fmt.Fprintf(w, "WARNING: unknown --sector %q; valid values: %s. Falling back to \"generic\" (%d years).\n",
+		sector, strings.Join(valid, ", "), DefaultSectorShelfLifeYears)
 	return DefaultSectorShelfLifeYears
 }
