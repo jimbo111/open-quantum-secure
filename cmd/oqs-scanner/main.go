@@ -363,6 +363,9 @@ Example with data lifetime adjustment for healthcare:
 			if dataLifetimeYears < 0 {
 				return fmt.Errorf("--data-lifetime-years must be a positive integer (got %d); set a value > 0 reflecting actual data retention (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default", dataLifetimeYears)
 			}
+			if cmd.Flags().Changed("data-lifetime-years") && dataLifetimeYears == 0 {
+				return fmt.Errorf("--data-lifetime-years 0 is not valid: no data has zero sensitivity in practice; set a positive value (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default")
+			}
 
 			absPath, err := filepath.Abs(targetPath)
 			if err != nil {
@@ -722,6 +725,9 @@ Example:
 			}
 			if dataLifetimeYears < 0 {
 				return fmt.Errorf("--data-lifetime-years must be a positive integer (got %d); set a value > 0 reflecting actual data retention (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default", dataLifetimeYears)
+			}
+			if cmd.Flags().Changed("data-lifetime-years") && dataLifetimeYears == 0 {
+				return fmt.Errorf("--data-lifetime-years 0 is not valid: no data has zero sensitivity in practice; set a positive value (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default")
 			}
 			if diffBase == "" {
 				return fmt.Errorf("--base is required (e.g. main, origin/main, a commit SHA)")
