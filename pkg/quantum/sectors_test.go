@@ -1,6 +1,8 @@
 package quantum
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestShelfLifeForSector_AllPresets(t *testing.T) {
 	tests := []struct {

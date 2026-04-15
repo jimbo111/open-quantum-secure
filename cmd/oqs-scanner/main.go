@@ -341,13 +341,12 @@ func scanCmd() *cobra.Command {
 		complianceFlag    string
 		ciMode            string
 		webhookURL        string
-		dataLifetimeYears    int
-		signCBOM             bool
-		tlsTargets           []string
-		tlsInsecure          bool
-		tlsStrict            bool
-		dataSensitivityYears int
-		sector               string
+		dataLifetimeYears int
+		signCBOM          bool
+		tlsTargets        []string
+		tlsInsecure       bool
+		tlsStrict         bool
+		sector            string
 	)
 
 	cmd := &cobra.Command{
@@ -362,7 +361,7 @@ Example with data lifetime adjustment for healthcare:
 				return fmt.Errorf("--path is required")
 			}
 			if dataLifetimeYears < 0 {
-				return fmt.Errorf("--data-lifetime-years must be >= 0 (got %d)", dataLifetimeYears)
+				return fmt.Errorf("--data-lifetime-years must be a positive integer (got %d); set a value > 0 reflecting actual data retention (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default", dataLifetimeYears)
 			}
 
 			absPath, err := filepath.Abs(targetPath)
@@ -433,16 +432,19 @@ Example with data lifetime adjustment for healthcare:
 				tlsStrict = true
 			}
 
-			// Resolve data sensitivity shelf-life for Mosca HNDL calculation.
-			// Precedence: --data-sensitivity-years > --sector > default (10 years).
-			hndlShelfLife := dataSensitivityYears
+			// Resolve HNDL shelf-life for Mosca inequality.
+			// --data-lifetime-years is the single source of truth for both QRS penalty
+			// multiplier and HNDL shelf life. --sector provides a preset when
+			// --data-lifetime-years is not explicitly set by the caller.
+			// Precedence: --data-lifetime-years (explicit) > --sector > default (10 years).
+			hndlShelfLife := dataLifetimeYears
 			if hndlShelfLife <= 0 && sector != "" {
 				hndlShelfLife = quantum.ShelfLifeForSector(sector)
 			}
 			if hndlShelfLife <= 0 {
 				hndlShelfLife = quantum.DefaultSectorShelfLifeYears
 			}
-			if cmd.Flags().Changed("data-sensitivity-years") || sector != "" {
+			if cmd.Flags().Changed("data-lifetime-years") || sector != "" {
 				surplus := quantum.ComputeHNDLSurplus(hndlShelfLife, 0, 0)
 				level := quantum.HNDLLevelFromSurplus(surplus)
 				fmt.Fprintf(os.Stderr, "HNDL sensitivity: %d years (Mosca surplus: %+d, level: %s)\n",
@@ -656,28 +658,23 @@ Example with data lifetime adjustment for healthcare:
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "POST scan results to this HTTPS URL on completion (JSON payload)")
 	cmd.Flags().BoolVar(&signCBOM, "sign-cbom", false, "Sign the CBOM output with an ephemeral Ed25519 key pair (only applies when --format cbom)")
 	cmd.Flags().IntVar(&dataLifetimeYears, "data-lifetime-years", 0,
-		`Expected data retention period in years. Adjusts HNDL urgency in QRS scoring.
-Industry guidelines: healthcare/medical=30, government/classified=25,
-financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
-0 = disabled (default). Values >10 amplify penalties, <5 reduce them.`)
+		`Expected data retention period in years. Used for both QRS penalty adjustment and
+the Mosca HNDL inequality calculation (surplus = shelf_life + migration_lag - time_to_CRQC).
+Industry guidelines: medical=30, state=50, infra=20, finance=7, code=5, generic=10.
+0 = disabled (default; HNDL uses --sector preset or 10y fallback for Mosca).
+Values >10 amplify QRS penalties, <5 reduce them. Must be > 0 if explicitly set.
+Overrides --sector when both are provided.`)
 
 	// TLS probe flags
 	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
 
-	// HNDL Mosca inequality flags
-	cmd.Flags().IntVar(&dataSensitivityYears, "data-sensitivity-years", 0,
-		`Data shelf-life in years for the Mosca HNDL inequality calculation.
-Overrides --sector when both are set. Default: 10 years (or sector preset).
-Mosca inequality: surplus = (shelf_life + migration_lag) - time_to_CRQC
-  surplus > 2  → HNDL HIGH   (migrate now)
-  surplus 0..2 → HNDL MEDIUM (migration underway)
-  surplus < 0  → HNDL LOW    (data expires before CRQC)`)
+	// HNDL Mosca sector preset flag
 	cmd.Flags().StringVar(&sector, "sector", "",
-		`Industry sector for data sensitivity preset (case-insensitive).
-Presets (shelf-life): medical=30y, finance=7y, state=50y, infra=20y, code=5y, generic=10y.
---data-sensitivity-years takes precedence if both flags are set.`)
+		`Industry sector preset for Mosca HNDL shelf-life (case-insensitive).
+Presets: medical=30y, finance=7y, state=50y, infra=20y, code=5y, generic=10y.
+--data-lifetime-years takes precedence when both are set.`)
 
 	return cmd
 }
@@ -724,7 +721,7 @@ Example:
 				return fmt.Errorf("--path is required")
 			}
 			if dataLifetimeYears < 0 {
-				return fmt.Errorf("--data-lifetime-years must be >= 0 (got %d)", dataLifetimeYears)
+				return fmt.Errorf("--data-lifetime-years must be a positive integer (got %d); set a value > 0 reflecting actual data retention (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default", dataLifetimeYears)
 			}
 			if diffBase == "" {
 				return fmt.Errorf("--base is required (e.g. main, origin/main, a commit SHA)")

@@ -3,7 +3,7 @@ package quantum
 import "strings"
 
 // SectorShelfLife maps industry sector names to their typical data shelf-life in years.
-// Used as the default for --data-sensitivity-years when --sector is specified.
+// Used as the default for --data-lifetime-years when --sector is specified.
 //
 // Values are conservative upper bounds sourced from industry retention requirements:
 //   - medical: HIPAA requires records for 6 years; state laws can require 30+ years for
@@ -27,7 +27,7 @@ var SectorShelfLife = map[string]int{
 	"generic": 10,
 }
 
-// DefaultSectorShelfLifeYears is returned when no --sector or --data-sensitivity-years
+// DefaultSectorShelfLifeYears is returned when no --sector or --data-lifetime-years
 // is provided. 10 years covers the most common legal hold periods.
 const DefaultSectorShelfLifeYears = 10
 
