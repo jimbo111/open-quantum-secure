@@ -126,6 +126,9 @@ var deprecatedAlgorithms = map[string]bool{
 
 // ClassifyAlgorithm assesses the quantum risk of a cryptographic algorithm.
 func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
+	// Trim surrounding whitespace that AST/grep engines sometimes surface on
+	// tokenised names. Without this, " RSA " fell through to RiskUnknown.
+	name = strings.TrimSpace(name)
 	upperName := strings.ToUpper(name)
 	baseName := extractBaseName(name)
 
