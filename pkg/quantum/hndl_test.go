@@ -1,6 +1,7 @@
 package quantum
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -175,4 +176,110 @@ func TestHNDL_RecommendationContainsHNDLTerminology(t *testing.T) {
 
 func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// ─── Mosca inequality: ComputeHNDLSurplus ──────────────────────────────────
+
+func TestComputeHNDLSurplus_ExplicitValues(t *testing.T) {
+	tests := []struct {
+		name         string
+		shelfLife    int
+		migLag       int
+		timeToCRQC   int
+		wantSurplus  int
+	}{
+		// surplus = (shelf + lag) - crqc
+		{"zero shelf, explicit lag+crqc", 0, 5, 5, 0},
+		{"standard 10y shelf", 10, 5, 5, 10},
+		{"medical 30y shelf", 30, 5, 5, 30},
+		{"finance 7y shelf", 7, 5, 5, 7},
+		{"state 50y shelf", 50, 5, 5, 50},
+		{"code 5y shelf, crqc=10", 5, 5, 10, 0},
+		{"code 5y shelf, crqc=15", 5, 5, 15, -5},
+		{"negative surplus (data expires before CRQC)", 1, 3, 10, -6},
+		{"negative shelf treated as-is", -1, 5, 5, -1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ComputeHNDLSurplus(tt.shelfLife, tt.migLag, tt.timeToCRQC)
+			if got != tt.wantSurplus {
+				t.Errorf("ComputeHNDLSurplus(%d, %d, %d) = %d, want %d",
+					tt.shelfLife, tt.migLag, tt.timeToCRQC, got, tt.wantSurplus)
+			}
+		})
+	}
+}
+
+func TestComputeHNDLSurplus_DefaultMigrationLag(t *testing.T) {
+	// Passing migrationLagYears=0 should use DefaultMigrationLagYears (5).
+	explicit := ComputeHNDLSurplus(10, DefaultMigrationLagYears, 5)
+	defaulted := ComputeHNDLSurplus(10, 0, 5)
+	if explicit != defaulted {
+		t.Errorf("migLag=0 should use default (%d): explicit=%d, defaulted=%d",
+			DefaultMigrationLagYears, explicit, defaulted)
+	}
+}
+
+func TestComputeHNDLSurplus_DefaultTimeToCRQC(t *testing.T) {
+	// Passing timeToCRQCYears=0 should use the dynamic default (≥ 0).
+	// We can't pin the exact value across years, but the result must be
+	// arithmetically consistent with a non-negative CRQC window.
+	surplus := ComputeHNDLSurplus(10, 5, 0)
+	// timeToCRQC is always ≥ 0, so surplus ≤ (10 + 5) = 15.
+	if surplus > 15 {
+		t.Errorf("ComputeHNDLSurplus(10, 5, 0) = %d, want ≤ 15 (CRQC must be ≥ 0)", surplus)
+	}
+	// With shelf=10 and default lag=5, surplus should always map to HIGH for any
+	// year ≤ 2031 (surplus = 15 - crqc ≥ 15 - 5 = 10 when crqc≥0 today) or remain
+	// elevated when CRQC arrives (surplus = 15 - 0 = 15 in year 2031+).
+	level := HNDLLevelFromSurplus(surplus)
+	if level != HNDLLevelHigh {
+		t.Errorf("10y shelf with defaults should be HNDLLevelHigh, got %s (surplus=%d)", level, surplus)
+	}
+}
+
+func TestComputeHNDLSurplus_EdgeCases(t *testing.T) {
+	// Zero shelf life with explicit values — near-zero surplus.
+	s := ComputeHNDLSurplus(0, 5, 5)
+	if s != 0 {
+		t.Errorf("ComputeHNDLSurplus(0, 5, 5) = %d, want 0", s)
+	}
+
+	// Zero shelf, zero lag (→default 5), zero crqc (→dynamic ≥ 0): surplus = 5 - crqc.
+	// We just verify it doesn't panic and returns an int.
+	_ = ComputeHNDLSurplus(0, 0, 0)
+
+	// Negative shelf is passed through unchanged.
+	s = ComputeHNDLSurplus(-5, 5, 5)
+	if s != -5 {
+		t.Errorf("ComputeHNDLSurplus(-5, 5, 5) = %d, want -5", s)
+	}
+}
+
+// ─── HNDLLevelFromSurplus ─────────────────────────────────────────────────
+
+func TestHNDLLevelFromSurplus(t *testing.T) {
+	tests := []struct {
+		surplus int
+		want    HNDLLevel
+	}{
+		{-10, HNDLLevelLow},
+		{-1, HNDLLevelLow},
+		{0, HNDLLevelMedium},
+		{1, HNDLLevelMedium},
+		{2, HNDLLevelMedium},
+		{3, HNDLLevelHigh},
+		{10, HNDLLevelHigh},
+		{50, HNDLLevelHigh},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("surplus_%+d", tt.surplus), func(t *testing.T) {
+			got := HNDLLevelFromSurplus(tt.surplus)
+			if got != tt.want {
+				t.Errorf("HNDLLevelFromSurplus(%d) = %q, want %q", tt.surplus, got, tt.want)
+			}
+		})
+	}
 }
