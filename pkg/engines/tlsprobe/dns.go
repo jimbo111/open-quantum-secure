@@ -6,7 +6,11 @@ import (
 	"net"
 )
 
-// privateRanges contains RFC 1918, loopback, link-local, and IPv6 private ranges.
+// privateRanges contains ranges that must not be reachable from a TLS probe
+// when --tls-strict is set: RFC 1918, loopback, link-local, unspecified, CGNAT,
+// benchmark, IPv6 unique-local / link-local / loopback / unspecified, plus
+// multicast and limited broadcast (not valid TLS destinations but could bypass
+// the strict guard if omitted).
 var privateRanges []*net.IPNet
 
 func init() {
@@ -16,13 +20,16 @@ func init() {
 		"192.168.0.0/16",
 		"127.0.0.0/8",
 		"169.254.0.0/16",
-		"0.0.0.0/8",      // "This" network (includes 0.0.0.0)
-		"100.64.0.0/10",   // CGNAT (RFC 6598)
-		"198.18.0.0/15",   // Benchmark testing (RFC 2544)
+		"0.0.0.0/8",           // "This" network (includes 0.0.0.0)
+		"100.64.0.0/10",       // CGNAT (RFC 6598)
+		"198.18.0.0/15",       // Benchmark testing (RFC 2544)
+		"224.0.0.0/4",         // IPv4 multicast
+		"255.255.255.255/32",  // IPv4 limited broadcast
 		"::1/128",
 		"::/128",
 		"fc00::/7",
 		"fe80::/10",
+		"ff00::/8",            // IPv6 multicast
 	}
 	for _, cidr := range cidrs {
 		_, ipNet, _ := net.ParseCIDR(cidr)

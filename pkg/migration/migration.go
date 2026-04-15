@@ -162,7 +162,14 @@ func langFromExt(ext string) string {
 func GenerateSnippet(filePath, classicalAlg, primitive, targetAlg string) *Snippet {
 	lang := langFromExt(strings.ToLower(filepath.Ext(filePath)))
 	if lang == "" {
-		return nil
+		// Extensionless server config files are common on Debian/Ubuntu
+		// (e.g. /etc/nginx/sites-available/default, /etc/haproxy/haproxy).
+		// Detect them by path so configSnippet can still run.
+		if isExtensionlessConfigPath(filePath) {
+			lang = "config"
+		} else {
+			return nil
+		}
 	}
 
 	// Bail out immediately for PQC-safe algorithms — no migration needed.
@@ -504,6 +511,22 @@ func configServerType(filePath string) string {
 	}
 }
 
+// isExtensionlessConfigPath reports whether filePath looks like a server
+// configuration file even though it has no file extension (e.g.
+// /etc/nginx/sites-available/default).
+func isExtensionlessConfigPath(filePath string) bool {
+	if filepath.Ext(filePath) != "" {
+		return false
+	}
+	lower := strings.ToLower(filepath.ToSlash(filePath))
+	for _, marker := range []string{"/nginx/", "/apache/", "/apache2/", "/httpd/", "/haproxy/"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // configSnippet generates a server-specific PQC migration snippet for config
 // files. The filePath is used to detect whether the target is nginx, Apache,
 // or HAProxy; all other paths default to nginx-style directives.
@@ -533,7 +556,22 @@ SSLCertificateKeyFile /etc/ssl/private/server-mldsa.key
 				Explanation: "Replace RSA/ECDSA TLS certificate with an ML-DSA-65 certificate (FIPS 204).",
 			}
 
-		default: // nginx and haproxy fall back to nginx-style for signing
+		case "haproxy":
+			before := `# Classical RSA certificate bundle (cert + key in one file per HAProxy convention)
+bind *:443 ssl crt /etc/haproxy/certs/server-rsa.pem`
+
+			after := `# Replace with ML-DSA certificate bundle
+bind *:443 ssl crt /etc/haproxy/certs/server-mldsa.pem
+# Generate with: openssl genpkey -algorithm ML-DSA-65`
+
+			return &Snippet{
+				Language:    "config",
+				Before:      before,
+				After:       after,
+				Explanation: "Replace RSA/ECDSA TLS certificate with an ML-DSA-65 certificate (FIPS 204) in the HAProxy bind directive.",
+			}
+
+		default: // nginx
 			before := `# Certificate key type (classical RSA)
 ssl_certificate     /etc/ssl/certs/server-rsa.crt;
 ssl_certificate_key /etc/ssl/private/server-rsa.key;`

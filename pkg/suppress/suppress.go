@@ -216,17 +216,8 @@ func (s *Scanner) MatchesIgnorePattern(filePath string) bool {
 
 		// Handle ** recursive patterns
 		if strings.Contains(pattern, "**") {
-			prefix := strings.Split(pattern, "**")[0]
-			if strings.HasPrefix(relPath, prefix) {
+			if matchDoubleStar(pattern, relPath) {
 				return true
-			}
-			// Also check path components
-			parts := strings.Split(relPath, "/")
-			for i := range parts {
-				suffix := strings.Join(parts[i:], "/")
-				if strings.HasPrefix(suffix, prefix) {
-					return true
-				}
 			}
 			continue
 		}
@@ -252,6 +243,47 @@ func (s *Scanner) MatchesIgnorePattern(filePath string) bool {
 	}
 
 	return false
+}
+
+// matchDoubleStar reports whether path matches a glob pattern that may contain
+// "**" segments. "**" matches zero or more path segments; other segments are
+// matched with filepath.Match (so "*" matches any single-segment substring).
+// Both pattern and path use forward slashes.
+func matchDoubleStar(pattern, path string) bool {
+	return matchSegments(strings.Split(pattern, "/"), strings.Split(path, "/"))
+}
+
+func matchSegments(pat, path []string) bool {
+	for len(pat) > 0 {
+		if pat[0] == "**" {
+			// Collapse consecutive ** to one.
+			for len(pat) > 1 && pat[1] == "**" {
+				pat = pat[1:]
+			}
+			// ** at end matches any remaining path (including empty).
+			if len(pat) == 1 {
+				return true
+			}
+			// Try matching the rest of pattern against every suffix of path.
+			rest := pat[1:]
+			for i := 0; i <= len(path); i++ {
+				if matchSegments(rest, path[i:]) {
+					return true
+				}
+			}
+			return false
+		}
+		if len(path) == 0 {
+			return false
+		}
+		matched, err := filepath.Match(pat[0], path[0])
+		if err != nil || !matched {
+			return false
+		}
+		pat = pat[1:]
+		path = path[1:]
+	}
+	return len(path) == 0
 }
 
 // Stats returns suppression statistics.
