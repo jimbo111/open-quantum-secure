@@ -16,8 +16,12 @@ import (
 )
 
 const (
-	defaultTimeout     = 10 * time.Second
-	defaultConcurrency = 10
+	defaultTimeout = 10 * time.Second
+	// defaultConcurrency caps the number of simultaneous TLS handshakes.
+	// Empirical sslyze finding: >5 concurrent probes trigger server-side rate
+	// limiting (connection resets, TCP RST floods) producing false negatives
+	// where reachable servers appear unreachable. 5 is the safe upper bound.
+	defaultConcurrency = 5
 	maxTargets         = 100
 )
 
