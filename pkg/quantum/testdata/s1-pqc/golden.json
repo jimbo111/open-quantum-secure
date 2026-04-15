@@ -1,0 +1,103 @@
+{
+  "schemaVersion": "1",
+  "records": [
+    {
+      "id": "0x0017",
+      "name": "secp256r1",
+      "pqcPresent": false,
+      "maturity": "",
+      "known": true
+    },
+    {
+      "id": "0x001d",
+      "name": "X25519",
+      "pqcPresent": false,
+      "maturity": "",
+      "known": true
+    },
+    {
+      "id": "0x001e",
+      "name": "X448",
+      "pqcPresent": false,
+      "maturity": "",
+      "known": true
+    },
+    {
+      "id": "0x0100",
+      "name": "ffdhe2048",
+      "pqcPresent": false,
+      "maturity": "",
+      "known": true
+    },
+    {
+      "id": "0x0104",
+      "name": "ffdhe8192",
+      "pqcPresent": false,
+      "maturity": "",
+      "known": true
+    },
+    {
+      "id": "0x11eb",
+      "name": "SecP256r1MLKEM768",
+      "pqcPresent": true,
+      "maturity": "final",
+      "known": true
+    },
+    {
+      "id": "0x11ec",
+      "name": "X25519MLKEM768",
+      "pqcPresent": true,
+      "maturity": "final",
+      "known": true
+    },
+    {
+      "id": "0x11ed",
+      "name": "SecP384r1MLKEM1024",
+      "pqcPresent": true,
+      "maturity": "final",
+      "known": true
+    },
+    {
+      "id": "0x11ee",
+      "name": "curveSM2MLKEM768",
+      "pqcPresent": true,
+      "maturity": "final",
+      "known": true
+    },
+    {
+      "id": "0x0200",
+      "name": "MLKEM512",
+      "pqcPresent": true,
+      "maturity": "final",
+      "known": true
+    },
+    {
+      "id": "0x0201",
+      "name": "MLKEM768",
+      "pqcPresent": true,
+      "maturity": "final",
+      "known": true
+    },
+    {
+      "id": "0x0202",
+      "name": "MLKEM1024",
+      "pqcPresent": true,
+      "maturity": "final",
+      "known": true
+    },
+    {
+      "id": "0x6399",
+      "name": "X25519Kyber768Draft00",
+      "pqcPresent": true,
+      "maturity": "draft",
+      "known": true
+    },
+    {
+      "id": "0x636d",
+      "name": "X25519Kyber768Draft00",
+      "pqcPresent": true,
+      "maturity": "draft",
+      "known": true
+    }
+  ]
+}

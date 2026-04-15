@@ -193,7 +193,7 @@ func TestTier5NetworkString(t *testing.T) {
 	}
 }
 
-// TestEngine_Concurrent_RaceDetector saturates the semaphore (defaultConcurrency=10)
+// TestEngine_Concurrent_RaceDetector saturates the semaphore (defaultConcurrency=5)
 // with 15 targets that all point to the same TLS server. It verifies that every
 // target produces findings (all reachable) and that no data races occur under -race.
 func TestEngine_Concurrent_RaceDetector(t *testing.T) {
@@ -204,7 +204,7 @@ func TestEngine_Concurrent_RaceDetector(t *testing.T) {
 
 	addr := srv.Listener.Addr().String()
 
-	// 15 targets all pointing to the same server — exceeds the semaphore cap of 10.
+	// 15 targets all pointing to the same server — exceeds the semaphore cap of 5.
 	const numTargets = 15
 	targets := make([]string, numTargets)
 	for i := range targets {

@@ -76,9 +76,15 @@ var pqcSafeFamilies = map[string]bool{
 	// Hybrid KEMs: classical + ML-KEM (IETF draft-ietf-tls-hybrid-design-16)
 	// TLS codepoint classification is handled in Sprint 1 (S1.3); name-based
 	// classification is added here so source/config findings are correct too.
-	"X25519MLKEM768":    true, // 0x11EC — production dominant (>50% Cloudflare, Oct 2025)
-	"SecP256r1MLKEM768": true, // 0x11EB
+	"X25519MLKEM768":     true, // 0x11EC — production dominant (>50% Cloudflare, Oct 2025)
+	"SecP256r1MLKEM768":  true, // 0x11EB
 	"SecP384r1MLKEM1024": true, // 0x11ED
+	"curveSM2MLKEM768":   true, // 0x11EE — SM2 hybrid (Chinese national standard pairing)
+	// Pure ML-KEM (FIPS 203) — listed with full names so extractBaseName's
+	// longest-prefix match returns the correct base (MLKEM1024 > MLKEM768/MLKEM512).
+	"MLKEM512":  true, // 0x0200
+	"MLKEM768":  true, // 0x0201
+	"MLKEM1024": true, // 0x0202
 }
 
 // kpqcEliminatedCandidates are K-PQC candidates eliminated in earlier rounds.

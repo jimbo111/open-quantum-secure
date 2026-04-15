@@ -337,6 +337,15 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 	if f.SourceEngine == "tls-probe" {
 		props = append(props, cdxProperty{Name: "oqs:sourceType", Value: "tls-endpoint"})
 	}
+	if f.NegotiatedGroupName != "" {
+		props = append(props, cdxProperty{Name: "oqs:negotiatedGroup", Value: f.NegotiatedGroupName})
+	}
+	if f.PQCPresent {
+		props = append(props, cdxProperty{Name: "oqs:pqcPresent", Value: "true"})
+	}
+	if f.PQCMaturity != "" {
+		props = append(props, cdxProperty{Name: "oqs:pqcMaturity", Value: f.PQCMaturity})
+	}
 
 	if len(f.DataFlowPath) > 0 {
 		dfpJSON, err := json.Marshal(f.DataFlowPath)

@@ -1264,6 +1264,67 @@ func TestSARIF_MigrationProperties(t *testing.T) {
 	}
 }
 
+// TestSARIF_NegotiatedGroupFieldSeparation verifies that the SARIF property for
+// the human-readable group name is keyed "negotiatedGroupName" (not "negotiatedGroup"),
+// preventing a collision with the JSON field negotiatedGroup (uint16 codepoint).
+// JSON: negotiatedGroup = uint16, negotiatedGroupName = string.
+// SARIF result.properties: negotiatedGroupName = string (name only; codepoint not emitted).
+func TestSARIF_NegotiatedGroupFieldSeparation(t *testing.T) {
+	const codepoint = uint16(0x11EC) // X25519MLKEM768
+	const name = "X25519MLKEM768"
+
+	ff := []findings.UnifiedFinding{
+		{
+			Location:            findings.Location{File: "/project/server.go", Line: 1},
+			Algorithm:           &findings.Algorithm{Name: name, Primitive: "key-exchange"},
+			Confidence:          findings.ConfidenceHigh,
+			SourceEngine:        "tls-probe",
+			Reachable:           findings.ReachableYes,
+			NegotiatedGroup:     codepoint,
+			NegotiatedGroupName: name,
+			PQCPresent:          true,
+		},
+	}
+
+	// ── JSON marshaling: uint16 codepoint under "negotiatedGroup" ────────────
+	jsonBytes, err := json.Marshal(ff[0])
+	if err != nil {
+		t.Fatalf("json.Marshal UnifiedFinding: %v", err)
+	}
+	var jsonMap map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &jsonMap); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if cpt, ok := jsonMap["negotiatedGroup"].(float64); !ok || uint16(cpt) != codepoint {
+		t.Errorf("JSON negotiatedGroup = %v, want uint16 codepoint %d", jsonMap["negotiatedGroup"], codepoint)
+	}
+	if n, ok := jsonMap["negotiatedGroupName"].(string); !ok || n != name {
+		t.Errorf("JSON negotiatedGroupName = %v, want %q", jsonMap["negotiatedGroupName"], name)
+	}
+
+	// ── SARIF result.properties: string name under "negotiatedGroupName" ─────
+	buf := writeSARIFFor(t, ff, "/project")
+	var raw map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	runs := raw["runs"].([]interface{})
+	result := runs[0].(map[string]interface{})["results"].([]interface{})[0].(map[string]interface{})
+	props, ok := result["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result.properties missing")
+	}
+
+	gotName, ok := props["negotiatedGroupName"].(string)
+	if !ok || gotName != name {
+		t.Errorf("SARIF properties.negotiatedGroupName = %v, want %q", props["negotiatedGroupName"], name)
+	}
+	// The old collision key must not appear.
+	if v, present := props["negotiatedGroup"]; present {
+		t.Errorf("SARIF properties.negotiatedGroup must be absent (old collision key), got %v", v)
+	}
+}
+
 // TestSARIF_NoMigrationWhenEmpty verifies that findings with no migration data
 // do NOT produce targetAlgorithm or migrationSnippet keys in result.properties.
 func TestSARIF_NoMigrationWhenEmpty(t *testing.T) {

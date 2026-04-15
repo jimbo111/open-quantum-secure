@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
+	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
 )
 
 // CipherComponent represents one cryptographic primitive extracted from a cipher suite.
@@ -267,6 +268,11 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 
 	basePath := "(tls-probe)/" + result.Target
 
+	// Classify the negotiated key-share group. CurveID is 0 for TLS 1.2 sessions
+	// that used an RSA KEM (no named group). Unknown codepoints yield ok=false;
+	// in both cases PQCPresent stays false.
+	groupInfo, groupKnown := quantum.ClassifyTLSGroup(result.NegotiatedGroupID)
+
 	var ff []findings.UnifiedFinding
 
 	// Findings from cipher suite components.
@@ -285,11 +291,12 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 				KeySize:   comp.KeySize,
 				Mode:      comp.Mode,
 			},
-			Confidence:   findings.ConfidenceHigh,
-			SourceEngine: "tls-probe",
-			Reachable:    findings.ReachableYes,
+			Confidence:    findings.ConfidenceHigh,
+			SourceEngine:  "tls-probe",
+			Reachable:     findings.ReachableYes,
 			RawIdentifier: comp.Primitive + ":" + comp.Name + "|" + result.CipherSuiteName + "|" + result.Target,
 		}
+		applyGroupFields(&f, result.NegotiatedGroupID, groupInfo, groupKnown)
 		ff = append(ff, f)
 	}
 
@@ -306,17 +313,27 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 				Primitive: "signature",
 				KeySize:   result.LeafCertKeySize,
 			},
-			Confidence:   findings.ConfidenceHigh,
-			SourceEngine: "tls-probe",
-			Reachable:    findings.ReachableYes,
+			Confidence:    findings.ConfidenceHigh,
+			SourceEngine:  "tls-probe",
+			Reachable:     findings.ReachableYes,
 			RawIdentifier: "cert:" + result.LeafCertKeyAlgo + "|" + result.Target,
 		}
+		applyGroupFields(&f, result.NegotiatedGroupID, groupInfo, groupKnown)
 		ff = append(ff, f)
 	}
 
-	// For TLS 1.3, the key exchange is implicit (ECDHE with X25519 or P-256).
-	// Add a key-exchange finding since it's not in the cipher suite name.
+	// For TLS 1.3, the key exchange is implicit (not in the cipher suite name).
+	// Emit a dedicated kex finding using the actual negotiated group name when
+	// known, so that PQC hybrid groups (e.g., X25519MLKEM768) are classified as
+	// quantum-safe rather than falling back to the generic "ECDHE" label.
 	if result.TLSVersion == tls.VersionTLS13 {
+		kexName := "ECDHE"
+		rawID := "kex:ECDHE|" + result.Target
+		if groupKnown && groupInfo.PQCPresent {
+			// PQC hybrid: use the group name so ClassifyAlgorithm identifies it as safe.
+			kexName = groupInfo.Name
+			rawID = "kex:" + groupInfo.Name + "|" + result.Target
+		}
 		f := findings.UnifiedFinding{
 			Location: findings.Location{
 				File:         basePath + "#kex",
@@ -324,16 +341,29 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 				ArtifactType: "tls-endpoint",
 			},
 			Algorithm: &findings.Algorithm{
-				Name:      "ECDHE",
+				Name:      kexName,
 				Primitive: "key-exchange",
 			},
-			Confidence:   findings.ConfidenceHigh,
-			SourceEngine: "tls-probe",
-			Reachable:    findings.ReachableYes,
-			RawIdentifier: "kex:ECDHE|" + result.Target,
+			Confidence:    findings.ConfidenceHigh,
+			SourceEngine:  "tls-probe",
+			Reachable:     findings.ReachableYes,
+			RawIdentifier: rawID,
 		}
+		applyGroupFields(&f, result.NegotiatedGroupID, groupInfo, groupKnown)
 		ff = append(ff, f)
 	}
 
 	return ff
+}
+
+// applyGroupFields sets the session-level TLS group metadata on a finding.
+// These fields describe the key-share negotiated in the handshake and apply
+// uniformly to all findings emitted for the same probe session.
+func applyGroupFields(f *findings.UnifiedFinding, groupID uint16, info quantum.GroupInfo, known bool) {
+	f.NegotiatedGroup = groupID
+	if known {
+		f.NegotiatedGroupName = info.Name
+		f.PQCPresent = info.PQCPresent
+		f.PQCMaturity = info.Maturity
+	}
 }
