@@ -25,6 +25,11 @@ const (
 	maxTargets         = 100
 )
 
+// probeFn is the underlying single-endpoint probe function. It is a
+// package-level variable so tests can inject an instrumented stub without
+// making real network connections (comparable to Sprint 0's nowFn hook).
+var probeFn = probe
+
 // Engine is the TLS probe engine. Pure Go, always available.
 type Engine struct{}
 
@@ -83,7 +88,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 			defer wg.Done()
 			sem <- struct{}{}        // acquire
 			defer func() { <-sem }() // release
-			results[idx] = probe(ctx, t, probeOpts)
+			results[idx] = probeFn(ctx, t, probeOpts)
 		}(i, target)
 	}
 	wg.Wait()

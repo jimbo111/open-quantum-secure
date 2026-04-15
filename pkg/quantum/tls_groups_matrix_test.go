@@ -9,46 +9,48 @@ import (
 // ClassifyTLSGroup.
 //
 // Coverage:
-//   - All 19 known codepoints × (Name, PQCPresent, Maturity, RiskLevel) tuple
+//   - All 19 known codepoints × (Name, PQCPresent, Maturity) tuple
 //   - 10 unknown codepoints → (GroupInfo{}, false)
 //   - Boundary codepoints adjacent to the hybrid-KEM range → unknown
 //   - Invariant: only 0x6399 and 0x636D may carry Maturity=="draft"
+//
+// Note: RiskLevel was removed from GroupInfo (X3 fix). Risk is now derived by
+// callers via ClassifyAlgorithm(groupInfo.Name) to avoid duplication.
 
 func TestTLSGroupMatrix_AllKnownCodepoints(t *testing.T) {
 	type wantTuple struct {
 		Name       string
 		PQCPresent bool
 		Maturity   string
-		RiskLevel  Risk
 	}
 	tests := []struct {
 		id   uint16
 		want wantTuple
 	}{
 		// ── Hybrid KEMs: classical ECDH + ML-KEM (IETF draft-ietf-tls-hybrid-design)
-		{0x11EB, wantTuple{"SecP256r1MLKEM768", true, "final", RiskSafe}},
-		{0x11EC, wantTuple{"X25519MLKEM768", true, "final", RiskSafe}},
-		{0x11ED, wantTuple{"SecP384r1MLKEM1024", true, "final", RiskSafe}},
-		{0x11EE, wantTuple{"curveSM2MLKEM768", true, "final", RiskSafe}},
+		{0x11EB, wantTuple{"SecP256r1MLKEM768", true, "final"}},
+		{0x11EC, wantTuple{"X25519MLKEM768", true, "final"}},
+		{0x11ED, wantTuple{"SecP384r1MLKEM1024", true, "final"}},
+		{0x11EE, wantTuple{"curveSM2MLKEM768", true, "final"}},
 		// ── Pure ML-KEM (FIPS 203)
-		{0x0200, wantTuple{"MLKEM512", true, "final", RiskSafe}},
-		{0x0201, wantTuple{"MLKEM768", true, "final", RiskSafe}},
-		{0x0202, wantTuple{"MLKEM1024", true, "final", RiskSafe}},
+		{0x0200, wantTuple{"MLKEM512", true, "final"}},
+		{0x0201, wantTuple{"MLKEM768", true, "final"}},
+		{0x0202, wantTuple{"MLKEM1024", true, "final"}},
 		// ── Deprecated draft Kyber (pre-FIPS 203)
-		{0x6399, wantTuple{"X25519Kyber768Draft00", true, "draft", RiskDeprecated}},
-		{0x636D, wantTuple{"X25519Kyber768Draft00", true, "draft", RiskDeprecated}},
+		{0x6399, wantTuple{"X25519Kyber768Draft00", true, "draft"}},
+		{0x636D, wantTuple{"X25519Kyber768Draft00", true, "draft"}},
 		// ── Classical ECDH
-		{0x0017, wantTuple{"secp256r1", false, "", RiskVulnerable}},
-		{0x0018, wantTuple{"secp384r1", false, "", RiskVulnerable}},
-		{0x0019, wantTuple{"secp521r1", false, "", RiskVulnerable}},
-		{0x001d, wantTuple{"X25519", false, "", RiskVulnerable}},
-		{0x001e, wantTuple{"X448", false, "", RiskVulnerable}},
+		{0x0017, wantTuple{"secp256r1", false, ""}},
+		{0x0018, wantTuple{"secp384r1", false, ""}},
+		{0x0019, wantTuple{"secp521r1", false, ""}},
+		{0x001d, wantTuple{"X25519", false, ""}},
+		{0x001e, wantTuple{"X448", false, ""}},
 		// ── Classical FFDH
-		{0x0100, wantTuple{"ffdhe2048", false, "", RiskVulnerable}},
-		{0x0101, wantTuple{"ffdhe3072", false, "", RiskVulnerable}},
-		{0x0102, wantTuple{"ffdhe4096", false, "", RiskVulnerable}},
-		{0x0103, wantTuple{"ffdhe6144", false, "", RiskVulnerable}},
-		{0x0104, wantTuple{"ffdhe8192", false, "", RiskVulnerable}},
+		{0x0100, wantTuple{"ffdhe2048", false, ""}},
+		{0x0101, wantTuple{"ffdhe3072", false, ""}},
+		{0x0102, wantTuple{"ffdhe4096", false, ""}},
+		{0x0103, wantTuple{"ffdhe6144", false, ""}},
+		{0x0104, wantTuple{"ffdhe8192", false, ""}},
 	}
 
 	for _, tc := range tests {
@@ -66,9 +68,6 @@ func TestTLSGroupMatrix_AllKnownCodepoints(t *testing.T) {
 			}
 			if info.Maturity != tc.want.Maturity {
 				t.Errorf("Maturity = %q, want %q", info.Maturity, tc.want.Maturity)
-			}
-			if info.RiskLevel != tc.want.RiskLevel {
-				t.Errorf("RiskLevel = %q, want %q", info.RiskLevel, tc.want.RiskLevel)
 			}
 		})
 	}
@@ -212,9 +211,6 @@ func TestTLSGroupMatrix_ClassicalPQCPresentFalse(t *testing.T) {
 		}
 		if info.Maturity != "" {
 			t.Errorf("0x%04x (%s): Maturity=%q for classical group — should be empty", id, info.Name, info.Maturity)
-		}
-		if info.RiskLevel != RiskVulnerable {
-			t.Errorf("0x%04x (%s): RiskLevel=%q, want RiskVulnerable", id, info.Name, info.RiskLevel)
 		}
 	}
 }
