@@ -114,6 +114,35 @@ type MigrationSnippet struct {
 	Explanation string `json:"explanation"`
 }
 
+// Clone returns a deep copy of f. Pointer fields (Algorithm, Dependency,
+// MigrationSnippet) and slice fields (CorroboratedBy, DataFlowPath) are copied
+// so that subsequent mutations on the clone do not affect the original. Used
+// by the orchestrator before in-place pipeline stages (normalizeFindings,
+// classifyFindings, attachMigrationSnippets) to keep concurrent Scan calls on
+// the same Orchestrator safe when engines return shared result slices.
+func (f *UnifiedFinding) Clone() UnifiedFinding {
+	c := *f
+	if f.Algorithm != nil {
+		a := *f.Algorithm
+		c.Algorithm = &a
+	}
+	if f.Dependency != nil {
+		d := *f.Dependency
+		c.Dependency = &d
+	}
+	if f.MigrationSnippet != nil {
+		m := *f.MigrationSnippet
+		c.MigrationSnippet = &m
+	}
+	if f.CorroboratedBy != nil {
+		c.CorroboratedBy = append([]string(nil), f.CorroboratedBy...)
+	}
+	if f.DataFlowPath != nil {
+		c.DataFlowPath = append([]FlowStep(nil), f.DataFlowPath...)
+	}
+	return c
+}
+
 // DedupeKey returns a string key for deduplication. Findings with the same key
 // from different engines are considered duplicates and should be merged.
 func (f *UnifiedFinding) DedupeKey() string {

@@ -553,9 +553,14 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 			return nil, nil, metrics, fmt.Errorf("scan aborted: %w", ctx.Err())
 		}
 
-		// Merge in engine order to keep output deterministic.
+		// Merge in engine order to keep output deterministic. Clone each finding
+		// so subsequent in-place pipeline stages (normalizeFindings, classify,
+		// migration snippets) don't mutate engine-owned state — concurrent Scan
+		// calls on the same Orchestrator would otherwise race on Algorithm.Name.
 		for _, er := range perEngine {
-			allFindings = append(allFindings, er.results...)
+			for i := range er.results {
+				allFindings = append(allFindings, er.results[i].Clone())
+			}
 		}
 
 		if len(errs) > 0 && len(allFindings) == 0 {
@@ -588,7 +593,9 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 			networkErrs = append(networkErrs, fmt.Errorf("%s: %w", eng.Name(), err))
 		}
 		metrics.Engines = append(metrics.Engines, em)
-		allFindings = append(allFindings, res...)
+		for i := range res {
+			allFindings = append(allFindings, res[i].Clone())
+		}
 	}
 	// Propagate network engine errors when all network engines failed and
 	// produced no findings (prevents silent pass in CI when TLS targets
