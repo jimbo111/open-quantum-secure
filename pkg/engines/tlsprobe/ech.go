@@ -3,6 +3,7 @@ package tlsprobe
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -14,6 +15,21 @@ import (
 
 // ECH TLS extension type code (RFC 9849, formerly draft-ietf-tls-esni).
 const echExtensionType = uint16(0xfe0d)
+
+// dnsTxIDFn returns a random uint16 for use as the DNS transaction ID.
+// Overridable in tests to produce deterministic IDs.
+var dnsTxIDFn = cryptoRandUint16
+
+// cryptoRandUint16 returns a cryptographically random uint16.
+func cryptoRandUint16() uint16 {
+	var buf [2]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// Fall back to a static non-zero value on entropy failure; this is
+		// exceedingly rare and only affects a best-effort DNS probe.
+		return 0xabcd
+	}
+	return binary.BigEndian.Uint16(buf[:])
+}
 
 // echSvcParamKey is the HTTPS/SVCB SvcParamKey for the ECH config list (RFC 9460 §7.3).
 const echSvcParamKey = uint16(0x0005)
@@ -62,9 +78,9 @@ func detectECH(ctx context.Context, hostname string) (bool, string) {
 // (ECH config list), indicating the host supports ECH.
 //
 // Implementation notes:
-//   - Uses UDP (fallback to TCP on TC bit would add >50 LOC; acceptable risk
-//     for a corroborating signal — ECH RDATA is large but single-UDP responses
-//     cover the detection use case).
+//   - Uses UDP with an EDNS0 OPT record advertising a 4096-byte buffer.
+//   - Checks the TC (truncated) bit after reading the UDP response; if set,
+//     retries the same query over TCP (RFC 7766 §6.2).
 //   - Parses only the RDATA portion minimally: walks SvcParams looking for key 5.
 //   - DNS failure modes (NXDOMAIN, timeout, SERVFAIL) all return false silently.
 func queryHTTPSRecordForECH(ctx context.Context, hostname string) bool {
@@ -74,7 +90,7 @@ func queryHTTPSRecordForECH(ctx context.Context, hostname string) bool {
 		return false
 	}
 
-	// Build a DNS query for Type=65 (HTTPS RR).
+	// Build a DNS query for Type=65 (HTTPS RR) with EDNS0 OPT.
 	qname := hostname
 	if !strings.HasSuffix(qname, ".") {
 		qname += "."
@@ -84,31 +100,94 @@ func queryHTTPSRecordForECH(ctx context.Context, hostname string) bool {
 		return false
 	}
 
-	// Send the query and read the response.
 	dialCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	conn, err := (&net.Dialer{}).DialContext(dialCtx, "udp", nsAddr)
+	// --- UDP path ---
+	udpConn, err := (&net.Dialer{}).DialContext(dialCtx, "udp", nsAddr)
 	if err != nil {
 		return false
 	}
-	defer conn.Close()
+	defer udpConn.Close()
 
-	deadline, ok := dialCtx.Deadline()
-	if ok {
-		_ = conn.SetDeadline(deadline)
+	if deadline, ok := dialCtx.Deadline(); ok {
+		_ = udpConn.SetDeadline(deadline)
 	}
-
-	if _, err := conn.Write(query); err != nil {
+	if _, err := udpConn.Write(query); err != nil {
 		return false
 	}
 
-	resp := make([]byte, 4096)
-	n, err := conn.Read(resp)
+	buf := make([]byte, 4096)
+	n, err := udpConn.Read(buf)
 	if err != nil || n < 12 {
 		return false
 	}
-	return parseHTTPSResponseForECH(resp[:n])
+	resp := buf[:n]
+
+	// TC bit is bit 1 of byte 2 of the DNS header (flags high byte).
+	// RFC 1035 §4.1.1: flags = QR|Opcode|AA|TC|RD|RA|Z|RCODE
+	// TC is the 9th bit of the 16-bit flags field → byte[2] bit 1.
+	if resp[2]&0x02 != 0 {
+		// Response was truncated — retry over TCP.
+		resp = dnsQueryTCP(dialCtx, nsAddr, query)
+		if resp == nil {
+			return false
+		}
+	}
+
+	return parseHTTPSResponseForECH(resp)
+}
+
+// dnsQueryTCP sends a DNS query over TCP and returns the response bytes, or nil
+// on any error. TCP DNS messages are prefixed with a 2-byte big-endian length
+// (RFC 1035 §4.2.2).
+func dnsQueryTCP(ctx context.Context, nsAddr string, query []byte) []byte {
+	tcpConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", nsAddr)
+	if err != nil {
+		return nil
+	}
+	defer tcpConn.Close()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = tcpConn.SetDeadline(deadline)
+	}
+
+	// Prepend the 2-byte message length.
+	framed := make([]byte, 2+len(query))
+	binary.BigEndian.PutUint16(framed[0:2], uint16(len(query)))
+	copy(framed[2:], query)
+	if _, err := tcpConn.Write(framed); err != nil {
+		return nil
+	}
+
+	// Read the 2-byte length prefix.
+	var lenBuf [2]byte
+	if _, err := readFull(tcpConn, lenBuf[:]); err != nil {
+		return nil
+	}
+	msgLen := int(binary.BigEndian.Uint16(lenBuf[:]))
+	if msgLen < 12 {
+		return nil
+	}
+
+	resp := make([]byte, msgLen)
+	if _, err := readFull(tcpConn, resp); err != nil {
+		return nil
+	}
+	return resp
+}
+
+// readFull reads exactly len(buf) bytes from r, returning an error on short reads.
+func readFull(r net.Conn, buf []byte) (int, error) {
+	total := 0
+	for total < len(buf) {
+		n, err := r.Read(buf[total:])
+		total += n
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
 }
 
 // resolveSystemNS returns "ip:53" for the first nameserver in /etc/resolv.conf,
@@ -148,13 +227,17 @@ func readSystemResolver() string {
 	return "1.1.1.1:53"
 }
 
-// buildDNSQuery constructs a minimal RFC 1035 DNS query message.
+// buildDNSQuery constructs a minimal RFC 1035 DNS query message with an EDNS0
+// OPT pseudo-RR (RFC 6891) advertising a 4096-byte UDP payload size.
 func buildDNSQuery(fqdn string, qtype uint16) ([]byte, error) {
+	txID := dnsTxIDFn()
+
 	// Header: ID(2) + FLAGS(2) + QDCOUNT(2) + ANCOUNT(2) + NSCOUNT(2) + ARCOUNT(2)
 	msg := make([]byte, 12)
-	binary.BigEndian.PutUint16(msg[0:2], 0x1234) // transaction ID
-	binary.BigEndian.PutUint16(msg[2:4], 0x0100) // flags: RD=1
-	binary.BigEndian.PutUint16(msg[4:6], 1)      // QDCOUNT=1
+	binary.BigEndian.PutUint16(msg[0:2], txID)    // transaction ID
+	binary.BigEndian.PutUint16(msg[2:4], 0x0100)  // flags: RD=1
+	binary.BigEndian.PutUint16(msg[4:6], 1)       // QDCOUNT=1
+	// ARCOUNT=1 for the OPT pseudo-RR (filled below).
 
 	// Encode the QNAME as a sequence of labels.
 	for _, label := range strings.Split(strings.TrimSuffix(fqdn, "."), ".") {
@@ -170,6 +253,22 @@ func buildDNSQuery(fqdn string, qtype uint16) ([]byte, error) {
 	msg = append(msg, 0, 0) // QTYPE placeholder
 	binary.BigEndian.PutUint16(msg[len(msg)-2:], qtype)
 	msg = append(msg, 0x00, 0x01) // QCLASS IN
+
+	// EDNS0 OPT pseudo-RR (RFC 6891 §6.1.2):
+	//   NAME:     0x00   (root — empty owner name)
+	//   TYPE:     0x0029 (41 = OPT)
+	//   CLASS:    0x1000 (payload size = 4096)
+	//   TTL:      0x00000000 (extended RCODE + flags = 0)
+	//   RDLENGTH: 0x0000 (no RDATA)
+	msg = append(msg,
+		0x00,       // NAME = root
+		0x00, 0x29, // TYPE = OPT (41)
+		0x10, 0x00, // CLASS = 4096 (advertised UDP payload size)
+		0x00, 0x00, 0x00, 0x00, // TTL = extended RCODE 0, flags 0
+		0x00, 0x00, // RDLENGTH = 0
+	)
+	// Set ARCOUNT=1 in the header (bytes 10–11).
+	binary.BigEndian.PutUint16(msg[10:12], 1)
 
 	return msg, nil
 }
