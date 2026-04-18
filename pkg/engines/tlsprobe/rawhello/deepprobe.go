@@ -65,6 +65,18 @@ func DeepProbe(ctx context.Context, addr, sni string, timeout time.Duration, gro
 
 // probeGroup opens a TCP connection to addr and probes a single group codepoint.
 func probeGroup(ctx context.Context, addr, sni string, timeout time.Duration, groupID uint16) DeepProbeGroupResult {
+	// SSRF guard: addr must be a pre-resolved IP literal (never a hostname).
+	// The caller (engine.go) is responsible for DNS resolution; this check is a
+	// defence-in-depth backstop so that a buggy caller cannot trigger DNS from
+	// inside the raw probe.
+	if h, _, splitErr := net.SplitHostPort(addr); splitErr != nil || net.ParseIP(h) == nil {
+		return DeepProbeGroupResult{
+			GroupID: groupID,
+			Outcome: OutcomeError,
+			Err:     fmt.Errorf("probeGroup: addr %q must be a pre-resolved IP:port, not a hostname", addr),
+		}
+	}
+
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}

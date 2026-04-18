@@ -217,6 +217,31 @@ func TestDeepProbe_EmptyGroupList(t *testing.T) {
 	}
 }
 
+func TestProbeGroup_SSRFGuard(t *testing.T) {
+	// addr is a hostname, not an IP literal — must return OutcomeError without dialing.
+	ctx := context.Background()
+	r := probeGroup(ctx, "example.com:443", "", 5*time.Second, 0x001d)
+	if r.Outcome != OutcomeError {
+		t.Errorf("outcome: got %s want error for hostname addr", r.Outcome)
+	}
+	if r.Err == nil {
+		t.Error("expected non-nil Err for hostname addr")
+	}
+}
+
+func TestProbeGroup_SSRFGuard_IPv6(t *testing.T) {
+	// Valid IPv6 literal — SSRF guard should pass (dial will fail with connect
+	// error, but not the SSRF guard error).
+	ctx := context.Background()
+	r := probeGroup(ctx, "[::1]:1", "", 200*time.Millisecond, 0xDEAD) // unknown group → ProbeKeyShare error
+	// The SSRF guard must not fire; failure mode will be ProbeKeyShare/dial.
+	if r.Outcome == OutcomeError && r.Err != nil {
+		if r.Err.Error() == "probeGroup: addr \"[::1]:1\" must be a pre-resolved IP:port, not a hostname" {
+			t.Error("SSRF guard incorrectly rejected valid IPv6 literal")
+		}
+	}
+}
+
 func TestProbeGroup_ServerClosesImmediately(t *testing.T) {
 	// Server closes without sending anything → transport error (OutcomeError).
 	addr := newLocalServer(t, func(c net.Conn) {
