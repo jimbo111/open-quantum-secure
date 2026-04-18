@@ -492,6 +492,14 @@ Example with data lifetime adjustment for healthcare:
 				}
 			}
 
+			// Validate --zeek-*-log paths (A3).
+			if err := validateZeekLogPath(zeekSSLPath); err != nil {
+				return fmt.Errorf("invalid --zeek-ssl-log: %w", err)
+			}
+			if err := validateZeekLogPath(zeekX509Path); err != nil {
+				return fmt.Errorf("invalid --zeek-x509-log: %w", err)
+			}
+
 			orch := buildOrchestrator()
 
 			ctx := context.Background()
@@ -901,6 +909,14 @@ Example:
 				}
 			}
 
+			// Validate --zeek-*-log paths (A3).
+			if err := validateZeekLogPath(zeekSSLPath); err != nil {
+				return fmt.Errorf("invalid --zeek-ssl-log: %w", err)
+			}
+			if err := validateZeekLogPath(zeekX509Path); err != nil {
+				return fmt.Errorf("invalid --zeek-x509-log: %w", err)
+			}
+
 			opts := engines.ScanOptions{
 				TargetPath:      absPath,
 				Timeout:         timeout,
@@ -1082,6 +1098,19 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().StringVar(&zeekX509Path, "zeek-x509-log", "", "Path to Zeek x509.log (TSV, JSON, or .gz) for passive certificate PQC inventory")
 
 	return cmd
+}
+
+// validateZeekLogPath rejects --zeek-ssl-log / --zeek-x509-log values that
+// contain null bytes (which the OS would reject anyway, but caught here for
+// a clear user-facing error before any file open attempt).
+func validateZeekLogPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	if strings.ContainsRune(path, 0) {
+		return fmt.Errorf("path contains null byte")
+	}
+	return nil
 }
 
 // validateSSHTarget validates a single --ssh-targets entry. It must be in
