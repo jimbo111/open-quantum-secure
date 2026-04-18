@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -88,7 +89,7 @@ func entryToRecord(e crtShEntry) certRecord {
 // the partial JSON-only entryToRecord.
 func x509ToRecord(cert *x509.Certificate) certRecord {
 	rec := certRecord{
-		Serial:     cert.SerialNumber.Text(16),
+		Serial:     strings.ToUpper(cert.SerialNumber.Text(16)),
 		NotBefore:  cert.NotBefore,
 		NotAfter:   cert.NotAfter,
 		IssuerName: cert.Issuer.String(),
