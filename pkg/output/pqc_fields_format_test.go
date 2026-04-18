@@ -279,14 +279,15 @@ func TestPQCFormat_CBOM_OQSPropertyConventions(t *testing.T) {
 
 	// RSA component: oqs:pqcPresent and oqs:pqcMaturity must be absent.
 	rsaProps := bom.Components[0].Properties
-	for _, prop := range []string{"oqs:pqcPresent", "oqs:pqcMaturity", "oqs:negotiatedGroup"} {
+	for _, prop := range []string{"oqs:pqcPresent", "oqs:pqcMaturity", "oqs:negotiatedGroupName"} {
 		if v, ok := findProp(rsaProps, prop); ok {
 			t.Errorf("CBOM RSA component: property %q present (value=%q), want absent", prop, v)
 		}
 	}
 
 	// Hybrid component: oqs:pqcPresent="true", oqs:pqcMaturity="final",
-	// oqs:negotiatedGroup="X25519MLKEM768" must all be present.
+	// oqs:negotiatedGroupName="X25519MLKEM768" must all be present.
+	// Note: renamed from oqs:negotiatedGroup → oqs:negotiatedGroupName (S2.5 carryover fix).
 	hybridProps := bom.Components[1].Properties
 	if v, ok := findProp(hybridProps, "oqs:pqcPresent"); !ok || v != "true" {
 		t.Errorf("CBOM hybrid component: oqs:pqcPresent=%q ok=%v, want \"true\" present", v, ok)
@@ -294,8 +295,8 @@ func TestPQCFormat_CBOM_OQSPropertyConventions(t *testing.T) {
 	if v, ok := findProp(hybridProps, "oqs:pqcMaturity"); !ok || v != "final" {
 		t.Errorf("CBOM hybrid component: oqs:pqcMaturity=%q ok=%v, want \"final\" present", v, ok)
 	}
-	if v, ok := findProp(hybridProps, "oqs:negotiatedGroup"); !ok || v != "X25519MLKEM768" {
-		t.Errorf("CBOM hybrid component: oqs:negotiatedGroup=%q ok=%v, want \"X25519MLKEM768\"", v, ok)
+	if v, ok := findProp(hybridProps, "oqs:negotiatedGroupName"); !ok || v != "X25519MLKEM768" {
+		t.Errorf("CBOM hybrid component: oqs:negotiatedGroupName=%q ok=%v, want \"X25519MLKEM768\"", v, ok)
 	}
 
 	// Draft component: oqs:pqcMaturity must be "draft".

@@ -338,7 +338,7 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 		props = append(props, cdxProperty{Name: "oqs:sourceType", Value: "tls-endpoint"})
 	}
 	if f.NegotiatedGroupName != "" {
-		props = append(props, cdxProperty{Name: "oqs:negotiatedGroup", Value: f.NegotiatedGroupName})
+		props = append(props, cdxProperty{Name: "oqs:negotiatedGroupName", Value: f.NegotiatedGroupName})
 	}
 	if f.PQCPresent {
 		props = append(props, cdxProperty{Name: "oqs:pqcPresent", Value: "true"})
