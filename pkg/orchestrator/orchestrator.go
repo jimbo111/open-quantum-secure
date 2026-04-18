@@ -450,9 +450,10 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 		available = applyScanTypeFilter(available, opts.ScanType)
 	}
 
-	// Include Tier5Network engines when TLS, CT, or SSH targets are explicitly
-	// provided, overriding tier/scanType filtering (even in diff/quick mode).
-	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH || len(opts.SSHTargets) > 0 {
+	// Include Tier5Network engines when TLS, CT, SSH, or Zeek-log paths are
+	// explicitly provided, overriding tier/scanType filtering (even in diff/quick mode).
+	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH ||
+		len(opts.SSHTargets) > 0 || opts.ZeekSSLPath != "" || opts.ZeekX509Path != "" {
 		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
 	}
 
