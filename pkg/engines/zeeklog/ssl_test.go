@@ -1,6 +1,7 @@
 package zeeklog
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -20,7 +21,7 @@ var sslTSVGolden = `#separator \x09
 `
 
 func TestParseSSLTSV(t *testing.T) {
-	recs, err := parseSSLLog(strings.NewReader(sslTSVGolden))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(sslTSVGolden))
 	if err != nil {
 		t.Fatalf("parseSSLLog TSV: %v", err)
 	}
@@ -42,7 +43,7 @@ var sslJSONGolden = `{"ts":1704067200.0,"uid":"CaBC12","id.orig_h":"10.0.0.1","i
 `
 
 func TestParseSSLJSON(t *testing.T) {
-	recs, err := parseSSLLog(strings.NewReader(sslJSONGolden))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(sslJSONGolden))
 	if err != nil {
 		t.Fatalf("parseSSLLog JSON: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestSSLCurveMapping(t *testing.T) {
 #types	time	string	addr	port	addr	port	string	string	string	string	bool
 1704067200.0	C1	1.1.1.1	1000	2.2.2.2	443	TLSv13	TLS_AES_256_GCM_SHA384	x25519mlkem768	hybrid.example.com	T
 `
-	recs, err := parseSSLLog(strings.NewReader(input))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -83,7 +84,7 @@ func TestSSLDedup(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		sb.WriteString("1704067200.0\tCx\t10.0.0.1\t9999\t1.2.3.4\t443\tTLSv13\tTLS_AES_256_GCM_SHA384\tX25519MLKEM768\texample.com\tT\n")
 	}
-	recs, err := parseSSLLog(strings.NewReader(sb.String()))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(sb.String()))
 	if err != nil {
 		t.Fatalf("%v", err)
 	}

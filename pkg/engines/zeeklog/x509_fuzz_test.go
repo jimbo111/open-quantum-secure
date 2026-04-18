@@ -1,6 +1,7 @@
 package zeeklog
 
 import (
+	"context"
 	"bytes"
 	"testing"
 )
@@ -45,7 +46,7 @@ func FuzzParseX509TSV(f *testing.F) {
 	f.Add([]byte("#separator \\x09\n"))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = parseX509TSV(bytes.NewReader(data))
+		_, _ = parseX509TSV(context.Background(), bytes.NewReader(data))
 	})
 }
 
@@ -84,6 +85,6 @@ func FuzzParseX509JSON(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = parseX509JSON(bytes.NewReader(data))
+		_, _ = parseX509JSON(context.Background(), bytes.NewReader(data))
 	})
 }

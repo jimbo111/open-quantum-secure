@@ -21,7 +21,7 @@ func TestConcurrent_ParseSSLLog(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			recs, err := parseSSLLog(strings.NewReader(sslTSVGolden))
+			recs, err := parseSSLLog(context.Background(), strings.NewReader(sslTSVGolden))
 			if err != nil {
 				errs <- err
 				return
@@ -59,7 +59,7 @@ func TestConcurrent_ParseX509Log(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := parseX509Log(strings.NewReader(x509TSVGolden))
+			_, err := parseX509Log(context.Background(), strings.NewReader(x509TSVGolden))
 			if err != nil {
 				errs <- err
 			}
@@ -128,7 +128,7 @@ func TestConcurrent_DedupPerCall(t *testing.T) {
 			} else {
 				input = inputB
 			}
-			recs, _ := parseSSLLog(strings.NewReader(input))
+			recs, _ := parseSSLLog(context.Background(), strings.NewReader(input))
 			results <- len(recs)
 		}()
 	}

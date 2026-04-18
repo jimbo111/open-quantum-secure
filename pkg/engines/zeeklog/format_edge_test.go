@@ -1,6 +1,7 @@
 package zeeklog
 
 import (
+	"context"
 	"bytes"
 	"compress/gzip"
 	"strings"
@@ -13,7 +14,7 @@ import (
 // The parser attempts JSON first, then TSV; both may return empty results.
 func TestFormatEdge_UTF8BOM(t *testing.T) {
 	tsvWithBOM := append([]byte{0xEF, 0xBB, 0xBF}, []byte(sslTSVGolden)...)
-	recs, err := parseSSLLog(bytes.NewReader(tsvWithBOM))
+	recs, err := parseSSLLog(context.Background(), bytes.NewReader(tsvWithBOM))
 	if err != nil {
 		t.Fatalf("UTF-8 BOM + TSV: unexpected error: %v", err)
 	}
@@ -28,7 +29,7 @@ func TestFormatEdge_UTF8BOM(t *testing.T) {
 // skip or silently fail the non-UTF-8 data.
 func TestFormatEdge_UTF16BOM_Reject(t *testing.T) {
 	utf16LE := []byte{0xFF, 0xFE, 0x23, 0x00, 0x66, 0x00} // BOM + "#f" in UTF-16LE
-	_, err := parseSSLLog(bytes.NewReader(utf16LE))
+	_, err := parseSSLLog(context.Background(), bytes.NewReader(utf16LE))
 	// Should not panic; error or empty result is acceptable.
 	_ = err
 }
@@ -40,7 +41,7 @@ func TestFormatEdge_WeirdSeparator(t *testing.T) {
 	spaceSep := "#separator \\x20\n" +
 		"#fields uid id.resp_h id.resp_p cipher curve established\n" +
 		"Cx 1.2.3.4 443 TLS_AES_256_GCM_SHA384 X25519MLKEM768 T\n"
-	_, err := parseSSLLog(strings.NewReader(spaceSep))
+	_, err := parseSSLLog(context.Background(), strings.NewReader(spaceSep))
 	// No crash; records may be 0 (column parsing falls back gracefully).
 	_ = err
 }
@@ -54,7 +55,7 @@ func TestFormatEdge_InterleavedTSVAndJSON(t *testing.T) {
 		"1704067200\tCx1\t1.2.3.4\t443\tTLS_AES_256_GCM_SHA384\tX25519MLKEM768\tT\n" +
 		`{"ts":1704067201,"uid":"Cx2","id.resp_h":"5.6.7.8","id.resp_p":443,"established":true}` + "\n" +
 		"1704067202\tCx3\t9.10.11.12\t443\tTLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384\tsecp256r1\tT\n"
-	recs, err := parseSSLLog(strings.NewReader(mixed))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(mixed))
 	if err != nil {
 		t.Fatalf("interleaved TSV+JSON: unexpected error: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestFormatEdge_GzipCompressedJSON(t *testing.T) {
 	}
 	defer out.Close()
 
-	recs, err := parseSSLLog(out)
+	recs, err := parseSSLLog(context.Background(), out)
 	if err != nil {
 		t.Fatalf("parse compressed JSON: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestFormatEdge_GzipCompressedTSV(t *testing.T) {
 	}
 	defer out.Close()
 
-	recs, err := parseSSLLog(out)
+	recs, err := parseSSLLog(context.Background(), out)
 	if err != nil {
 		t.Fatalf("parse compressed TSV: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestFormatEdge_EmptyGzipBody(t *testing.T) {
 	}
 	defer out.Close()
 
-	recs, _ := parseSSLLog(out)
+	recs, _ := parseSSLLog(context.Background(), out)
 	if len(recs) != 0 {
 		t.Errorf("empty gzip: got %d records, want 0", len(recs))
 	}

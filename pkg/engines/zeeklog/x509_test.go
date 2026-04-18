@@ -1,6 +1,7 @@
 package zeeklog
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -18,7 +19,7 @@ var x509TSVGolden = `#separator \x09
 `
 
 func TestParseX509TSV(t *testing.T) {
-	recs, err := parseX509Log(strings.NewReader(x509TSVGolden))
+	recs, err := parseX509Log(context.Background(), strings.NewReader(x509TSVGolden))
 	if err != nil {
 		t.Fatalf("parseX509Log TSV: %v", err)
 	}
@@ -51,13 +52,16 @@ func TestParseX509TSV(t *testing.T) {
 	}
 }
 
-var x509JSONGolden = `{"ts":1704067200.0,"id":"Fuid01","certificate":{"version":3,"serial":"01","subject":"CN=example.com","issuer":"CN=TrustCA","key_alg":"rsaEncryption","sig_alg":"sha256WithRSAEncryption","key_type":"rsa","key_length":2048,"curve":""},"san":{"dns":"example.com"}}
-{"ts":1704067201.0,"id":"Fuid02","certificate":{"version":3,"serial":"02","subject":"CN=pqc.example.com","issuer":"CN=PQC-CA","key_alg":"id-ML-DSA-65","sig_alg":"ML-DSA-65","key_type":"unknown","key_length":0,"curve":""},"san":{"dns":"pqc.example.com"}}
-{"ts":1704067202.0,"id":"Fuid03","certificate":{"version":3,"serial":"03","subject":"CN=oid.example.com","issuer":"CN=OID-CA","key_alg":"id-ML-DSA-65","sig_alg":"unknown 2.16.840.1.101.3.4.3.18","key_type":"unknown","key_length":0,"curve":""},"san":{"dns":"oid.example.com"}}
+// x509JSONGolden uses the flat dotted-key format that Zeek actually emits (B1 fix).
+// Old nested-struct format ("certificate":{...}) was incorrect — Zeek JSON uses
+// "certificate.sig_alg":"..." at the top level, not nested objects.
+var x509JSONGolden = `{"ts":1704067200.0,"id":"Fuid01","certificate.version":3,"certificate.serial":"01","certificate.subject":"CN=example.com","certificate.issuer":"CN=TrustCA","certificate.key_alg":"rsaEncryption","certificate.sig_alg":"sha256WithRSAEncryption","certificate.key_type":"rsa","certificate.key_length":2048,"certificate.exponent":65537,"certificate.curve":"-","san.dns":"example.com"}
+{"ts":1704067201.0,"id":"Fuid02","certificate.version":3,"certificate.serial":"02","certificate.subject":"CN=pqc.example.com","certificate.issuer":"CN=PQC-CA","certificate.key_alg":"id-ML-DSA-65","certificate.sig_alg":"ML-DSA-65","certificate.key_type":"unknown","certificate.key_length":0,"certificate.exponent":0,"certificate.curve":"-","san.dns":"pqc.example.com"}
+{"ts":1704067202.0,"id":"Fuid03","certificate.version":3,"certificate.serial":"03","certificate.subject":"CN=oid.example.com","certificate.issuer":"CN=OID-CA","certificate.key_alg":"id-ML-DSA-65","certificate.sig_alg":"unknown 2.16.840.1.101.3.4.3.18","certificate.key_type":"unknown","certificate.key_length":0,"certificate.exponent":0,"certificate.curve":"-","san.dns":"oid.example.com"}
 `
 
 func TestParseX509JSON(t *testing.T) {
-	recs, err := parseX509Log(strings.NewReader(x509JSONGolden))
+	recs, err := parseX509Log(context.Background(), strings.NewReader(x509JSONGolden))
 	if err != nil {
 		t.Fatalf("parseX509Log JSON: %v", err)
 	}

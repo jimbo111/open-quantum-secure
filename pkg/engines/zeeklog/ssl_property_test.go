@@ -1,6 +1,7 @@
 package zeeklog
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -11,7 +12,7 @@ import (
 // records back to TSV, then re-parsing, yields the same set of unique records.
 // This exercises the dedup key and field extraction idempotency.
 func TestSSLTSV_RoundTrip(t *testing.T) {
-	recs, err := parseSSLLog(strings.NewReader(sslTSVGolden))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(sslTSVGolden))
 	if err != nil {
 		t.Fatalf("initial parse: %v", err)
 	}
@@ -29,7 +30,7 @@ func TestSSLTSV_RoundTrip(t *testing.T) {
 			i, i, i, r.RespHost, r.RespPort, r.Version, r.Cipher, r.Curve, r.ServerName))
 	}
 
-	recs2, err := parseSSLLog(strings.NewReader(sb.String()))
+	recs2, err := parseSSLLog(context.Background(), strings.NewReader(sb.String()))
 	if err != nil {
 		t.Fatalf("re-parse after round-trip: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestSSLDedup_OrderIndependent(t *testing.T) {
 
 	// Parse in original order.
 	orig := []int{0, 1, 2, 3}
-	recsA, err := parseSSLLog(strings.NewReader(buildTSV(orig)))
+	recsA, err := parseSSLLog(context.Background(), strings.NewReader(buildTSV(orig)))
 	if err != nil {
 		t.Fatalf("orig order: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestSSLDedup_OrderIndependent(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 	shuffled := []int{0, 1, 2, 3}
 	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
-	recsB, err := parseSSLLog(strings.NewReader(buildTSV(shuffled)))
+	recsB, err := parseSSLLog(context.Background(), strings.NewReader(buildTSV(shuffled)))
 	if err != nil {
 		t.Fatalf("shuffled order: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestSSLDedup_OrderIndependent(t *testing.T) {
 
 // TestSSLJSON_RoundTrip verifies JSON-parsed records are consistent.
 func TestSSLJSON_RoundTrip(t *testing.T) {
-	recs, err := parseSSLLog(strings.NewReader(sslJSONGolden))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(sslJSONGolden))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

@@ -1,6 +1,7 @@
 package zeeklog
 
 import (
+	"context"
 	"bytes"
 	"compress/gzip"
 	"fmt"
@@ -16,9 +17,9 @@ func TestBoundary_EmptyFile(t *testing.T) {
 			var recs interface{}
 			var err error
 			if name == "SSL" {
-				recs, err = parseSSLLog(bytes.NewReader(nil))
+				recs, err = parseSSLLog(context.Background(), bytes.NewReader(nil))
 			} else {
-				recs, err = parseX509Log(bytes.NewReader(nil))
+				recs, err = parseX509Log(context.Background(), bytes.NewReader(nil))
 			}
 			// sniffFormat returns io.EOF on empty → error or (nil, nil) are both acceptable.
 			// What matters: no panic.
@@ -31,8 +32,8 @@ func TestBoundary_EmptyFile(t *testing.T) {
 // TestBoundary_SingleByte verifies single-byte inputs don't panic.
 func TestBoundary_SingleByte(t *testing.T) {
 	for _, b := range []byte{'#', '{', ' ', '\n', '\t', 0x00, 0xFF} {
-		_, _ = parseSSLLog(bytes.NewReader([]byte{b}))
-		_, _ = parseX509Log(bytes.NewReader([]byte{b}))
+		_, _ = parseSSLLog(context.Background(), bytes.NewReader([]byte{b}))
+		_, _ = parseX509Log(context.Background(), bytes.NewReader([]byte{b}))
 	}
 }
 
@@ -41,7 +42,7 @@ func TestBoundary_HeaderOnly_NoData(t *testing.T) {
 	sslHeaderOnly := "#separator \\x09\n#set_separator\t,\n#empty_field\t(empty)\n#unset_field\t-\n#path\tssl\n" +
 		"#fields\tts\tuid\tid.orig_h\tid.orig_p\tid.resp_h\tid.resp_p\tversion\tcipher\tcurve\tserver_name\testablished\n" +
 		"#types\ttime\tstring\taddr\tport\taddr\tport\tstring\tstring\tstring\tstring\tbool\n"
-	recs, err := parseSSLLog(strings.NewReader(sslHeaderOnly))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(sslHeaderOnly))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestBoundary_HeaderOnly_NoData(t *testing.T) {
 
 // TestBoundary_SingleHeaderLine verifies a log with only the #fields line (no #types, no data).
 func TestBoundary_SingleHeaderLine(t *testing.T) {
-	recs, err := parseSSLLog(strings.NewReader("#fields\tts\tuid\tid.resp_h\tid.resp_p\tcipher\tcurve\testablished\n"))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader("#fields\tts\tuid\tid.resp_h\tid.resp_p\tcipher\tcurve\testablished\n"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestBoundary_EOFMidRow(t *testing.T) {
 	// Row is cut after the cipher field — missing curve, server_name, established.
 	input := "#fields\tts\tuid\tid.orig_h\tid.orig_p\tid.resp_h\tid.resp_p\tversion\tcipher\tcurve\tserver_name\testablished\n" +
 		"1704067200\tCx\t10.0.0.1\t9999\t1.2.3.4\t443\tTLSv13\tTLS_AES_256_GCM_SHA384" // EOF mid-row
-	recs, err := parseSSLLog(strings.NewReader(input))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("unexpected error on EOF mid-row: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestBoundary_EOFMidRow(t *testing.T) {
 // TestBoundary_EOFMidJSON verifies truncated JSON object doesn't panic.
 func TestBoundary_EOFMidJSON(t *testing.T) {
 	input := `{"ts":1700,"uid":"Cx","id.resp_h":"1.2.3.4","id.resp_p":443,"cipher":"TLS_AES_256_GCM_SHA384","established":true`
-	recs, err := parseSSLLog(strings.NewReader(input))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestBoundary_EOFMidJSON(t *testing.T) {
 func TestBoundary_LastLineNoNewline(t *testing.T) {
 	input := "#separator \\x09\n#fields\tts\tuid\tid.orig_h\tid.orig_p\tid.resp_h\tid.resp_p\tversion\tcipher\tcurve\tserver_name\testablished\n" +
 		"1704067200\tCx\t10.0.0.1\t9999\t1.2.3.4\t443\tTLSv13\tTLS_AES_256_GCM_SHA384\tX25519MLKEM768\texample.com\tT" // no trailing newline
-	recs, err := parseSSLLog(strings.NewReader(input))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -219,7 +220,7 @@ func TestBoundary_DoubleGzip(t *testing.T) {
 	}
 	defer out.Close()
 	// Parse should not panic — result may be empty/error.
-	_, _ = parseSSLLog(out)
+	_, _ = parseSSLLog(context.Background(), out)
 }
 
 // TestBoundary_EmptyGzip verifies that a valid gzip stream containing no bytes parses safely.
@@ -234,7 +235,7 @@ func TestBoundary_EmptyGzip(t *testing.T) {
 		t.Fatalf("openMaybeGzip empty gzip: %v", err)
 	}
 	defer out.Close()
-	recs, err := parseSSLLog(out)
+	recs, err := parseSSLLog(context.Background(), out)
 	_ = err
 	if len(recs) != 0 {
 		t.Errorf("empty gzip: expected 0 records, got %d", len(recs))
@@ -252,7 +253,7 @@ func TestBoundary_DedupCap(t *testing.T) {
 	for i := 0; i < rows; i++ {
 		sb.WriteString(fmt.Sprintf("1704067200.%d\tCx%d\t10.0.0.1\t9999\t1.2.3.4\t443\tTLSv13\tTLS_AES_256_GCM_SHA384\tX25519MLKEM768\texample.com\tT\n", i, i))
 	}
-	recs, err := parseSSLLog(strings.NewReader(sb.String()))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(sb.String()))
 	if err != nil {
 		t.Fatalf("1M rows: unexpected error: %v", err)
 	}

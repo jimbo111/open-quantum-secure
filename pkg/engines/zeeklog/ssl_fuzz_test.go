@@ -1,6 +1,7 @@
 package zeeklog
 
 import (
+	"context"
 	"bytes"
 	"testing"
 )
@@ -54,7 +55,7 @@ func FuzzParseSSLTSV(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Must not panic.
-		_, _ = parseSSLTSV(bytes.NewReader(data))
+		_, _ = parseSSLTSV(context.Background(), bytes.NewReader(data))
 	})
 }
 
@@ -101,6 +102,6 @@ func FuzzParseSSLJSON(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Must not panic.
-		_, _ = parseSSLJSON(bytes.NewReader(data))
+		_, _ = parseSSLJSON(context.Background(), bytes.NewReader(data))
 	})
 }

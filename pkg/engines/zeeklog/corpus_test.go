@@ -2,6 +2,7 @@ package zeeklog
 
 import (
 	"compress/gzip"
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -25,7 +26,7 @@ func TestCorpus_SSL_Zeek4_Classical(t *testing.T) {
 		t.Fatalf("read testdata: %v", err)
 	}
 
-	recs, err := parseSSLLog(strings.NewReader(string(data)))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(string(data)))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestCorpus_SSL_Zeek5_HybridKEM(t *testing.T) {
 		t.Fatalf("read testdata: %v", err)
 	}
 
-	recs, err := parseSSLLog(strings.NewReader(string(data)))
+	recs, err := parseSSLLog(context.Background(), strings.NewReader(string(data)))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestCorpus_X509_RSA_ECDSA_MLDSA(t *testing.T) {
 		t.Fatalf("read testdata: %v", err)
 	}
 
-	recs, err := parseX509Log(strings.NewReader(string(data)))
+	recs, err := parseX509Log(context.Background(), strings.NewReader(string(data)))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestCorpus_X509FlatJSON(t *testing.T) {
 		t.Fatalf("read testdata: %v", err)
 	}
 
-	recs, err := parseX509Log(strings.NewReader(string(data)))
+	recs, err := parseX509Log(context.Background(), strings.NewReader(string(data)))
 	if err != nil {
 		t.Fatalf("parseX509Log: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestCorpus_Compressed(t *testing.T) {
 	gzPath := dir + "/ssl.log.gz"
 	writeCorpusGzipFile(t, gzPath, rawData)
 
-	recs, err := readSSLLog(gzPath)
+	recs, err := readSSLLog(context.Background(), gzPath)
 	if err != nil {
 		t.Fatalf("readSSLLog compressed: %v", err)
 	}

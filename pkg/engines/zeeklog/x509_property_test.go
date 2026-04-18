@@ -1,6 +1,7 @@
 package zeeklog
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -10,7 +11,7 @@ import (
 // TestX509TSV_RoundTrip verifies that re-serializing parsed records and
 // re-parsing yields the same count and dedup keys.
 func TestX509TSV_RoundTrip(t *testing.T) {
-	recs, err := parseX509Log(strings.NewReader(x509TSVGolden))
+	recs, err := parseX509Log(context.Background(), strings.NewReader(x509TSVGolden))
 	if err != nil {
 		t.Fatalf("initial parse: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestX509TSV_RoundTrip(t *testing.T) {
 			i, r.ID, r.KeyAlg, r.SigAlg, r.KeyType, kl, curve, san))
 	}
 
-	recs2, err := parseX509Log(strings.NewReader(sb.String()))
+	recs2, err := parseX509Log(context.Background(), strings.NewReader(sb.String()))
 	if err != nil {
 		t.Fatalf("re-parse: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestX509Dedup_OrderIndependent(t *testing.T) {
 		return sb.String()
 	}
 
-	recsA, err := parseX509Log(strings.NewReader(buildTSV([]int{0, 1, 2, 3})))
+	recsA, err := parseX509Log(context.Background(), strings.NewReader(buildTSV([]int{0, 1, 2, 3})))
 	if err != nil {
 		t.Fatalf("orig order: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestX509Dedup_OrderIndependent(t *testing.T) {
 	rng := rand.New(rand.NewSource(99))
 	shuffled := []int{0, 1, 2, 3}
 	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
-	recsB, err := parseX509Log(strings.NewReader(buildTSV(shuffled)))
+	recsB, err := parseX509Log(context.Background(), strings.NewReader(buildTSV(shuffled)))
 	if err != nil {
 		t.Fatalf("shuffled order: %v", err)
 	}
