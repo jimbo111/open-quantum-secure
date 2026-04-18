@@ -50,17 +50,34 @@ func hostnameFromFile(file string) string {
 	return host
 }
 
+// canonicalizeHostname returns a canonical form of h: lowercased, trailing dot
+// stripped, and :port suffix removed. Applying this once at ingestion means
+// cache keys, dedup maps, and rate-limiter counters all agree.
+func canonicalizeHostname(h string) string {
+	h = strings.ToLower(h)
+	// Strip :port if present.
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		h = host
+	}
+	// Strip trailing dot (root label).
+	h = strings.TrimRight(h, ".")
+	return h
+}
+
 // deduplicateHostnames returns a new slice with duplicate entries removed,
-// preserving input order. Empty strings are dropped.
+// preserving input order. Empty strings are dropped. Hostnames are
+// canonicalized (lowercased, port-stripped, trailing-dot removed) before
+// deduplication so "Example.Com:443" and "example.com" collapse to one entry.
 func deduplicateHostnames(in []string) []string {
 	seen := make(map[string]bool, len(in))
 	out := make([]string, 0, len(in))
 	for _, h := range in {
-		if h == "" || seen[h] {
+		c := canonicalizeHostname(h)
+		if c == "" || seen[c] {
 			continue
 		}
-		seen[h] = true
-		out = append(out, h)
+		seen[c] = true
+		out = append(out, c)
 	}
 	return out
 }
