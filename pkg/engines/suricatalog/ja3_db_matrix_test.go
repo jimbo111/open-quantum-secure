@@ -43,6 +43,8 @@ func TestJA3SMatrix_ValidLookingUnknownHashes(t *testing.T) {
 // TestJA3SMatrix_DBStructureInvariant ensures all current DB entries (if any)
 // have non-empty keys and Labels. Enforces structural guarantees for future additions.
 func TestJA3SMatrix_DBStructureInvariant(t *testing.T) {
+	// Trigger sync.Once initialization so ja3sDB is non-nil before we range it.
+	lookupJA3S("")
 	for hash, hint := range ja3sDB {
 		if hash == "" {
 			t.Error("ja3sDB has an entry with an empty string key — all keys must be non-empty")
