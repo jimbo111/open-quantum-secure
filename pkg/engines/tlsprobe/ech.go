@@ -53,6 +53,13 @@ const echSvcParamKey = uint16(0x0005)
 // Returns (true, source) when ECH is detected; (false, "") when not detected.
 // source is "dns-https-rr" or "tls-ext".
 func detectECH(ctx context.Context, hostname string, timeout time.Duration) (bool, string) {
+	// Short-circuit for IP-literal hostnames: HTTPS RRs are keyed on names,
+	// never bare IPs, so the query would always return NXDOMAIN after wasting
+	// up to `timeout` seconds. RFC 9460 §2.4.3 confirms this.
+	if net.ParseIP(hostname) != nil {
+		return false, ""
+	}
+
 	// Path 1: DNS HTTPS RR lookup.
 	// We implement a minimal raw DNS query (Type=65) to avoid the stdlib
 	// limitation. Budget: kept under 100 LOC by querying only the first
