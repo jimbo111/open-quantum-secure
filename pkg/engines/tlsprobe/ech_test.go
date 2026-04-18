@@ -137,6 +137,53 @@ func TestSkipDNSName_Pointer(t *testing.T) {
 	}
 }
 
+// TestSkipDNSName_PointerLoopReturnsZero verifies that skipDNSName enforces a hard
+// cap on compression-pointer hops. A self-referential pointer (offset → itself)
+// would loop forever without the cap; with it the function must return 0.
+func TestSkipDNSName_PointerLoopReturnsZero(t *testing.T) {
+	t.Parallel()
+	// Pointer at offset 0 pointing back to offset 0: 0xC0 0x00.
+	// The updated skipDNSName follows the pointer, lands at 0 again, follows
+	// it again, etc. — until maxDNSPointerHops is hit and it returns 0.
+	data := []byte{0xC0, 0x00}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("skipDNSName(self-pointer loop) panicked: %v", r)
+		}
+	}()
+	got := skipDNSName(data, 0)
+	if got != 0 {
+		t.Errorf("skipDNSName(self-pointer loop): expected 0 (hop-limit sentinel), got %d", got)
+	}
+}
+
+// TestParseHTTPSResponseForECH_PointerLoopInQuestion verifies that a crafted
+// DNS response with a pointer loop in the question section's QNAME does not
+// hang or panic. parseHTTPSResponseForECH relies on skipDNSName to advance
+// past QNAME; with a looping pointer it should return false cleanly.
+func TestParseHTTPSResponseForECH_PointerLoopInQuestion(t *testing.T) {
+	t.Parallel()
+	// Header: QDCOUNT=1, ANCOUNT=1 so the parser tries to skip the question.
+	// QNAME is a pointer at offset 12 → offset 12 (self-loop).
+	msg := make([]byte, 20)
+	binary.BigEndian.PutUint16(msg[4:6], 1) // QDCOUNT=1
+	binary.BigEndian.PutUint16(msg[6:8], 1) // ANCOUNT=1
+	msg[12] = 0xC0                           // pointer flag
+	msg[13] = 0x0C                           // → offset 12 (self-loop)
+	// Remaining bytes are zero (QTYPE/QCLASS parsing never reached safely).
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("parseHTTPSResponseForECH(pointer loop in QNAME) panicked: %v", r)
+		}
+	}()
+	result := parseHTTPSResponseForECH(msg)
+	// Must return false (not true and not panic).
+	if result {
+		t.Error("parseHTTPSResponseForECH(pointer loop): expected false, got true")
+	}
+}
+
 // ── parseHTTPSResponseForECH ─────────────────────────────────────────────────
 
 // buildHTTPSResponse constructs a minimal DNS response containing a Type=65

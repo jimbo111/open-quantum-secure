@@ -380,20 +380,63 @@ func parseHTTPSResponseForECH(resp []byte) bool {
 	return false
 }
 
+// maxDNSPointerHops is the maximum number of compression-pointer dereferences
+// skipDNSName will follow before aborting. RFC 1035 §4.1.4 defines pointer
+// compression; a hard cap of 128 hops is well within the RFC-maximum of 255
+// labels and prevents crafted responses from causing an infinite loop.
+const maxDNSPointerHops = 128
+
 // skipDNSName advances offset past a DNS name in wire format (compressed or plain).
+// It follows compression pointers and counts hops; if more than maxDNSPointerHops
+// pointers are encountered (indicating a loop in a malicious response), it returns
+// 0 so callers treat the response as invalid.
+//
+// For a plain (uncompressed) name the returned offset points to the byte after the
+// terminating zero label. For a compressed name it returns the byte after the
+// 2-byte pointer field at the outermost call site (i.e. the wire position, not the
+// destination), which is the correct advance for a caller iterating through RRs.
 func skipDNSName(data []byte, offset int) int {
-	for offset < len(data) {
-		length := int(data[offset])
+	hops := 0
+	// outerAdvance tracks the position after the first pointer field so we can
+	// return the right wire offset to the caller while still following the chain.
+	outerAdvance := -1
+	cur := offset
+
+	for cur < len(data) {
+		length := int(data[cur])
 		if length == 0 {
-			return offset + 1
+			if outerAdvance >= 0 {
+				return outerAdvance
+			}
+			return cur + 1
 		}
 		// Pointer compression: top 2 bits == 11.
 		if length&0xC0 == 0xC0 {
-			return offset + 2
+			if cur+1 >= len(data) {
+				// Truncated pointer — invalid.
+				return 0
+			}
+			hops++
+			if hops > maxDNSPointerHops {
+				// Pointer loop detected — signal invalid to caller.
+				return 0
+			}
+			// Record the wire position immediately after this pointer field
+			// (only the first one matters for the caller's offset advance).
+			if outerAdvance < 0 {
+				outerAdvance = cur + 2
+			}
+			// Follow the pointer: compute the referenced offset.
+			target := int(binary.BigEndian.Uint16(data[cur:cur+2]) & 0x3FFF)
+			cur = target
+			continue
 		}
-		offset += 1 + length
+		cur += 1 + length
 	}
-	return offset
+	if outerAdvance >= 0 {
+		return outerAdvance
+	}
+	return cur
 }
 
 // ScanBytesForECHExtension scans a buffer for the 0xfe0d ECH extension codepoint
