@@ -94,6 +94,13 @@ type ScanOptions struct {
 	SSHTargets     []string // host:port targets to probe SSH KEX advertisement (empty = skip ssh-probe)
 	SSHTimeout     int      // per-target dial+KEXINIT timeout in seconds (0 = default 10s)
 	SSHDenyPrivate bool     // reject RFC 1918 / loopback / link-local target IPs (--ssh-strict)
+
+	// Deep-probe options (Sprint 7).
+	// When DeepProbe is true, the tls-probe engine opens a second raw TCP
+	// connection per target and probes DefaultProbeGroups individually using
+	// hand-crafted ClientHellos. This reveals PQC group support that Go's
+	// stdlib crypto/tls does not expose via CurveID (e.g. pure ML-KEM groups).
+	DeepProbe bool // enable raw ClientHello deep-probe for PQC group detection
 }
 
 // Engine is the interface every scanner engine must implement.

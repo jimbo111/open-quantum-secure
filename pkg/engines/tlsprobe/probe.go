@@ -43,6 +43,12 @@ type ProbeResult struct {
 	ECHDetected bool   // true when Encrypted Client Hello is detected
 	// Diagnostic: surfaced in JSON output via /dashboard only; not consumed by classifier.
 	ECHSource   string // "dns-https-rr", "tls-ext", or "" when not detected
+
+	// Deep-probe fields (Sprint 7, S7.4).
+	// DeepProbeAcceptedGroups lists IANA SupportedGroup codepoints for which the
+	// server returned a ServerHello (not HRR, not Alert) during the raw probe pass.
+	// Only populated when --deep-probe is enabled.
+	DeepProbeAcceptedGroups []uint16
 }
 
 // ProbeOpts configures a single TLS probe.

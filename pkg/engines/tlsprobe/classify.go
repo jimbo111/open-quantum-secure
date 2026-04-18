@@ -369,6 +369,17 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 		applyVolumeFields(&ff[i], result)
 	}
 
+	// Deep-probe results (Sprint 7): annotate the kex finding with the list of
+	// accepted groups. Only the kex finding carries this field because it is the
+	// finding consumers use for key-exchange risk assessment.
+	if len(result.DeepProbeAcceptedGroups) > 0 {
+		for i := range ff {
+			if ff[i].Algorithm != nil && ff[i].Algorithm.Primitive == "key-exchange" {
+				ff[i].DeepProbeSupportedGroups = result.DeepProbeAcceptedGroups
+			}
+		}
+	}
+
 	return ff
 }
 

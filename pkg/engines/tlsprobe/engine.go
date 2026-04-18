@@ -7,11 +7,13 @@ package tlsprobe
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe/rawhello"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 )
 
@@ -98,6 +100,36 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		}(i, target)
 	}
 	wg.Wait()
+
+	// Deep-probe pass (--deep-probe, Sprint 7): for each reachable target, probe
+	// each group in DefaultProbeGroups individually using hand-crafted ClientHellos.
+	// Run sequentially per target to avoid rate-limiting (groups are already
+	// sequential inside rawhello.DeepProbe; targets could be parallelised but
+	// sequential is safe and keeps the code simple for MVP).
+	if opts.DeepProbe {
+		for i := range results {
+			r := &results[i]
+			if r.Error != nil || r.ResolvedIP == "" {
+				continue
+			}
+			if ctx.Err() != nil {
+				break
+			}
+			host, port, err := parseHostPort(r.Target)
+			if err != nil {
+				continue
+			}
+			addr := net.JoinHostPort(r.ResolvedIP, port)
+			groupResults := rawhello.DeepProbe(ctx, addr, host, timeout, rawhello.DefaultProbeGroups)
+			for _, gr := range groupResults {
+				if gr.Outcome == rawhello.OutcomeAccepted {
+					r.DeepProbeAcceptedGroups = append(r.DeepProbeAcceptedGroups, gr.GroupID)
+				}
+			}
+			fmt.Fprintf(os.Stderr, "deep-probe: %s — %d/%d groups accepted\n",
+				r.Target, len(r.DeepProbeAcceptedGroups), len(groupResults))
+		}
+	}
 
 	// Collect findings and track errors.
 	var allFindings []findings.UnifiedFinding

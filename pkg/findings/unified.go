@@ -124,6 +124,12 @@ type UnifiedFinding struct {
 	// the TLS handshake exchange.
 	HandshakeVolumeClass string `json:"handshakeVolumeClass,omitempty"` // "classical", "hybrid-kem", "full-pqc", "unknown"
 	HandshakeBytes       int64  `json:"handshakeBytes,omitempty"`       // total handshake bytes (in+out)
+
+	// Deep-probe fields (populated by tls-probe --deep-probe raw ClientHello pass, Sprint 7).
+	// DeepProbeSupportedGroups lists the IANA TLS SupportedGroup codepoints that the
+	// server accepted (responded with ServerHello, not HRR or Alert) during the
+	// raw probe. Only set on the kex finding for a target when --deep-probe is enabled.
+	DeepProbeSupportedGroups []uint16 `json:"deepProbeSupportedGroups,omitempty"`
 }
 
 // MigrationSnippet holds a language-specific PQC migration code example.
@@ -159,6 +165,9 @@ func (f *UnifiedFinding) Clone() UnifiedFinding {
 	}
 	if f.DataFlowPath != nil {
 		c.DataFlowPath = append([]FlowStep(nil), f.DataFlowPath...)
+	}
+	if f.DeepProbeSupportedGroups != nil {
+		c.DeepProbeSupportedGroups = append([]uint16(nil), f.DeepProbeSupportedGroups...)
 	}
 	return c
 }

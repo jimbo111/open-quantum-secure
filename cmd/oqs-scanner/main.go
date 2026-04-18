@@ -358,6 +358,7 @@ func scanCmd() *cobra.Command {
 		tlsTargets        []string
 		tlsInsecure       bool
 		tlsStrict         bool
+		tlsDeepProbe      bool
 		sector            string
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
@@ -518,6 +519,7 @@ Example with data lifetime adjustment for healthcare:
 				TLSDenyPrivate:  tlsStrict,
 				TLSTimeout:      tlsTimeout,
 				TLSCACert:       cfg.TLS.CACert,
+				DeepProbe:       tlsDeepProbe,
 				NoNetwork:       noNetwork,
 				CTLookupTargets: ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
@@ -708,6 +710,7 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
+	cmd.Flags().BoolVar(&tlsDeepProbe, "deep-probe", false, "After TLS handshake, probe PQC group codepoints via raw ClientHellos (Sprint 7; requires --tls-targets)")
 
 	// CT log lookup flags (Sprint 3)
 	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
