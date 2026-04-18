@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"time"
 )
 
 // buildServerHello constructs a raw ServerHello handshake message body with the
@@ -238,24 +239,202 @@ func TestParseServerResponse_ContextCancelled(t *testing.T) {
 	}
 }
 
+func TestParseServerHelloBody_AdditionalTruncations(t *testing.T) {
+	var zero [32]byte
+	full := buildServerHello(zero, 0x1301, 0x001d, false)
+
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		// Truncated at cipher_suite (need 2 bytes after session_id)
+		{"truncated_at_cipher_suite", func() []byte {
+			b := make([]byte, 35) // version(2)+random(32)+sid_len(1)=35, sid_len=0
+			return b[:35]         // no cipher bytes
+		}()},
+		// Truncated at compression_method (need 1 byte after cipher)
+		{"truncated_at_compression", func() []byte {
+			b := make([]byte, 37) // +cipher(2)
+			return b[:37]
+		}()},
+		// Valid up through compression then truncated before extensions_len
+		{"truncated_before_exts_len", func() []byte {
+			// version(2)+random(32)+sidlen(1)+cipher(2)+compression(1)=38
+			return full[:5+4+38] // record_hdr(5)+hs_hdr(4)+body(38)
+		}()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseServerHelloBody(tt.body)
+			// Some truncations return error, some return a partial result; neither panics.
+			_ = err
+		})
+	}
+}
+
+func TestParseServerHelloBody_UnknownExtensionSkip(t *testing.T) {
+	// Build a ServerHello body with an unknown extension (0xFFFF) before key_share.
+	var zero [32]byte
+	var b []byte
+	b = appendU16(b, 0x0303) // legacy_version
+	b = append(b, zero[:]...)
+	b = append(b, 0x00)       // session_id_len = 0
+	b = appendU16(b, 0x1301)  // cipher_suite
+	b = append(b, 0x00)       // compression = 0
+
+	// Extensions: unknown 0xFFFF (4 bytes data) then supported_versions + key_share
+	var exts []byte
+	exts = appendU16(exts, 0xFFFF) // unknown type
+	exts = appendU16(exts, 4)
+	exts = append(exts, 0xDE, 0xAD, 0xBE, 0xEF)
+	// supported_versions
+	exts = appendU16(exts, 0x002b)
+	exts = appendU16(exts, 2)
+	exts = append(exts, 0x03, 0x04)
+	// key_share for SH: group + kex_len + 1 byte kex
+	exts = appendU16(exts, 0x0033)
+	exts = appendU16(exts, 5) // group(2)+kexlen(2)+kex(1)
+	exts = appendU16(exts, 0x001d)
+	exts = appendU16(exts, 1)
+	exts = append(exts, 0x42)
+
+	b = appendU16(b, uint16(len(exts)))
+	b = append(b, exts...)
+
+	res, err := parseServerHelloBody(b)
+	if err != nil {
+		t.Fatalf("parseServerHelloBody: %v", err)
+	}
+	if res.SelectedGroup != 0x001d {
+		t.Errorf("SelectedGroup: got 0x%04x want 0x001d", res.SelectedGroup)
+	}
+}
+
+func TestParseServerHelloBody_ZeroLengthExtension(t *testing.T) {
+	// Extension with length=0 must be skipped without error.
+	var zero [32]byte
+	var b []byte
+	b = appendU16(b, 0x0303)
+	b = append(b, zero[:]...)
+	b = append(b, 0x00)
+	b = appendU16(b, 0x1301)
+	b = append(b, 0x00)
+
+	var exts []byte
+	exts = appendU16(exts, 0xABCD) // unknown type, zero length
+	exts = appendU16(exts, 0)
+
+	b = appendU16(b, uint16(len(exts)))
+	b = append(b, exts...)
+
+	res, err := parseServerHelloBody(b)
+	if err != nil {
+		t.Fatalf("zero-length extension: %v", err)
+	}
+	if res.SelectedGroup != 0 {
+		t.Errorf("SelectedGroup: got 0x%04x want 0", res.SelectedGroup)
+	}
+}
+
+func TestParseServerHelloBody_TLS12LegacyVersion(t *testing.T) {
+	// A ServerHello with legacy_version=0x0302 parses without panic;
+	// current code does not enforce version — exercises the version bytes path.
+	var zero [32]byte
+	var b []byte
+	b = appendU16(b, 0x0302) // TLS 1.1 legacy version
+	b = append(b, zero[:]...)
+	b = append(b, 0x00)
+	b = appendU16(b, 0x002F) // TLS_RSA_WITH_AES_128_CBC_SHA (TLS 1.2 suite)
+	b = append(b, 0x00)
+
+	_, err := parseServerHelloBody(b)
+	// No extensions → returns result with no group. Must not panic.
+	_ = err
+}
+
+func TestParseServerHelloBody_ExtensionLenOverflow(t *testing.T) {
+	// Build a valid SH then corrupt the extensions length to overflow.
+	var zero [32]byte
+	body := buildServerHello(zero, 0x1301, 0, false)
+	// The last 2 bytes of extensions block header: set to 0x7FFF (large claim).
+	// body ends with the extensions block; walk to find extensions length field.
+	// Simpler: corrupt the last 2 bytes that encode extsLen.
+	if len(body) >= 4 {
+		body[len(body)-len(extSupportedVersions())-2] = 0x7F
+		body[len(body)-len(extSupportedVersions())-1] = 0xFF
+	}
+	_, _ = parseServerHelloBody(body) // must not panic
+}
+
 // FuzzParseServerHello exercises parseServerHelloBody against arbitrary inputs.
 // Run: go test -fuzz=FuzzParseServerHello ./pkg/engines/tlsprobe/rawhello/
 func FuzzParseServerHello(f *testing.F) {
-	// Seed with valid SH bodies.
-	var random [32]byte
-	f.Add(buildServerHello(random, 0x1301, 0x001d, false))
+	var zero [32]byte
+	// 10+ seeds covering valid SH, HRR, truncated, and edge cases.
+	f.Add(buildServerHello(zero, 0x1301, 0x001d, false))
 	f.Add(buildServerHello(HRRMagic, 0x1302, 0x11ec, true))
+	f.Add(buildServerHello(zero, 0x1302, 0x11eb, false))
+	f.Add(buildServerHello(HRRMagic, 0x1303, 0x0201, true))
+	f.Add(buildServerHello(zero, 0x1303, 0, false))    // no key_share
+	f.Add(buildServerHello(HRRMagic, 0x1301, 0, true)) // HRR no key_share
 	f.Add([]byte{})
+	f.Add(make([]byte, 38)) // exactly min for extensions present
 	f.Add(make([]byte, 100))
+	f.Add(make([]byte, 200))
+	f.Add([]byte{0x03, 0x03}) // only legacy_version, truncated
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		// Must not panic on any input.
 		result, err := parseServerHelloBody(data)
 		if err != nil {
 			return
 		}
-		// If it succeeded, SelectedGroup must be a sane uint16.
 		_ = result.SelectedGroup
+	})
+}
+
+// FuzzParseHRR exercises the HRR-specific parsing path in ParseServerResponse.
+func FuzzParseHRR(f *testing.F) {
+	ctx := context.Background()
+	var zero [32]byte
+	// 10+ seeds: valid HRR bodies and corrupted variants.
+	hrrBodies := [][]byte{
+		buildServerHello(HRRMagic, 0x1302, 0x11ec, true),
+		buildServerHello(HRRMagic, 0x1301, 0x001d, true),
+		buildServerHello(HRRMagic, 0x1303, 0x0201, true),
+		buildServerHello(HRRMagic, 0x1302, 0x11eb, true),
+		buildServerHello(HRRMagic, 0x1302, 0x0202, true),
+		buildServerHello(HRRMagic, 0x1301, 0, true),
+		buildServerHello(zero, 0x1301, 0x001d, false),
+		buildServerHello(zero, 0x1302, 0, false),
+		make([]byte, 35),
+		make([]byte, 10),
+		[]byte{},
+	}
+	for _, body := range hrrBodies {
+		// Wrap body in a full handshake record so ReadHandshakeMsg can consume it.
+		msg := make([]byte, 4+len(body))
+		msg[0] = HandshakeTypeServerHello
+		msg[2] = byte(len(body) >> 8)
+		msg[3] = byte(len(body))
+		copy(msg[4:], body)
+		f.Add(msg)
+	}
+
+	f.Fuzz(func(t *testing.T, msgBody []byte) {
+		// Feed msgBody as the payload of a handshake record via net.Pipe.
+		client, server := net.Pipe()
+		fctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+		go func() {
+			WriteRecord(fctx, client, Record{
+				Type:    RecordTypeHandshake,
+				Version: LegacyRecordVersion,
+				Payload: msgBody,
+			})
+			client.Close()
+		}()
+		defer server.Close()
+		_, _ = ParseServerResponse(fctx, server)
 	})
 }
 
@@ -265,6 +444,12 @@ func FuzzParseKeyShareExtGroup(f *testing.F) {
 	f.Add([]byte{0x11, 0xec, 0x00, 0x01, 0x42}, false)
 	f.Add([]byte{}, true)
 	f.Add(make([]byte, 200), false)
+	f.Add([]byte{0x11, 0xeb}, true)                        // SecP256r1MLKEM768 HRR
+	f.Add([]byte{0x02, 0x01, 0x00, 0x10}, false)           // MLKEM768 SH, kex_len=16
+	f.Add([]byte{0x02, 0x00}, true)                        // MLKEM512 HRR
+	f.Add([]byte{0x02, 0x02, 0x00, 0x04, 0x01, 0x02, 0x03, 0x04}, false) // MLKEM1024 SH
+	f.Add([]byte{0x00}, true)                              // truncated (1 byte only)
+	f.Add([]byte{0x00, 0x1d, 0x00}, false)                 // truncated kex_len
 
 	f.Fuzz(func(t *testing.T, data []byte, isHRR bool) {
 		_, _ = parseKeyShareExtGroup(data, isHRR)

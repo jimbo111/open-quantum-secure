@@ -303,3 +303,169 @@ func TestBuildClientHello_WithKeyShare(t *testing.T) {
 		t.Errorf("record type: 0x%02x", raw[0])
 	}
 }
+
+func TestBuildClientHello_CustomCipherSuites(t *testing.T) {
+	// Exercise each individual TLS 1.3 cipher suite and multi-cipher combos.
+	cases := []struct {
+		name    string
+		ciphers []uint16
+	}{
+		{"aes128_only", []uint16{0x1301}},
+		{"aes256_only", []uint16{0x1302}},
+		{"chacha_only", []uint16{0x1303}},
+		{"all_three", []uint16{0x1301, 0x1302, 0x1303}},
+		{"reversed", []uint16{0x1303, 0x1302, 0x1301}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := BuildClientHello(ClientHelloOpts{CipherSuites: tc.ciphers})
+			if err != nil {
+				t.Fatalf("BuildClientHello: %v", err)
+			}
+			hs := raw[5:]
+			body := hs[4:]
+			off := 2 + 32 + 1 + 32
+			csLen := int(binary.BigEndian.Uint16(body[off : off+2]))
+			off += 2
+			if csLen != len(tc.ciphers)*2 {
+				t.Errorf("cipher suite bytes: got %d want %d", csLen, len(tc.ciphers)*2)
+			}
+			for i, want := range tc.ciphers {
+				got := binary.BigEndian.Uint16(body[off+i*2 : off+i*2+2])
+				if got != want {
+					t.Errorf("cipher[%d]: got 0x%04x want 0x%04x", i, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildClientHello_Random32Bytes(t *testing.T) {
+	raw, err := BuildClientHello(ClientHelloOpts{SNI: "x.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rnd, _, _ := parseClientHelloFields(t, raw)
+	if len(rnd) != 32 {
+		t.Errorf("random: got %d bytes want 32", len(rnd))
+	}
+}
+
+func TestBuildClientHello_EmptyGroupList(t *testing.T) {
+	// No SupportedGroups = omit the extension entirely; must not error.
+	raw, err := BuildClientHello(ClientHelloOpts{SNI: "x.example", SupportedGroups: []uint16{}})
+	if err != nil {
+		t.Fatalf("BuildClientHello with empty groups: %v", err)
+	}
+	_, _, _, exts := parseClientHelloFields(t, raw)
+	for off := 0; off+4 <= len(exts); {
+		extType := binary.BigEndian.Uint16(exts[off : off+2])
+		extLen := int(binary.BigEndian.Uint16(exts[off+2 : off+4]))
+		off += 4
+		if extType == 0x000a {
+			t.Error("supported_groups extension present despite empty group list")
+		}
+		off += extLen
+	}
+}
+
+func TestBuildClientHello_AllPQCKeyShareLengths(t *testing.T) {
+	// Verify every ProbeGroup in DefaultProbeGroups has the correct key_share byte length.
+	want := map[uint16]int{
+		0x001d: 32,         // X25519
+		0x11ec: 32 + 1184, // X25519MLKEM768 = 1216
+		0x11eb: 65 + 1184, // SecP256r1MLKEM768 = 1249
+		0x0201: 1184,       // MLKEM768
+		0x0202: 1568,       // MLKEM1024
+		0x0200: 800,        // MLKEM512
+	}
+	for groupID, wantLen := range want {
+		ks, err := ProbeKeyShare(groupID)
+		if err != nil {
+			t.Errorf("ProbeKeyShare(0x%04x): %v", groupID, err)
+			continue
+		}
+		if len(ks.PublicKey) != wantLen {
+			t.Errorf("group 0x%04x: key length %d want %d", groupID, len(ks.PublicKey), wantLen)
+		}
+	}
+}
+
+func TestExtKeyShare_KeyTooLong(t *testing.T) {
+	// A single key_share entry with PublicKey > 65535 bytes.
+	_, err := BuildClientHello(ClientHelloOpts{
+		KeyShares: []KeyShareEntry{{GroupID: 0x001d, PublicKey: make([]byte, 65536)}},
+	})
+	if err == nil {
+		t.Fatal("expected error for key share public key > 65535, got nil")
+	}
+}
+
+func TestExtKeyShare_EntriesTooLong(t *testing.T) {
+	// A 65535-byte key is legal per-entry but makes total entries > 65535.
+	_, err := BuildClientHello(ClientHelloOpts{
+		KeyShares: []KeyShareEntry{{GroupID: 0x001d, PublicKey: make([]byte, 65535)}},
+	})
+	if err == nil {
+		t.Fatal("expected error for key_share entries total > 65535, got nil")
+	}
+}
+
+func TestBuildClientHello_ExtensionsTooLong(t *testing.T) {
+	// sigAlgs list large enough to push total extensions over 65535 bytes.
+	algs := make([]uint16, 33000)
+	for i := range algs {
+		algs[i] = 0x0401
+	}
+	_, err := BuildClientHello(ClientHelloOpts{SigAlgs: algs})
+	if err == nil {
+		t.Fatal("expected error for extensions exceeding 65535 bytes, got nil")
+	}
+}
+
+func TestBuildClientHello_SNITooLong(t *testing.T) {
+	sni := string(bytes.Repeat([]byte("a"), 256))
+	_, err := BuildClientHello(ClientHelloOpts{SNI: sni})
+	if err == nil {
+		t.Fatal("expected error for SNI > 255 bytes, got nil")
+	}
+}
+
+// FuzzBuildClientHello ensures BuildClientHello never panics on varied inputs.
+func FuzzBuildClientHello(f *testing.F) {
+	seeds := []struct {
+		sni      string
+		addGrp   bool
+		addKS    bool
+		grpIndex uint8
+	}{
+		{"example.com", true, true, 0},
+		{"", false, false, 0},
+		{"x.example", true, false, 1},
+		{"probe.example.com", false, true, 0},
+		{"", true, true, 2},
+		{"a.b.c", true, true, 3},
+		{"test.example", true, false, 4},
+		{"", true, false, 5},
+		{"long.hostname.example.com", true, true, 1},
+		{"minimal.io", false, false, 0},
+	}
+	for _, s := range seeds {
+		f.Add(s.sni, s.addGrp, s.addKS, s.grpIndex)
+	}
+	f.Fuzz(func(t *testing.T, sni string, addGrp bool, addKS bool, grpIndex uint8) {
+		opts := ClientHelloOpts{SNI: sni}
+		groups := DefaultProbeGroups
+		if addGrp {
+			idx := int(grpIndex) % len(groups)
+			opts.SupportedGroups = []uint16{groups[idx]}
+			if addKS {
+				ks, err := ProbeKeyShare(groups[idx])
+				if err == nil {
+					opts.KeyShares = []KeyShareEntry{ks}
+				}
+			}
+		}
+		_, _ = BuildClientHello(opts)
+	})
+}
