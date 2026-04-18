@@ -35,6 +35,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cbomkit"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/configscanner"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/ctlookup"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/sshprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cdxgen"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cipherscope"
@@ -134,7 +135,10 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 	// runs tls-probe first and can enrich ct-lookup with ECH hostnames.
 	ct := ctlookup.New()
 
-	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct)
+	// Tier 5: SSH probe engine (pure Go, always available; Sprint 4).
+	sshp := sshprobe.New()
+
+	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct, sshp)
 }
 
 // engineVersionsHash computes a stable SHA-256 hex digest over the
@@ -356,6 +360,7 @@ func scanCmd() *cobra.Command {
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
 		noNetwork         bool
+		sshTargets        []string
 	)
 
 	cmd := &cobra.Command{
@@ -506,6 +511,7 @@ Example with data lifetime adjustment for healthcare:
 				NoNetwork:       noNetwork,
 				CTLookupTargets: ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
+				SSHTargets:      sshTargets,
 			}
 
 			if incremental && noCache {
@@ -698,6 +704,9 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().BoolVar(&noNetwork, "no-network", false, "Disable all outbound network calls (TLS probe + CT lookup)")
 	cmd.Flags().BoolVar(&noNetwork, "offline", false, "Disable all outbound network calls (alias for --no-network)")
 
+	// SSH probe flags (Sprint 4)
+	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
+
 	// HNDL Mosca sector preset flag
 	cmd.Flags().StringVar(&sector, "sector", "",
 		`Industry sector preset for Mosca HNDL shelf-life (case-insensitive).
@@ -735,6 +744,7 @@ func diffCmd() *cobra.Command {
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
 		noNetwork         bool
+		sshTargets        []string
 	)
 
 	cmd := &cobra.Command{
@@ -875,6 +885,7 @@ Example:
 				NoNetwork:       noNetwork,
 				CTLookupTargets: ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
+				SSHTargets:      sshTargets,
 			}
 
 			selected := orch.EffectiveEngines(opts)
@@ -1023,6 +1034,9 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().BoolVar(&ctLookupFromECH, "ct-lookup-from-ech", false, "Auto-query CT logs for ECH-enabled findings detected by the TLS probe")
 	cmd.Flags().BoolVar(&noNetwork, "no-network", false, "Disable all outbound network calls (TLS probe + CT lookup)")
 	cmd.Flags().BoolVar(&noNetwork, "offline", false, "Disable all outbound network calls (alias for --no-network)")
+
+	// SSH probe flags (Sprint 4)
+	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
 
 	return cmd
 }
