@@ -38,10 +38,13 @@ func (r *rateLimiter) Wait(ctx context.Context) error {
 		if ok {
 			return nil
 		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return ctx.Err()
-		case <-time.After(wait):
+		case <-t.C:
+			t.Stop()
 		}
 	}
 }
