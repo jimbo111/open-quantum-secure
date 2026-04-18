@@ -144,7 +144,13 @@ oqs-scanner scan --path . --tls-targets api.example.com:443,db.internal:8443
 
 The `tls-probe` engine connects to each target, inspects the TLS handshake, and reports vulnerable key exchange (ECDHE, RSA), signature algorithms (RSA, ECDSA), and weak symmetric ciphers (AES-128). Findings include the negotiated cipher suite and leaf certificate key type.
 
-**Security:** DNS pinning prevents rebinding attacks. RFC 1918/loopback IPs are blocked with `--tls-strict`. TLS targets cannot be set via project config (`.oqs-scanner.yaml`) to prevent SSRF in CI.
+**PQC presence detection.** When the server negotiates a post-quantum group (ML-KEM or an IETF hybrid such as X25519MLKEM768), findings carry `negotiatedGroup` (uint16 IANA codepoint), `negotiatedGroupName`, `pqcPresent=true`, and `pqcMaturity` (`final` or `draft`). The table output shows a `[PQC]` or `[PQC:DRAFT]` badge.
+
+**Size-based passive signals.** The probe also emits `handshakeVolumeClass` (`classical` / `hybrid-kem` / `full-pqc` / `unknown` based on handshake byte volume — thresholds per Mallick et al., arXiv:2503.17830) and `handshakeBytes` (total). These are deterministic signals that corroborate the codepoint classification and surface in JSON, SARIF (`result.properties`), and CBOM (`oqs:*` component properties).
+
+**ECH-enabled hosts.** When the server advertises Encrypted Client Hello (ECH) via a DNS HTTPS RR, findings are annotated `partialInventory=true` with `partialInventoryReason="ECH_ENABLED"` — some handshake details are encrypted and the active probe's inventory is necessarily incomplete. A future Certificate Transparency lookup engine (Sprint 3) will recover the cert algorithm for these hosts.
+
+**Security:** DNS pinning prevents rebinding attacks. RFC 1918/loopback IPs are blocked with `--tls-strict`. Under `--tls-strict`, the ECH DNS path also rejects a private/loopback system resolver in favour of public fallbacks (1.1.1.1, 8.8.8.8). TLS targets cannot be set via project config (`.oqs-scanner.yaml`) to prevent SSRF in CI.
 
 | Flag | Default | Description |
 |------|---------|-------------|
