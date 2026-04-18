@@ -346,6 +346,12 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 	if f.PQCMaturity != "" {
 		props = append(props, cdxProperty{Name: "oqs:pqcMaturity", Value: f.PQCMaturity})
 	}
+	if f.PartialInventory {
+		props = append(props, cdxProperty{Name: "oqs:partialInventory", Value: "true"})
+		if f.PartialInventoryReason != "" {
+			props = append(props, cdxProperty{Name: "oqs:partialInventoryReason", Value: f.PartialInventoryReason})
+		}
+	}
 
 	if len(f.DataFlowPath) > 0 {
 		dfpJSON, err := json.Marshal(f.DataFlowPath)

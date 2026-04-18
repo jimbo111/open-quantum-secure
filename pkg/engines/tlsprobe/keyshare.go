@@ -29,7 +29,7 @@ type KeyShareInfo struct {
 // but indexed as [len, len] to make callers uniform.
 var expectedKeyShareLengths = map[uint16][2]int{
 	// Classical ECDH (client and server lengths are identical for ECDH).
-	0x001D: {32, 32},   // X25519
+	0x001d: {32, 32},   // X25519
 	0x0017: {65, 65},   // secp256r1 (uncompressed point)
 	0x0018: {97, 97},   // secp384r1
 	0x0019: {133, 133}, // secp521r1
@@ -42,18 +42,18 @@ var expectedKeyShareLengths = map[uint16][2]int{
 	// Hybrid KEMs (draft-ietf-tls-hybrid-design-16).
 	// Client key_exchange = classical_pubkey || mlkem_pubkey.
 	// Server key_exchange = classical_contribution || mlkem_ciphertext.
-	0x11EB: {65 + 1184, 65 + 1088},   // SecP256r1MLKEM768  (1249 / 1153)
-	0x11EC: {32 + 1184, 32 + 1088},   // X25519MLKEM768     (1216 / 1120)
-	0x11ED: {97 + 1568, 97 + 1568},   // SecP384r1MLKEM1024 (1665 / 1665)
-	0x11EE: {65 + 1184, 65 + 1088},   // curveSM2MLKEM768   (1249 / 1153)
+	0x11eb: {65 + 1184, 65 + 1088},   // SecP256r1MLKEM768  (1249 / 1153)
+	0x11ec: {32 + 1184, 32 + 1088},   // X25519MLKEM768     (1216 / 1120)
+	0x11ed: {97 + 1568, 97 + 1568},   // SecP384r1MLKEM1024 (1665 / 1665)
+	0x11ee: {65 + 1184, 65 + 1088},   // curveSM2MLKEM768   (1249 / 1153)
 }
 
 // hybridGroups is the set of codepoints that represent hybrid KEMs.
 var hybridGroups = map[uint16]bool{
-	0x11EB: true,
-	0x11EC: true,
-	0x11ED: true,
-	0x11EE: true,
+	0x11eb: true,
+	0x11ec: true,
+	0x11ed: true,
+	0x11ee: true,
 }
 
 // purePQGroups is the set of codepoints that represent pure ML-KEM.
@@ -74,6 +74,9 @@ func inferPrimitive(groupID uint16) string {
 	}
 	return "classical"
 }
+
+// TODO(sprint7): wire via rawhello.ClientHelloCapture — Sprint 7 raw CH builder
+// will call ParseKeyShareExtension directly from captured outgoing ClientHellos.
 
 // ParseKeyShareExtension parses the body of a key_share extension from a
 // TLS 1.3 ClientHello or ServerHello and returns all key share entries found.

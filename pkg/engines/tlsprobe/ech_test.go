@@ -144,10 +144,7 @@ func buildHTTPSResponse(hostname string, svcParams []byte) []byte {
 	// Encode hostname as labels.
 	encodeLabel := func(name string) []byte {
 		var out []byte
-		for _, label := range []string{} {
-			_ = label
-		}
-		// Simple: split on "." and encode
+		// Split on "." and encode each label.
 		parts := splitLabels(name)
 		for _, p := range parts {
 			out = append(out, byte(len(p)))

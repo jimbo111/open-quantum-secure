@@ -31,14 +31,17 @@ type ProbeResult struct {
 	Duration          time.Duration
 
 	// Size-based passive detection fields (Sprint 2, S2.1–S2.3).
+	// Diagnostic: surfaced in JSON output via /dashboard only; not consumed by classifier.
 	IncomingSegments    int64  // approximate number of incoming TCP segments during handshake
+	// Diagnostic: surfaced in JSON output via /dashboard only; not consumed by classifier.
 	OutgoingSegments    int64  // approximate number of outgoing TCP segments during handshake
-	BytesIn             int64  // total bytes received during handshake
-	BytesOut            int64  // total bytes sent during handshake
+	BytesIn             int64  // total bytes received during handshake (authoritative volume signal)
+	BytesOut            int64  // total bytes sent during handshake (authoritative volume signal)
 	HandshakeVolumeClass string // "classical", "hybrid-kem", "full-pqc", or "unknown" (S2.3)
 
 	// ECH detection fields (Sprint 2, S2.4).
 	ECHDetected bool   // true when Encrypted Client Hello is detected
+	// Diagnostic: surfaced in JSON output via /dashboard only; not consumed by classifier.
 	ECHSource   string // "dns-https-rr", "tls-ext", or "" when not detected
 }
 
@@ -152,7 +155,7 @@ func probe(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
 	result.HandshakeVolumeClass = ClassifyHandshakeVolume(result.BytesIn + result.BytesOut).String()
 
 	// Detect ECH (S2.4) after handshake data is available.
-	echDetected, echSource := detectECH(ctx, host)
+	echDetected, echSource := detectECH(ctx, host, opts.Timeout)
 	result.ECHDetected = echDetected
 	result.ECHSource = echSource
 

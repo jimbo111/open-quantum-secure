@@ -72,6 +72,20 @@ func pqcDraftFinding() findings.UnifiedFinding {
 	}
 }
 
+// partialInventoryFinding is an ECH-hidden finding with PartialInventory=true.
+func partialInventoryFinding() findings.UnifiedFinding {
+	return findings.UnifiedFinding{
+		Location:               findings.Location{File: "(tls-probe)/ech.example.com:443#kex"},
+		Algorithm:              &findings.Algorithm{Name: "ECDHE", Primitive: "key-exchange"},
+		SourceEngine:           "tls-probe",
+		Confidence:             findings.ConfidenceMedium,
+		Reachable:              findings.ReachableYes,
+		QuantumRisk:            findings.QRVulnerable,
+		PartialInventory:       true,
+		PartialInventoryReason: "ECH_ENABLED",
+	}
+}
+
 // ── JSON round-trip ──────────────────────────────────────────────────────────
 
 func TestPQCFormat_JSON_RoundTrip(t *testing.T) {
@@ -371,6 +385,152 @@ func TestPQCFormat_Table_PQCBadges(t *testing.T) {
 				t.Errorf("RSA line incorrectly carries [PQC] badge: %q", line)
 			}
 		}
+	}
+}
+
+// ── PartialInventory surfacing ───────────────────────────────────────────────
+
+// TestPartialInventory_JSON_OmitEmpty verifies that PartialInventory fields are
+// absent from JSON output when false/empty (zero-value RSA finding).
+func TestPartialInventory_JSON_OmitEmpty(t *testing.T) {
+	result := makePQCTestResult([]findings.UnifiedFinding{rsaFinding()})
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, result); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var raw struct {
+		Findings []map[string]json.RawMessage `json:"findings"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	f := raw.Findings[0]
+	for _, key := range []string{"partialInventory", "partialInventoryReason"} {
+		if _, present := f[key]; present {
+			t.Errorf("field %q must be omitted for non-ECH finding, but was present", key)
+		}
+	}
+}
+
+// TestPartialInventory_JSON_Present verifies that PartialInventory fields appear
+// in JSON output when set.
+func TestPartialInventory_JSON_Present(t *testing.T) {
+	result := makePQCTestResult([]findings.UnifiedFinding{partialInventoryFinding()})
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, result); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var raw struct {
+		Findings []map[string]json.RawMessage `json:"findings"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	f := raw.Findings[0]
+	if _, present := f["partialInventory"]; !present {
+		t.Error("partialInventory must be present for ECH finding")
+	}
+	if _, present := f["partialInventoryReason"]; !present {
+		t.Error("partialInventoryReason must be present for ECH finding")
+	}
+}
+
+// TestPartialInventory_SARIF_Properties verifies that PartialInventory is surfaced
+// in SARIF result.properties when set and absent when not set.
+func TestPartialInventory_SARIF_Properties(t *testing.T) {
+	result := makePQCTestResult([]findings.UnifiedFinding{
+		rsaFinding(),
+		partialInventoryFinding(),
+	})
+	var buf bytes.Buffer
+	if err := WriteSARIF(&buf, result); err != nil {
+		t.Fatalf("WriteSARIF: %v", err)
+	}
+	var sarifDoc struct {
+		Runs []struct {
+			Results []struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &sarifDoc); err != nil {
+		t.Fatalf("unmarshal SARIF: %v", err)
+	}
+	if len(sarifDoc.Runs[0].Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(sarifDoc.Runs[0].Results))
+	}
+
+	// RSA: partialInventory must be absent.
+	rsaProps := sarifDoc.Runs[0].Results[0].Properties
+	if _, ok := rsaProps["partialInventory"]; ok {
+		t.Error("SARIF RSA: partialInventory must be absent")
+	}
+
+	// ECH finding: partialInventory must be present with value "ECH_ENABLED".
+	echProps := sarifDoc.Runs[0].Results[1].Properties
+	if v, ok := echProps["partialInventory"]; !ok {
+		t.Error("SARIF ECH finding: partialInventory absent")
+	} else {
+		var reason string
+		_ = json.Unmarshal(v, &reason)
+		if reason != "ECH_ENABLED" {
+			t.Errorf("SARIF ECH finding: partialInventory=%q, want ECH_ENABLED", reason)
+		}
+	}
+}
+
+// TestPartialInventory_CBOM_Properties verifies that oqs:partialInventory and
+// oqs:partialInventoryReason appear in CBOM component properties when set.
+func TestPartialInventory_CBOM_Properties(t *testing.T) {
+	result := makePQCTestResult([]findings.UnifiedFinding{
+		rsaFinding(),
+		partialInventoryFinding(),
+	})
+	var buf bytes.Buffer
+	if err := WriteCBOM(&buf, result); err != nil {
+		t.Fatalf("WriteCBOM: %v", err)
+	}
+	var bom struct {
+		Components []struct {
+			Name       string `json:"name"`
+			Properties []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"properties"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &bom); err != nil {
+		t.Fatalf("unmarshal CBOM: %v", err)
+	}
+	if len(bom.Components) < 2 {
+		t.Fatalf("expected at least 2 components, got %d", len(bom.Components))
+	}
+
+	findProp := func(props []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}, name string) (string, bool) {
+		for _, p := range props {
+			if p.Name == name {
+				return p.Value, true
+			}
+		}
+		return "", false
+	}
+
+	// RSA: oqs:partialInventory must be absent.
+	for _, prop := range []string{"oqs:partialInventory", "oqs:partialInventoryReason"} {
+		if _, ok := findProp(bom.Components[0].Properties, prop); ok {
+			t.Errorf("CBOM RSA: %q must be absent", prop)
+		}
+	}
+
+	// ECH finding: both properties must be present.
+	if v, ok := findProp(bom.Components[1].Properties, "oqs:partialInventory"); !ok || v != "true" {
+		t.Errorf("CBOM ECH: oqs:partialInventory=%q ok=%v, want \"true\" present", v, ok)
+	}
+	if v, ok := findProp(bom.Components[1].Properties, "oqs:partialInventoryReason"); !ok || v != "ECH_ENABLED" {
+		t.Errorf("CBOM ECH: oqs:partialInventoryReason=%q ok=%v, want \"ECH_ENABLED\" present", v, ok)
 	}
 }
 

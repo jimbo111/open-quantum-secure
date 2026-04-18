@@ -47,14 +47,17 @@ const echSvcParamKey = uint16(0x0005)
 //     implemented as ScanBytesForECHExtension; the integration with
 //     countingConn's Write() capture is documented in the function body below.
 //
+// timeout controls the DNS query deadline cap: if zero, defaults to 3s; if
+// positive but < 3s, the tighter value is used.
+//
 // Returns (true, source) when ECH is detected; (false, "") when not detected.
 // source is "dns-https-rr" or "tls-ext".
-func detectECH(ctx context.Context, hostname string) (bool, string) {
+func detectECH(ctx context.Context, hostname string, timeout time.Duration) (bool, string) {
 	// Path 1: DNS HTTPS RR lookup.
 	// We implement a minimal raw DNS query (Type=65) to avoid the stdlib
 	// limitation. Budget: kept under 100 LOC by querying only the first
 	// name server returned by the OS and parsing only the RDATA we need.
-	if ok := queryHTTPSRecordForECH(ctx, hostname); ok {
+	if ok := queryHTTPSRecordForECH(ctx, hostname, timeout); ok {
 		return true, "dns-https-rr"
 	}
 
@@ -83,7 +86,7 @@ func detectECH(ctx context.Context, hostname string) (bool, string) {
 //     retries the same query over TCP (RFC 7766 §6.2).
 //   - Parses only the RDATA portion minimally: walks SvcParams looking for key 5.
 //   - DNS failure modes (NXDOMAIN, timeout, SERVFAIL) all return false silently.
-func queryHTTPSRecordForECH(ctx context.Context, hostname string) bool {
+func queryHTTPSRecordForECH(ctx context.Context, hostname string, timeout time.Duration) bool {
 	// Resolve the system's default nameserver address.
 	nsAddr := resolveSystemNS()
 	if nsAddr == "" {
@@ -100,7 +103,14 @@ func queryHTTPSRecordForECH(ctx context.Context, hostname string) bool {
 		return false
 	}
 
-	dialCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	// Determine DNS timeout: cap at 3s; honour caller's tighter bound when set.
+	const maxDNSTimeout = 3 * time.Second
+	dnsTimeout := maxDNSTimeout
+	if timeout > 0 && timeout < maxDNSTimeout {
+		dnsTimeout = timeout
+	}
+
+	dialCtx, cancel := context.WithTimeout(ctx, dnsTimeout)
 	defer cancel()
 
 	// --- UDP path ---
@@ -347,15 +357,10 @@ func skipDNSName(data []byte, offset int) int {
 	return offset
 }
 
-// ScanBytesForECHExtension scans raw TLS record bytes for the ECH extension
-// type (0xfe0d). It is used to detect ECH presence in captured ClientHello or
-// ServerHello bytes.
-//
-// This path is best-effort: it does NOT attempt to parse the full TLS record
-// structure. It walks the byte slice looking for the 2-byte big-endian value
-// 0xfe0d. This is safe because 0xfe0d would not appear accidentally in ECDHE
-// or ML-KEM key material with high probability; false positives here are
-// acceptable for a corroborating signal.
+// ScanBytesForECHExtension scans a buffer for the 0xfe0d ECH extension codepoint
+// as a 2-byte pattern. False-positive rate ~0.0015% per kilobyte of random data
+// (≈7% over a 5KB random buffer). Intended for use on parsed TLS record bytes,
+// not raw ciphertext.
 //
 // Returns (true, "tls-ext") when the pattern is found, (false, "") otherwise.
 func ScanBytesForECHExtension(data []byte) (bool, string) {
