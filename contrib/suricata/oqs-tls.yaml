@@ -30,7 +30,8 @@ tls:
     - issuer
     - version
     - cipher
-    - chain                   # Full certificate chain (subject/issuerdn/serial/fingerprint per link)
+    # chain: disabled in Sprint 6 — use Zeek x509.log for cert chain PQC inventory.
+    # Implementing chain parse would duplicate x509 sig-alg classification (zeeklog's job).
     - ja3                     # JA3 client fingerprint
     - ja3s                    # JA3S server fingerprint (used by oqs-scanner for PQC hint lookup)
     # The following fields require Suricata built with extended TLS logging support.

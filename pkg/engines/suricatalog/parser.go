@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 )
 
 // maxSuricataRecords caps the dedup map to prevent unbounded memory on
@@ -54,12 +55,12 @@ type TLSRecord struct {
 	CipherSuite string
 	Version     string
 	SNI         string
-	Subject     string
-	Issuerdn    string
-	JA3Hash     string
-	JA3SHash    string
-	SigAlgs     string
-	Groups      string
+	// Subject and Issuerdn removed — Sprint 6 audit M2: fields were captured but
+	// never emitted into UnifiedFinding. Use Zeek x509.log for cert chain inventory.
+	JA3Hash  string
+	JA3SHash string
+	SigAlgs  string
+	Groups   string
 }
 
 // dedupeKey returns a string used to suppress repeated findings for the same
@@ -72,7 +73,13 @@ func (r TLSRecord) dedupeKey() string {
 // parseEveJSON reads Suricata eve.json NDJSON from r, dispatches on
 // event_type="tls", and returns unique TLS records deduplicated by
 // (dest_ip, dest_port, cipher_suite, version, sni).
-func parseEveJSON(ctx context.Context, r io.Reader) ([]TLSRecord, error) {
+// The optional pathHint is used only in operator-facing stderr warnings.
+func parseEveJSON(ctx context.Context, r io.Reader, pathHint ...string) ([]TLSRecord, error) {
+	logPath := "(stream)"
+	if len(pathHint) > 0 && pathHint[0] != "" {
+		logPath = pathHint[0]
+	}
+
 	scanner := bufio.NewScanner(r)
 	// 4 MB per-line buffer — same cap as zeeklog to handle verbose eve.json lines.
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -80,6 +87,7 @@ func parseEveJSON(ctx context.Context, r io.Reader) ([]TLSRecord, error) {
 	seen := make(map[string]bool)
 	var recs []TLSRecord
 	lineNum := 0
+	warnedCap := false
 
 	for scanner.Scan() {
 		select {
@@ -112,16 +120,14 @@ func parseEveJSON(ctx context.Context, r io.Reader) ([]TLSRecord, error) {
 			CipherSuite: ev.TLS.CipherSuite,
 			Version:     ev.TLS.Version,
 			SNI:         ev.TLS.SNI,
-			Subject:     ev.TLS.Subject,
-			Issuerdn:    ev.TLS.Issuerdn,
 			SigAlgs:     ev.TLS.SigAlgs,
 			Groups:      ev.TLS.Groups,
 		}
 		if ev.TLS.JA3 != nil {
-			rec.JA3Hash = ev.TLS.JA3.Hash
+			rec.JA3Hash = validateJA3Hash(ev.TLS.JA3.Hash)
 		}
 		if ev.TLS.JA3S != nil {
-			rec.JA3SHash = ev.TLS.JA3S.Hash
+			rec.JA3SHash = validateJA3Hash(ev.TLS.JA3S.Hash)
 		}
 
 		k := rec.dedupeKey()
@@ -129,8 +135,11 @@ func parseEveJSON(ctx context.Context, r io.Reader) ([]TLSRecord, error) {
 			continue
 		}
 		if len(seen) >= maxSuricataRecords {
-			// Cap reached — stop ingesting new unique records to bound memory.
-			continue
+			if !warnedCap {
+				fmt.Fprintf(os.Stderr, "suricata-log: dedup cap %d reached for %s; inventory may be incomplete\n", maxSuricataRecords, logPath)
+				warnedCap = true
+			}
+			break
 		}
 		seen[k] = true
 		recs = append(recs, rec)

@@ -83,5 +83,5 @@ func readEveJSON(ctx context.Context, path string) ([]TLSRecord, error) {
 		return nil, err
 	}
 	defer r.Close()
-	return parseEveJSON(ctx, r)
+	return parseEveJSON(ctx, r, path)
 }
