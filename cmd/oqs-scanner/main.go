@@ -34,6 +34,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/binaryscanner"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cbomkit"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/configscanner"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/ctlookup"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cdxgen"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cipherscope"
@@ -128,7 +129,12 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 	// Tier 5: TLS probe engine (pure Go, always available)
 	tlsp := tlsprobe.New()
 
-	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp)
+	// Tier 5: CT log lookup engine (pure Go, always available)
+	// Registered after tls-probe so the orchestrator's two-pass network loop
+	// runs tls-probe first and can enrich ct-lookup with ECH hostnames.
+	ct := ctlookup.New()
+
+	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct)
 }
 
 // engineVersionsHash computes a stable SHA-256 hex digest over the
@@ -347,6 +353,9 @@ func scanCmd() *cobra.Command {
 		tlsInsecure       bool
 		tlsStrict         bool
 		sector            string
+		ctLookupTargets   []string
+		ctLookupFromECH   bool
+		noNetwork         bool
 	)
 
 	cmd := &cobra.Command{
@@ -487,6 +496,9 @@ Example with data lifetime adjustment for healthcare:
 				TLSDenyPrivate:  tlsStrict,
 				TLSTimeout:      tlsTimeout,
 				TLSCACert:       cfg.TLS.CACert,
+				NoNetwork:       noNetwork,
+				CTLookupTargets: ctLookupTargets,
+				CTLookupFromECH: ctLookupFromECH,
 			}
 
 			if incremental && noCache {
@@ -673,6 +685,12 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
 
+	// CT log lookup flags (Sprint 3)
+	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
+	cmd.Flags().BoolVar(&ctLookupFromECH, "ct-lookup-from-ech", false, "Auto-query CT logs for ECH-enabled findings detected by the TLS probe")
+	cmd.Flags().BoolVar(&noNetwork, "no-network", false, "Disable all outbound network calls (TLS probe + CT lookup)")
+	cmd.Flags().BoolVar(&noNetwork, "offline", false, "Disable all outbound network calls (alias for --no-network)")
+
 	// HNDL Mosca sector preset flag
 	cmd.Flags().StringVar(&sector, "sector", "",
 		`Industry sector preset for Mosca HNDL shelf-life (case-insensitive).
@@ -707,6 +725,9 @@ func diffCmd() *cobra.Command {
 		tlsTargets        []string
 		tlsInsecure       bool
 		tlsStrict         bool
+		ctLookupTargets   []string
+		ctLookupFromECH   bool
+		noNetwork         bool
 	)
 
 	cmd := &cobra.Command{
@@ -837,6 +858,9 @@ Example:
 				TLSDenyPrivate:  tlsStrict,
 				TLSTimeout:      cfg.TLS.Timeout,
 				TLSCACert:       cfg.TLS.CACert,
+				NoNetwork:       noNetwork,
+				CTLookupTargets: ctLookupTargets,
+				CTLookupFromECH: ctLookupFromECH,
 			}
 
 			selected := orch.EffectiveEngines(opts)
@@ -979,6 +1003,12 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
+
+	// CT log lookup flags (Sprint 3)
+	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
+	cmd.Flags().BoolVar(&ctLookupFromECH, "ct-lookup-from-ech", false, "Auto-query CT logs for ECH-enabled findings detected by the TLS probe")
+	cmd.Flags().BoolVar(&noNetwork, "no-network", false, "Disable all outbound network calls (TLS probe + CT lookup)")
+	cmd.Flags().BoolVar(&noNetwork, "offline", false, "Disable all outbound network calls (alias for --no-network)")
 
 	return cmd
 }

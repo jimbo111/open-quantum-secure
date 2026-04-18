@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -74,9 +75,9 @@ func (o *Orchestrator) EffectiveEngines(opts engines.ScanOptions) []engines.Engi
 	} else {
 		available = applyScanTypeFilter(available, opts.ScanType)
 	}
-	// Include Tier5Network engines when TLS targets are explicitly provided,
-	// even if they were excluded by tier/scanType filtering above.
-	if len(opts.TLSTargets) > 0 {
+	// Include Tier5Network engines when TLS or CT lookup targets are explicitly
+	// provided, even if they were excluded by tier/scanType filtering above.
+	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH {
 		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
 	}
 	return available
@@ -448,9 +449,9 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 		available = applyScanTypeFilter(available, opts.ScanType)
 	}
 
-	// Include Tier5Network engines when TLS targets are explicitly provided,
-	// overriding tier/scanType filtering (even in diff/quick mode).
-	if len(opts.TLSTargets) > 0 {
+	// Include Tier5Network engines when TLS or CT lookup targets are explicitly
+	// provided, overriding tier/scanType filtering (even in diff/quick mode).
+	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH {
 		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
 	}
 
@@ -578,13 +579,65 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 
 	// -- Network engines (Tier5Network) run outside the file-based pipeline --
 	// They do not participate in incremental caching or file-based filtering.
+	//
+	// Ordering guarantee: ct-lookup runs after all other network engines so that
+	// when CTLookupFromECH is true, ECH-enabled findings from tls-probe are
+	// available for hostname extraction before ct-lookup is invoked.
 	var networkErrs []error
+
+	// ctlookupOpts is a copy of opts that may be enriched with ECH hostnames
+	// after tls-probe (and any other engine) has run.
+	ctlookupOpts := opts
+
+	// Pass 1: all Tier5Network engines except ct-lookup.
 	for _, eng := range networkEngines {
+		if eng.Name() == "ct-lookup" {
+			continue
+		}
 		if ctx.Err() != nil {
 			break
 		}
 		engStart := time.Now()
 		res, err := eng.Scan(ctx, opts)
+		dur := time.Since(engStart)
+		em := EngineMetrics{Name: eng.Name(), Duration: dur, Findings: len(res)}
+		if err != nil {
+			em.Error = err.Error()
+			fmt.Fprintf(os.Stderr, "WARNING: %s: %v\n", eng.Name(), err)
+			networkErrs = append(networkErrs, fmt.Errorf("%s: %w", eng.Name(), err))
+		}
+		metrics.Engines = append(metrics.Engines, em)
+		for i := range res {
+			allFindings = append(allFindings, res[i].Clone())
+		}
+	}
+
+	// If CTLookupFromECH, extract ECH-enabled hostnames from pass-1 findings and
+	// add them to ctlookupOpts so ct-lookup can resolve what ECH hid.
+	if opts.CTLookupFromECH {
+		echHosts := echHostnamesFromFindings(allFindings)
+		seen := make(map[string]bool, len(ctlookupOpts.CTLookupTargets))
+		for _, h := range ctlookupOpts.CTLookupTargets {
+			seen[h] = true
+		}
+		for _, h := range echHosts {
+			if !seen[h] {
+				ctlookupOpts.CTLookupTargets = append(ctlookupOpts.CTLookupTargets, h)
+				seen[h] = true
+			}
+		}
+	}
+
+	// Pass 2: ct-lookup engine with (potentially ECH-enriched) opts.
+	for _, eng := range networkEngines {
+		if eng.Name() != "ct-lookup" {
+			continue
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		engStart := time.Now()
+		res, err := eng.Scan(ctx, ctlookupOpts)
 		dur := time.Since(engStart)
 		em := EngineMetrics{Name: eng.Name(), Duration: dur, Findings: len(res)}
 		if err != nil {
@@ -1109,4 +1162,37 @@ func filterEngines(all []engines.Engine, names []string) []engines.Engine {
 		}
 	}
 	return filtered
+}
+
+// echHostnamesFromFindings extracts deduplicated bare hostnames from findings
+// that are annotated as partial inventory due to ECH. The orchestrator calls this
+// between the tls-probe and ct-lookup engine runs when CTLookupFromECH is set.
+// It mirrors the logic in pkg/engines/ctlookup.ExtractECHHostnames to avoid
+// importing a specific engine implementation in the orchestrator.
+func echHostnamesFromFindings(ff []findings.UnifiedFinding) []string {
+	seen := make(map[string]bool)
+	var hosts []string
+	for _, f := range ff {
+		if !f.PartialInventory || f.PartialInventoryReason != "ECH_ENABLED" {
+			continue
+		}
+		file := f.Location.File
+		// Strip engine prefix: "(tls-probe)/host:port#suffix" → "host:port#suffix".
+		if idx := strings.Index(file, "/"); idx >= 0 {
+			file = file[idx+1:]
+		}
+		// Strip fragment suffix: "host:port#suffix" → "host:port".
+		if idx := strings.LastIndex(file, "#"); idx >= 0 {
+			file = file[:idx]
+		}
+		host, _, err := net.SplitHostPort(file)
+		if err != nil {
+			host = file
+		}
+		if host != "" && !seen[host] {
+			seen[host] = true
+			hosts = append(hosts, host)
+		}
+	}
+	return hosts
 }

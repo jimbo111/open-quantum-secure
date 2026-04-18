@@ -53,8 +53,11 @@ func (e *Engine) Version() string { return "embedded" }
 
 // Scan probes each target in opts.TLSTargets and returns findings for
 // quantum-vulnerable cryptography observed in TLS handshakes.
-// If TLSTargets is empty, returns nil immediately (self-gating).
+// If TLSTargets is empty or opts.NoNetwork is true, returns nil immediately.
 func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings.UnifiedFinding, error) {
+	if opts.NoNetwork {
+		return nil, nil
+	}
 	if len(opts.TLSTargets) == 0 {
 		return nil, nil
 	}
