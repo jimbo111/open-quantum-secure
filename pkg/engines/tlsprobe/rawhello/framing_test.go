@@ -75,13 +75,16 @@ func TestReadRecord_TooLong(t *testing.T) {
 
 	ctx := context.Background()
 	go func() {
-		// Write a raw header with length = MaxRecordLen+1
+		// Use variables to avoid constant-overflow vet errors when converting
+		// multi-byte constants (LegacyRecordVersion, MaxRecordLen) to byte.
+		ver := LegacyRecordVersion
+		overSize := MaxRecordLen + 1
 		hdr := [5]byte{
 			RecordTypeHandshake,
-			byte(LegacyRecordVersion >> 8),
-			byte(LegacyRecordVersion),
-			byte((MaxRecordLen + 1) >> 8),
-			byte(MaxRecordLen + 1),
+			byte(ver >> 8),
+			byte(ver),
+			byte(overSize >> 8),
+			byte(overSize),
 		}
 		client.Write(hdr[:])
 	}()

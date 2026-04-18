@@ -48,9 +48,9 @@ func buildServerHello(random [32]byte, cipherSuite uint16, groupID uint16, isHRR
 }
 
 // sendServerHello builds a complete TLS record carrying a ServerHello and writes
-// it to conn. Used in tests to simulate a server response.
-func sendServerHello(t *testing.T, conn net.Conn, ctx context.Context, random [32]byte, cipherSuite uint16, groupID uint16, isHRR bool) {
-	t.Helper()
+// it to conn. Must NOT call t.Fatalf — this function is invoked from goroutines.
+// Write errors are dropped: the reader will observe io.EOF and the test fails there.
+func sendServerHello(conn net.Conn, ctx context.Context, random [32]byte, cipherSuite uint16, groupID uint16, isHRR bool) {
 	body := buildServerHello(random, cipherSuite, groupID, isHRR)
 	msg := make([]byte, 4+len(body))
 	msg[0] = HandshakeTypeServerHello
@@ -58,14 +58,11 @@ func sendServerHello(t *testing.T, conn net.Conn, ctx context.Context, random [3
 	msg[2] = byte(len(body) >> 8)
 	msg[3] = byte(len(body))
 	copy(msg[4:], body)
-	err := WriteRecord(ctx, conn, Record{
+	_ = WriteRecord(ctx, conn, Record{
 		Type:    RecordTypeHandshake,
 		Version: LegacyRecordVersion,
 		Payload: msg,
 	})
-	if err != nil {
-		t.Fatalf("sendServerHello WriteRecord: %v", err)
-	}
 }
 
 func TestParseServerResponse_NormalServerHello(t *testing.T) {
@@ -77,7 +74,7 @@ func TestParseServerResponse_NormalServerHello(t *testing.T) {
 	defer server.Close()
 
 	ctx := context.Background()
-	go sendServerHello(t, client, ctx, random, 0x1301, 0x001d, false)
+	go sendServerHello(client, ctx, random, 0x1301, 0x001d, false)
 
 	result, err := ParseServerResponse(ctx, server)
 	if err != nil {
@@ -103,7 +100,7 @@ func TestParseServerResponse_HRR(t *testing.T) {
 	defer server.Close()
 
 	ctx := context.Background()
-	go sendServerHello(t, client, ctx, HRRMagic, 0x1302, 0x11ec, true)
+	go sendServerHello(client, ctx, HRRMagic, 0x1302, 0x11ec, true)
 
 	result, err := ParseServerResponse(ctx, server)
 	if err != nil {
