@@ -46,7 +46,7 @@ func TestParseEveJSONSkipNonTLS(t *testing.T) {
 }
 
 func TestParseEveJSONFieldMapping(t *testing.T) {
-	const data = `{"event_type":"tls","dest_ip":"192.0.2.1","dest_port":8443,"tls":{"version":"TLSv1.3","cipher_suite":"TLS_CHACHA20_POLY1305_SHA256","sni":"test.example.com","subject":"CN=test.example.com","ja3s":{"hash":"deadbeef","string":""}}}
+	const data = `{"event_type":"tls","dest_ip":"192.0.2.1","dest_port":8443,"tls":{"version":"TLSv1.3","cipher_suite":"TLS_CHACHA20_POLY1305_SHA256","sni":"test.example.com","subject":"CN=test.example.com","ja3s":{"hash":"deadbeefdeadbeefdeadbeefdeadbeef","string":""}}}
 `
 	recs, err := parseEveJSON(context.Background(), strings.NewReader(data))
 	if err != nil {
@@ -68,8 +68,8 @@ func TestParseEveJSONFieldMapping(t *testing.T) {
 	if r.SNI != "test.example.com" {
 		t.Errorf("SNI = %q, want %q", r.SNI, "test.example.com")
 	}
-	if r.JA3SHash != "deadbeef" {
-		t.Errorf("JA3SHash = %q, want %q", r.JA3SHash, "deadbeef")
+	if r.JA3SHash != "deadbeefdeadbeefdeadbeefdeadbeef" {
+		t.Errorf("JA3SHash = %q, want %q", r.JA3SHash, "deadbeefdeadbeefdeadbeefdeadbeef")
 	}
 }
 

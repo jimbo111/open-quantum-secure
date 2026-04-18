@@ -57,7 +57,9 @@ func TestJA3SMatrix_DBStructureInvariant(t *testing.T) {
 // "hash" field correctly and does NOT conflate it with the "string" field.
 // The two fields must be independently parsed from the {"hash":..., "string":...} sub-object.
 func TestJA3SMatrix_HashVsStringDistinguishable(t *testing.T) {
-	const line = `{"event_type":"tls","dest_ip":"1.2.3.4","dest_port":443,"tls":{"version":"TLSv1.3","cipher_suite":"TLS_AES_128_GCM_SHA256","ja3s":{"hash":"thehashvalue","string":"thetlsstring"}}}` + "\n"
+	// Use a valid 32-char lowercase hex hash (validateJA3Hash rejects non-conforming values).
+	const wantHash = "aabbccddeeff00112233445566778899"
+	const line = `{"event_type":"tls","dest_ip":"1.2.3.4","dest_port":443,"tls":{"version":"TLSv1.3","cipher_suite":"TLS_AES_128_GCM_SHA256","ja3s":{"hash":"aabbccddeeff00112233445566778899","string":"thetlsstring"}}}` + "\n"
 	recs, err := parseEveJSON(context.Background(), strings.NewReader(line))
 	if err != nil {
 		t.Fatalf("parseEveJSON: %v", err)
@@ -66,15 +68,18 @@ func TestJA3SMatrix_HashVsStringDistinguishable(t *testing.T) {
 		t.Fatalf("expected 1 record, got %d", len(recs))
 	}
 	r := recs[0]
-	if r.JA3SHash != "thehashvalue" {
-		t.Errorf("JA3SHash = %q, want %q (must come from 'hash' field, not 'string')", r.JA3SHash, "thehashvalue")
+	if r.JA3SHash != wantHash {
+		t.Errorf("JA3SHash = %q, want %q (must come from 'hash' field, not 'string')", r.JA3SHash, wantHash)
 	}
 }
 
 // TestJA3SMatrix_JA3AndJA3SIndependent verifies that JA3 (client) hash and JA3S
 // (server) hash are independently parsed and stored.
 func TestJA3SMatrix_JA3AndJA3SIndependent(t *testing.T) {
-	const line = `{"event_type":"tls","dest_ip":"1.2.3.4","dest_port":443,"tls":{"version":"TLSv1.3","cipher_suite":"TLS_AES_128_GCM_SHA256","ja3":{"hash":"client-hash","string":"client-string"},"ja3s":{"hash":"server-hash","string":"server-string"}}}` + "\n"
+	// Use valid 32-char lowercase hex hashes (validateJA3Hash rejects non-conforming values).
+	const wantClientHash = "11223344556677889900aabbccddeeff"
+	const wantServerHash = "ffeeddccbbaa00998877665544332211"
+	const line = `{"event_type":"tls","dest_ip":"1.2.3.4","dest_port":443,"tls":{"version":"TLSv1.3","cipher_suite":"TLS_AES_128_GCM_SHA256","ja3":{"hash":"11223344556677889900aabbccddeeff","string":"client-string"},"ja3s":{"hash":"ffeeddccbbaa00998877665544332211","string":"server-string"}}}` + "\n"
 	recs, err := parseEveJSON(context.Background(), strings.NewReader(line))
 	if err != nil {
 		t.Fatalf("parseEveJSON: %v", err)
@@ -83,11 +88,11 @@ func TestJA3SMatrix_JA3AndJA3SIndependent(t *testing.T) {
 		t.Fatalf("expected 1 record, got %d", len(recs))
 	}
 	r := recs[0]
-	if r.JA3Hash != "client-hash" {
-		t.Errorf("JA3Hash = %q, want %q", r.JA3Hash, "client-hash")
+	if r.JA3Hash != wantClientHash {
+		t.Errorf("JA3Hash = %q, want %q", r.JA3Hash, wantClientHash)
 	}
-	if r.JA3SHash != "server-hash" {
-		t.Errorf("JA3SHash = %q, want %q", r.JA3SHash, "server-hash")
+	if r.JA3SHash != wantServerHash {
+		t.Errorf("JA3SHash = %q, want %q", r.JA3SHash, wantServerHash)
 	}
 }
 

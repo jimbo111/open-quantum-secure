@@ -100,7 +100,7 @@ func TestRoundTripSyntheticRecord(t *testing.T) {
 			destIP:   "10.0.0.1", destPort: 443,
 			cipher: "TLS_AES_128_GCM_SHA256", version: "TLSv1.3",
 			sni: "rt.example.com", subject: "CN=rt.example.com",
-			issuerdn: "CN=Root CA", ja3sHash: "abc123",
+			issuerdn: "CN=Root CA", ja3sHash: "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3",
 		},
 		{
 			name:     "TLS1.2 ECDHE IPv6",
