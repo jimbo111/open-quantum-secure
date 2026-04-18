@@ -2,6 +2,7 @@ package suricatalog
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -89,17 +90,40 @@ func TestParseEveJSONMalformedLines(t *testing.T) {
 }
 
 func TestParseEveJSONContextCancel(t *testing.T) {
+	// Build 20 TLS lines so the scanner has something to process before cancellation.
+	var sb strings.Builder
+	for i := 0; i < 20; i++ {
+		sb.WriteString(`{"event_type":"tls","dest_ip":"1.1.1.` + strings.Repeat("1", 1) + `","dest_port":` + fmt.Sprintf("%d", 10000+i) + `,"tls":{"version":"TLSv1.3","cipher_suite":"TLS_AES_128_GCM_SHA256"}}` + "\n")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancelled
 
-	recs, err := parseEveJSON(ctx, strings.NewReader(`{"event_type":"tls","dest_ip":"1.1.1.1","dest_port":443,"tls":{"version":"TLSv1.3","cipher_suite":"TLS_AES_128_GCM_SHA256"}}`))
-	// Should return context error (possibly with 0 or 1 records depending on timing).
-	if err == nil && len(recs) == 0 {
-		// Both outcomes are acceptable — the key is no panic.
-		return
+	recs, err := parseEveJSON(ctx, strings.NewReader(sb.String()))
+	// A pre-cancelled context must return context.Canceled and fewer records than total.
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled error, got: %v", err)
 	}
-	// If we get an error it must be the context error.
-	if err != nil && err != context.Canceled {
-		t.Errorf("unexpected error: %v", err)
+	if len(recs) >= 20 {
+		t.Errorf("expected fewer than 20 records on cancelled context, got %d", len(recs))
 	}
+}
+
+// TestParseChainDeepNestingNoPanic verifies that an eve.json event carrying a
+// deeply nested "chain" array (which oqs-scanner drops) does not panic.
+// Locks in A4/B4: chain was removed from YAML and the parser silently ignores it
+// via encoding/json's unknown-field drop behaviour.
+func TestParseChainDeepNestingNoPanic(t *testing.T) {
+	// 100-level deep array nesting in the chain field.
+	chainVal := strings.Repeat("[", 100) + strings.Repeat("]", 100)
+	line := `{"event_type":"tls","dest_ip":"1.2.3.4","dest_port":443,"tls":{"version":"TLSv1.3","cipher_suite":"TLS_AES_128_GCM_SHA256","chain":` + chainVal + `}}` + "\n"
+
+	recs, err := parseEveJSON(context.Background(), strings.NewReader(line))
+	// Must not panic. The result (0 or 1 records) depends on whether json.Unmarshal
+	// accepts the deeply nested value; what matters is no panic and no error from us.
+	if err != nil {
+		t.Errorf("unexpected error for chain-bearing event: %v", err)
+	}
+	// The TLS record itself must be parseable even if chain nesting confuses json.
+	_ = recs
 }

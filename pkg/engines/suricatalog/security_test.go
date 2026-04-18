@@ -68,6 +68,36 @@ func TestSanitizeFieldControlChars(t *testing.T) {
 	}
 }
 
+// TestValidateJA3Hash verifies that validateJA3Hash accepts only valid 32-char
+// lowercase hex MD5 strings and rejects everything else without panicking.
+func TestValidateJA3Hash(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"valid lowercase hex", "d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"},
+		{"empty string", "", ""},
+		{"too short (8 chars)", "deadbeef", ""},
+		{"too long (33 chars)", "deadbeefdeadbeefdeadbeefdeadbeef0", ""},
+		{"uppercase rejected", "D41D8CD98F00B204E9800998ECF8427E", ""},
+		{"mixed case rejected", "D41d8cd98f00b204e9800998ecf8427e", ""},
+		{"non-hex chars", "gggggggggggggggggggggggggggggggg", ""},
+		{"ANSI escape injection", "\x1b[31mdeadbeefdeadbeefdeadbeef\x1b[0m", ""},
+		{"hyphen in hash", "dead-beef-dead-beef-dead-beef-de", ""},
+		{"all zeros valid", "00000000000000000000000000000000", "00000000000000000000000000000000"},
+		{"all f's valid", "ffffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffff"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := validateJA3Hash(c.input)
+			if got != c.want {
+				t.Errorf("validateJA3Hash(%q) = %q, want %q", c.input, got, c.want)
+			}
+		})
+	}
+}
+
 func TestSanitizeTargetPathChars(t *testing.T) {
 	cases := []struct {
 		input string

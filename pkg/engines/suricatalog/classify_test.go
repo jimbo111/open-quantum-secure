@@ -1,6 +1,8 @@
 package suricatalog
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -76,7 +78,7 @@ func TestBuildFindingFilePath(t *testing.T) {
 		t.Fatal("Location.File is empty")
 	}
 	// File must contain the suricata-log marker.
-	if f.Location.File[:15] != "(suricata-log)/" {
+	if !strings.HasPrefix(f.Location.File, "(suricata-log)/") {
 		t.Errorf("Location.File does not start with (suricata-log)/: %q", f.Location.File)
 	}
 }
@@ -136,6 +138,29 @@ func TestSplitCSV(t *testing.T) {
 			if v != c.want[i] {
 				t.Errorf("splitCSV(%q)[%d] = %q, want %q", c.input, i, v, c.want[i])
 			}
+		}
+	}
+}
+
+// TestSplitCSVCap verifies that splitCSV enforces maxCSVEntries even when the
+// input contains far more comma-separated entries. Prevents CSV amplification
+// attacks where an adversarially crafted 4 MB log line yields millions of findings.
+func TestSplitCSVCap(t *testing.T) {
+	// Build a 1000-entry CSV — all distinct so no early exit from dedup.
+	entries := make([]string, 1000)
+	for i := range entries {
+		entries[i] = fmt.Sprintf("entry%d", i)
+	}
+	input := strings.Join(entries, ",")
+	got := splitCSV(input)
+	if len(got) != maxCSVEntries {
+		t.Errorf("splitCSV(1000-entry input) = %d entries, want %d (maxCSVEntries cap)", len(got), maxCSVEntries)
+	}
+	// The first maxCSVEntries entries must be preserved in order.
+	for i, v := range got {
+		if v != entries[i] {
+			t.Errorf("splitCSV[%d] = %q, want %q", i, v, entries[i])
+			break
 		}
 	}
 }
