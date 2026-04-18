@@ -94,6 +94,10 @@ type ScanOptions struct {
 	SSHTargets     []string // host:port targets to probe SSH KEX advertisement (empty = skip ssh-probe)
 	SSHTimeout     int      // per-target dial+KEXINIT timeout in seconds (0 = default 10s)
 	SSHDenyPrivate bool     // reject RFC 1918 / loopback / link-local target IPs (--ssh-strict)
+
+	// Zeek log ingestion options (Sprint 5).
+	ZeekSSLPath  string // path to ssl.log (TSV, JSON, or .gz); empty = skip zeek-log engine
+	ZeekX509Path string // path to x509.log (TSV, JSON, or .gz); empty = skip when no ssl path either
 }
 
 // Engine is the interface every scanner engine must implement.
