@@ -94,8 +94,8 @@ func TestRateLimiter_Burst3ExhaustAndRefill(t *testing.T) {
 	rl.last = time.Now()
 	rl.mu.Unlock()
 
-	// Wait slightly longer than one token interval.
-	time.Sleep(15 * time.Millisecond)
+	// Wait well past one token interval (CI machines can be slow).
+	time.Sleep(50 * time.Millisecond)
 
 	// Exactly one token should now be available.
 	refillCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

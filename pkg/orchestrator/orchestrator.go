@@ -616,6 +616,8 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 	// add them to ctlookupOpts so ct-lookup can resolve what ECH hid.
 	if opts.CTLookupFromECH {
 		echHosts := echHostnamesFromFindings(allFindings)
+		// Copy to avoid mutating caller's backing array via append.
+		ctlookupOpts.CTLookupTargets = append([]string(nil), opts.CTLookupTargets...)
 		seen := make(map[string]bool, len(ctlookupOpts.CTLookupTargets))
 		for _, h := range ctlookupOpts.CTLookupTargets {
 			seen[h] = true

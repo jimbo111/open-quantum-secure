@@ -80,6 +80,9 @@ func TestEngine_Stress_100Hostnames(t *testing.T) {
 // uses a server-side atomic counter over a 100ms window to assert a plausible
 // lower bound relative to burst size.
 func TestEngine_Stress_RateLimiterNotBypassed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-sensitive stress test in short mode")
+	}
 	var totalCalls atomic.Int64
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
