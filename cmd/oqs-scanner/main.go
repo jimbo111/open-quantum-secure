@@ -11,9 +11,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -35,6 +37,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cbomkit"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/configscanner"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/ctlookup"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/sshprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cdxgen"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cipherscope"
@@ -134,7 +137,10 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 	// runs tls-probe first and can enrich ct-lookup with ECH hostnames.
 	ct := ctlookup.New()
 
-	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct)
+	// Tier 5: SSH probe engine (pure Go, always available; Sprint 4).
+	sshp := sshprobe.New()
+
+	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct, sshp)
 }
 
 // engineVersionsHash computes a stable SHA-256 hex digest over the
@@ -356,6 +362,8 @@ func scanCmd() *cobra.Command {
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
 		noNetwork         bool
+		sshTargets        []string
+		sshStrict         bool
 	)
 
 	cmd := &cobra.Command{
@@ -470,6 +478,13 @@ Example with data lifetime adjustment for healthcare:
 				}
 			}
 
+			// Validate --ssh-targets: must be host:port with valid hostname/IP syntax.
+			for _, t := range sshTargets {
+				if err := validateSSHTarget(t); err != nil {
+					return fmt.Errorf("invalid --ssh-targets value %q: %w", t, err)
+				}
+			}
+
 			orch := buildOrchestrator()
 
 			ctx := context.Background()
@@ -506,6 +521,8 @@ Example with data lifetime adjustment for healthcare:
 				NoNetwork:       noNetwork,
 				CTLookupTargets: ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
+				SSHTargets:      sshTargets,
+				SSHDenyPrivate:  sshStrict,
 			}
 
 			if incremental && noCache {
@@ -698,6 +715,10 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().BoolVar(&noNetwork, "no-network", false, "Disable all outbound network calls (TLS probe + CT lookup)")
 	cmd.Flags().BoolVar(&noNetwork, "offline", false, "Disable all outbound network calls (alias for --no-network)")
 
+	// SSH probe flags (Sprint 4)
+	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
+	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
+
 	// HNDL Mosca sector preset flag
 	cmd.Flags().StringVar(&sector, "sector", "",
 		`Industry sector preset for Mosca HNDL shelf-life (case-insensitive).
@@ -735,6 +756,8 @@ func diffCmd() *cobra.Command {
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
 		noNetwork         bool
+		sshTargets        []string
+		sshStrict         bool
 	)
 
 	cmd := &cobra.Command{
@@ -856,6 +879,13 @@ Example:
 				}
 			}
 
+			// Validate --ssh-targets: must be host:port with valid hostname/IP syntax.
+			for _, t := range sshTargets {
+				if err := validateSSHTarget(t); err != nil {
+					return fmt.Errorf("invalid --ssh-targets value %q: %w", t, err)
+				}
+			}
+
 			opts := engines.ScanOptions{
 				TargetPath:      absPath,
 				Timeout:         timeout,
@@ -875,6 +905,8 @@ Example:
 				NoNetwork:       noNetwork,
 				CTLookupTargets: ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
+				SSHTargets:      sshTargets,
+				SSHDenyPrivate:  sshStrict,
 			}
 
 			selected := orch.EffectiveEngines(opts)
@@ -1024,7 +1056,33 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().BoolVar(&noNetwork, "no-network", false, "Disable all outbound network calls (TLS probe + CT lookup)")
 	cmd.Flags().BoolVar(&noNetwork, "offline", false, "Disable all outbound network calls (alias for --no-network)")
 
+	// SSH probe flags (Sprint 4)
+	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
+	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
+
 	return cmd
+}
+
+// validateSSHTarget validates a single --ssh-targets entry. It must be in
+// "host:port" form with a valid port number (1–65535) and either a valid
+// hostname (RFC 1123 DNS labels) or an IP literal.
+func validateSSHTarget(target string) error {
+	host, portStr, err := net.SplitHostPort(target)
+	if err != nil {
+		return fmt.Errorf("must be in host:port format: %w", err)
+	}
+	if host == "" {
+		return fmt.Errorf("empty host")
+	}
+	portNum, convErr := strconv.Atoi(portStr)
+	if convErr != nil || portNum < 1 || portNum > 65535 {
+		return fmt.Errorf("invalid port %q (must be 1-65535)", portStr)
+	}
+	// IP literals are valid SSH targets; skip hostname validation for them.
+	if net.ParseIP(host) != nil {
+		return nil
+	}
+	return ctlookup.ValidateHostname(host)
 }
 
 // writeOutput writes the scan result in the specified format to the given destination.
