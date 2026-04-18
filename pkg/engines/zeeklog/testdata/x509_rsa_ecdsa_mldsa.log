@@ -1,0 +1,13 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	x509
+#open	2024-07-01-00:00:00
+#fields	ts	id	certificate.version	certificate.serial	certificate.subject	certificate.issuer	certificate.not_valid_before	certificate.not_valid_after	certificate.key_alg	certificate.sig_alg	certificate.key_type	certificate.key_length	certificate.exponent	certificate.curve	san.dns	san.uri	san.email	san.ip	basic_constraints.ca
+#types	time	string	count	string	string	string	time	time	string	string	string	count	count	string	vector[string]	vector[string]	vector[string]	vector[string]	bool
+1719792000.000000	FrRSA1	3	01	CN=rsa.example.com	CN=DigiCert TLS RSA SHA256	1700000000.000000	1800000000.000000	rsaEncryption	sha256WithRSAEncryption	rsa	2048	65537	-	rsa.example.com	-	-	-	F
+1719792001.000000	FeECDSA	3	02	CN=ecdsa.example.com	CN=Let's Encrypt ECDSA	1700000000.000000	1800000000.000000	id-ecPublicKey	ecdsa-with-SHA256	ec	256	-	prime256v1	ecdsa.example.com	-	-	-	F
+1719792002.000000	FpMLDSA	3	03	CN=pqc.example.com	CN=PQC-CA-Root	1700000000.000000	1900000000.000000	id-ML-DSA-65	ML-DSA-65	unknown	0	-	-	pqc.example.com	-	-	-	T
+1719792003.000000	FpRSA4	3	04	CN=rsa4096.example.com	CN=CA-Root	1700000000.000000	1800000000.000000	rsaEncryption	sha512WithRSAEncryption	rsa	4096	65537	-	rsa4096.example.com	-	-	-	F
+#close	2024-07-01-01:00:00

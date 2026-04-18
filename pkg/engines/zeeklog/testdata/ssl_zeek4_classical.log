@@ -1,0 +1,13 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	ssl
+#open	2023-06-01-00:00:00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	version	cipher	curve	server_name	resumed	last_alert	next_protocol	established	ssl_history	cert_chain_fuids	client_cert_chain_fuids	subject	issuer	validation_status
+#types	time	string	addr	port	addr	port	string	string	string	string	bool	count	string	bool	string	vector[string]	vector[string]	string	string	string
+1685577600.000000	Caaaa1	192.168.1.10	51001	10.0.0.1	443	TLSv12	TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384	secp256r1	bank.example.com	F	-	-	T	-	-	-	-	-	ok
+1685577601.000000	Caaaa2	192.168.1.11	51002	10.0.0.1	443	TLSv12	TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256	secp256r1	bank.example.com	F	-	-	T	-	-	-	-	-	ok
+1685577602.000000	Caaaa3	192.168.1.12	51003	10.0.0.2	443	TLSv12	TLS_DHE_RSA_WITH_AES_256_GCM_SHA384	-	legacy.example.com	F	-	-	T	-	-	-	-	-	ok
+1685577603.000000	Caaaa4	192.168.1.13	51004	10.0.0.3	443	TLSv12	TLS_RSA_WITH_AES_256_GCM_SHA384	-	old.example.com	F	-	-	F	-	-	-	-	-	ok
+#close	2023-06-01-01:00:00
