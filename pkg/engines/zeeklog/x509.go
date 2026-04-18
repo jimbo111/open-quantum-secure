@@ -2,9 +2,12 @@ package zeeklog
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -26,27 +29,36 @@ func (r X509Record) dedupeKey() string {
 
 // parseX509Log reads x509.log records. Handles TSV and JSON. Returns unique
 // records deduplicated by (sig_alg, key_alg, key_type, key_length, curve).
-func parseX509Log(r io.Reader) ([]X509Record, error) {
+func parseX509Log(ctx context.Context, r io.Reader) ([]X509Record, error) {
 	peeked, fmt_, err := sniffFormat(r)
 	if err != nil {
 		return nil, fmt.Errorf("zeek-log x509.log: sniff format: %w", err)
 	}
-	full := multiReader(peeked, r)
+
 	switch fmt_ {
 	case formatTSV:
-		return parseX509TSV(full)
-	case formatJSON, formatUnknown:
-		recs, err := parseX509JSON(full)
-		if err != nil && fmt_ == formatUnknown {
-			return parseX509TSV(multiReader(peeked, r))
+		return parseX509TSV(ctx, io.MultiReader(bytes.NewReader(peeked), r))
+	case formatJSON:
+		return parseX509JSON(ctx, io.MultiReader(bytes.NewReader(peeked), r))
+	case formatUnknown:
+		all, readErr := io.ReadAll(io.MultiReader(bytes.NewReader(peeked), r))
+		if readErr != nil {
+			return nil, readErr
 		}
-		return recs, err
+		recs, _ := parseX509JSON(ctx, bytes.NewReader(all))
+		if len(recs) > 0 {
+			return recs, nil
+		}
+		return parseX509TSV(ctx, bytes.NewReader(all))
 	}
 	return nil, fmt.Errorf("zeek-log x509.log: unrecognized format")
 }
 
-func parseX509TSV(r io.Reader) ([]X509Record, error) {
+func parseX509TSV(ctx context.Context, r io.Reader) ([]X509Record, error) {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
+	hdr := defaultTSVHeader()
 	var colIdx map[string]int
 	seen := map[string]bool{}
 	var recs []X509Record
@@ -56,9 +68,40 @@ func parseX509TSV(r io.Reader) ([]X509Record, error) {
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "#separator") || strings.HasPrefix(line, "#set_separator") ||
-			strings.HasPrefix(line, "#empty_field") || strings.HasPrefix(line, "#unset_field") ||
-			strings.HasPrefix(line, "#open") || strings.HasPrefix(line, "#close") ||
+
+		if strings.HasPrefix(line, "#separator") {
+			// Column separator (almost always tab). #set_separator is within-set
+			// separator and does NOT share this prefix — safe to parse independently.
+			parts := strings.Fields(line)
+			if len(parts) == 2 {
+				sep := parts[1]
+				if sep == `\x09` || sep == `\t` {
+					hdr.separator = "\t"
+				} else if len(sep) == 1 {
+					hdr.separator = sep
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#set_separator") {
+			// Within-set separator — does not affect column splitting; skip.
+			continue
+		}
+		if strings.HasPrefix(line, "#unset_field") {
+			parts := strings.Fields(line)
+			if len(parts) == 2 {
+				hdr.unsetField = parts[1]
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#empty_field") {
+			parts := strings.Fields(line)
+			if len(parts) == 2 {
+				hdr.emptyField = parts[1]
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#open") || strings.HasPrefix(line, "#close") ||
 			strings.HasPrefix(line, "#path") || strings.HasPrefix(line, "#types") {
 			continue
 		}
@@ -79,7 +122,7 @@ func parseX509TSV(r io.Reader) ([]X509Record, error) {
 		if colIdx == nil {
 			continue
 		}
-		rec, ok := extractX509TSVRow(line, colIdx)
+		rec, ok := extractX509TSVRow(line, colIdx, hdr)
 		if !ok {
 			continue
 		}
@@ -89,19 +132,35 @@ func parseX509TSV(r io.Reader) ([]X509Record, error) {
 		}
 		seen[dk] = true
 		recs = append(recs, rec)
+
+		if len(recs) >= maxZeekRecords {
+			fmt.Fprintf(os.Stderr, "zeeklog: record cap %d reached\n", maxZeekRecords)
+			break
+		}
+		if len(recs)%500 == 0 {
+			if ctx.Err() != nil {
+				return recs, ctx.Err()
+			}
+		}
 	}
-	return recs, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		if err == bufio.ErrTooLong {
+			return recs, nil
+		}
+		return recs, err
+	}
+	return recs, nil
 }
 
-func extractX509TSVRow(line string, colIdx map[string]int) (X509Record, bool) {
-	cols := strings.Split(line, "\t")
+func extractX509TSVRow(line string, colIdx map[string]int, hdr zeekTSVHeader) (X509Record, bool) {
+	cols := strings.Split(line, hdr.separator)
 	get := func(name string) string {
 		i, ok := colIdx[name]
 		if !ok || i >= len(cols) {
 			return ""
 		}
 		v := cols[i]
-		if v == "-" || v == "(empty)" {
+		if v == hdr.unsetField || v == hdr.emptyField {
 			return ""
 		}
 		return v
@@ -126,22 +185,22 @@ func extractX509TSVRow(line string, colIdx map[string]int) (X509Record, bool) {
 }
 
 // jsonX509Row is the JSON deserialization target for x509.log NDJSON lines.
+// Zeek's JSON output is flat with dotted keys ("certificate.sig_alg", "san.dns"),
+// NOT nested structs. Using dotted json tags correctly maps these fields (B1 fix).
 type jsonX509Row struct {
-	ID          string `json:"id"`
-	Certificate struct {
-		SigAlg    string `json:"sig_alg"`
-		KeyAlg    string `json:"key_alg"`
-		KeyType   string `json:"key_type"`
-		KeyLength any    `json:"key_length"` // may be int or string
-		Curve     string `json:"curve"`
-	} `json:"certificate"`
-	SAN struct {
-		DNS string `json:"dns"`
-	} `json:"san"`
+	ID        string `json:"id"`
+	SigAlg    string `json:"certificate.sig_alg"`
+	KeyAlg    string `json:"certificate.key_alg"`
+	KeyType   string `json:"certificate.key_type"`
+	KeyLength any    `json:"certificate.key_length"` // number or string
+	Curve     string `json:"certificate.curve"`
+	SANDNS    any    `json:"san.dns"` // string or []interface{} in Zeek JSON
 }
 
-func parseX509JSON(r io.Reader) ([]X509Record, error) {
+func parseX509JSON(ctx context.Context, r io.Reader) ([]X509Record, error) {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
 	seen := map[string]bool{}
 	var recs []X509Record
 
@@ -155,20 +214,24 @@ func parseX509JSON(r io.Reader) ([]X509Record, error) {
 			continue
 		}
 		kl := 0
-		switch v := row.Certificate.KeyLength.(type) {
+		switch v := row.KeyLength.(type) {
 		case float64:
 			kl = int(v)
 		case string:
 			kl, _ = strconv.Atoi(v)
 		}
+		curve := row.Curve
+		if curve == "-" {
+			curve = ""
+		}
 		rec := X509Record{
 			ID:      row.ID,
-			SigAlg:  row.Certificate.SigAlg,
-			KeyAlg:  row.Certificate.KeyAlg,
-			KeyType: row.Certificate.KeyType,
+			SigAlg:  row.SigAlg,
+			KeyAlg:  row.KeyAlg,
+			KeyType: row.KeyType,
 			KeyLen:  kl,
-			Curve:   row.Certificate.Curve,
-			SANDNS:  row.SAN.DNS,
+			Curve:   curve,
+			SANDNS:  x509SANString(row.SANDNS),
 		}
 		if rec.SigAlg == "" && rec.KeyAlg == "" {
 			continue
@@ -179,6 +242,38 @@ func parseX509JSON(r io.Reader) ([]X509Record, error) {
 		}
 		seen[dk] = true
 		recs = append(recs, rec)
+
+		if len(recs) >= maxZeekRecords {
+			fmt.Fprintf(os.Stderr, "zeeklog: record cap %d reached\n", maxZeekRecords)
+			break
+		}
+		if len(recs)%500 == 0 {
+			if ctx.Err() != nil {
+				return recs, ctx.Err()
+			}
+		}
 	}
-	return recs, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		if err == bufio.ErrTooLong {
+			return recs, nil
+		}
+		return recs, err
+	}
+	return recs, nil
+}
+
+// x509SANString extracts the first DNS SAN from the san.dns field.
+// Zeek JSON emits san.dns as either a string or a JSON array.
+func x509SANString(v any) string {
+	switch s := v.(type) {
+	case string:
+		return s
+	case []any:
+		if len(s) > 0 {
+			if first, ok := s[0].(string); ok {
+				return first
+			}
+		}
+	}
+	return ""
 }

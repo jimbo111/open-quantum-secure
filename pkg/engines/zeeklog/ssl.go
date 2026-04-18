@@ -2,9 +2,13 @@ package zeeklog
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"strconv"
 	"strings"
 )
 
@@ -33,30 +37,49 @@ func (r SSLRecord) dedupeKey() string {
 // parseSSLLog reads ssl.log records from r (already gzip-decoded if needed).
 // Handles both TSV and JSON formats. Returns unique records deduplicated by
 // (host, port, cipher, curve).
-func parseSSLLog(r io.Reader) ([]SSLRecord, error) {
+func parseSSLLog(ctx context.Context, r io.Reader) ([]SSLRecord, error) {
 	peeked, fmt_, err := sniffFormat(r)
 	if err != nil {
 		return nil, fmt.Errorf("zeek-log ssl.log: sniff format: %w", err)
 	}
-	full := multiReader(peeked, r)
 
 	switch fmt_ {
 	case formatTSV:
-		return parseSSLTSV(full)
-	case formatJSON, formatUnknown:
-		recs, err := parseSSLJSON(full)
-		if err != nil && fmt_ == formatUnknown {
-			// Last resort: try TSV
-			return parseSSLTSV(multiReader(peeked, r))
+		return parseSSLTSV(ctx, io.MultiReader(bytes.NewReader(peeked), r))
+	case formatJSON:
+		return parseSSLJSON(ctx, io.MultiReader(bytes.NewReader(peeked), r))
+	case formatUnknown:
+		// Buffer all content so both parsers can attempt from the beginning.
+		all, readErr := io.ReadAll(io.MultiReader(bytes.NewReader(peeked), r))
+		if readErr != nil {
+			return nil, readErr
 		}
-		return recs, err
+		recs, _ := parseSSLJSON(ctx, bytes.NewReader(all))
+		if len(recs) > 0 {
+			return recs, nil
+		}
+		return parseSSLTSV(ctx, bytes.NewReader(all))
 	}
 	return nil, fmt.Errorf("zeek-log ssl.log: unrecognized format")
 }
 
+// zeekTSVHeader holds parsed Zeek TSV directive values.
+type zeekTSVHeader struct {
+	separator  string
+	unsetField string
+	emptyField string
+}
+
+func defaultTSVHeader() zeekTSVHeader {
+	return zeekTSVHeader{separator: "\t", unsetField: "-", emptyField: "(empty)"}
+}
+
 // parseSSLTSV parses the Zeek native TSV format.
-func parseSSLTSV(r io.Reader) ([]SSLRecord, error) {
+func parseSSLTSV(ctx context.Context, r io.Reader) ([]SSLRecord, error) {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
+	hdr := defaultTSVHeader()
 	var colIdx map[string]int
 	seen := map[string]bool{}
 	var recs []SSLRecord
@@ -66,20 +89,45 @@ func parseSSLTSV(r io.Reader) ([]SSLRecord, error) {
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "#separator") || strings.HasPrefix(line, "#set_separator") ||
-			strings.HasPrefix(line, "#empty_field") || strings.HasPrefix(line, "#unset_field") ||
-			strings.HasPrefix(line, "#open") || strings.HasPrefix(line, "#close") ||
+
+		if strings.HasPrefix(line, "#separator") {
+			// #separator \x09 — column separator (almost always tab).
+			// #set_separator is within-set separator (e.g. ",") — NOT the column sep.
+			// HasPrefix("#separator") does NOT match "#set_separator" (different prefix).
+			parts := strings.Fields(line)
+			if len(parts) == 2 {
+				sep := parts[1]
+				if sep == `\x09` || sep == `\t` {
+					hdr.separator = "\t"
+				} else if len(sep) == 1 {
+					hdr.separator = sep
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#set_separator") {
+			// Within-set separator — does not affect column splitting; skip.
+			continue
+		}
+		if strings.HasPrefix(line, "#unset_field") {
+			parts := strings.Fields(line)
+			if len(parts) == 2 {
+				hdr.unsetField = parts[1]
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#empty_field") {
+			parts := strings.Fields(line)
+			if len(parts) == 2 {
+				hdr.emptyField = parts[1]
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#open") || strings.HasPrefix(line, "#close") ||
 			strings.HasPrefix(line, "#path") || strings.HasPrefix(line, "#types") {
 			continue
 		}
 		if strings.HasPrefix(line, "#fields") {
-			fields := strings.Split(line, "\t")
-			colIdx = make(map[string]int, len(fields))
-			for i, f := range fields {
-				colIdx[strings.TrimPrefix(f, "#fields\t")] = i
-				colIdx[f] = i
-			}
-			// Re-parse without the #fields prefix
 			rawFields := strings.SplitN(line, "\t", 2)
 			if len(rawFields) == 2 {
 				cols := strings.Split(rawFields[1], "\t")
@@ -97,7 +145,7 @@ func parseSSLTSV(r io.Reader) ([]SSLRecord, error) {
 			continue // no header yet
 		}
 
-		rec, ok := extractSSLTSVRow(line, colIdx)
+		rec, ok := extractSSLTSVRow(line, colIdx, hdr)
 		if !ok {
 			continue
 		}
@@ -107,19 +155,35 @@ func parseSSLTSV(r io.Reader) ([]SSLRecord, error) {
 		}
 		seen[dk] = true
 		recs = append(recs, rec)
+
+		if len(recs) >= maxZeekRecords {
+			fmt.Fprintf(os.Stderr, "zeeklog: record cap %d reached\n", maxZeekRecords)
+			break
+		}
+		if len(recs)%500 == 0 {
+			if ctx.Err() != nil {
+				return recs, ctx.Err()
+			}
+		}
 	}
-	return recs, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		if err == bufio.ErrTooLong {
+			return recs, nil
+		}
+		return recs, err
+	}
+	return recs, nil
 }
 
-func extractSSLTSVRow(line string, colIdx map[string]int) (SSLRecord, bool) {
-	cols := strings.Split(line, "\t")
+func extractSSLTSVRow(line string, colIdx map[string]int, hdr zeekTSVHeader) (SSLRecord, bool) {
+	cols := strings.Split(line, hdr.separator)
 	get := func(name string) string {
 		i, ok := colIdx[name]
 		if !ok || i >= len(cols) {
 			return ""
 		}
 		v := cols[i]
-		if v == "-" || v == "(empty)" {
+		if v == hdr.unsetField || v == hdr.emptyField {
 			return ""
 		}
 		return v
@@ -149,13 +213,15 @@ type jsonSSLRow struct {
 	Cipher     string `json:"cipher"`
 	Curve      string `json:"curve"`
 	ServerName string `json:"server_name"`
-	Established any    `json:"established"` // bool or string
+	Established any   `json:"established"` // bool or string
 	PQCKeyShare string `json:"pqc_key_share"`
 }
 
 // parseSSLJSON parses NDJSON ssl.log (one JSON object per line).
-func parseSSLJSON(r io.Reader) ([]SSLRecord, error) {
+func parseSSLJSON(ctx context.Context, r io.Reader) ([]SSLRecord, error) {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
 	seen := map[string]bool{}
 	var recs []SSLRecord
 
@@ -179,7 +245,7 @@ func parseSSLJSON(r io.Reader) ([]SSLRecord, error) {
 				continue
 			}
 		}
-		portStr := fmt.Sprintf("%v", row.IDRespP)
+		portStr := sslPortString(row.IDRespP)
 		rec := SSLRecord{
 			UID:         row.UID,
 			RespHost:    row.IDRespH,
@@ -196,6 +262,41 @@ func parseSSLJSON(r io.Reader) ([]SSLRecord, error) {
 		}
 		seen[dk] = true
 		recs = append(recs, rec)
+
+		if len(recs) >= maxZeekRecords {
+			fmt.Fprintf(os.Stderr, "zeeklog: record cap %d reached\n", maxZeekRecords)
+			break
+		}
+		if len(recs)%500 == 0 {
+			if ctx.Err() != nil {
+				return recs, ctx.Err()
+			}
+		}
 	}
-	return recs, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		if err == bufio.ErrTooLong {
+			return recs, nil
+		}
+		return recs, err
+	}
+	return recs, nil
+}
+
+// sslPortString converts the IDRespP any-typed field to a port string (B4).
+// Zeek JSON emits ports as numbers; "<nil>" from fmt.Sprintf("%v", nil) is avoided.
+func sslPortString(v any) string {
+	switch p := v.(type) {
+	case nil:
+		return ""
+	case float64:
+		return strconv.FormatFloat(p, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(p)
+	case int64:
+		return strconv.FormatInt(p, 10)
+	case string:
+		return p
+	default:
+		return ""
+	}
 }
