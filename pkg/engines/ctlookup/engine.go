@@ -19,6 +19,9 @@ const (
 	maxConcurrency = 3
 
 	engineName = "ct-lookup"
+
+	defaultRate  = 1.0
+	defaultBurst = 3.0
 )
 
 // Engine queries Certificate Transparency logs (crt.sh) to recover certificate
@@ -34,16 +37,26 @@ type Engine struct {
 func New() *Engine {
 	return &Engine{
 		cache:  newCTCache(defaultCacheSize, defaultCacheTTL),
-		rl:     newRateLimiter(1.0, 3.0),
-		client: newCrtShClient(defaultHTTPTimeout),
+		rl:     newRateLimiter(defaultRate, defaultBurst),
+		client: newCrtShClient(defaultHTTPTimeout, defaultBaseURL),
 	}
 }
 
-func (e *Engine) Name() string             { return engineName }
-func (e *Engine) Tier() engines.Tier       { return engines.Tier5Network }
+// NewWithBaseURL returns a CT lookup Engine that targets baseURL instead of the
+// production crt.sh endpoint. Intended for integration tests using httptest.Server.
+func NewWithBaseURL(baseURL string) *Engine {
+	return &Engine{
+		cache:  newCTCache(defaultCacheSize, defaultCacheTTL),
+		rl:     newRateLimiter(defaultRate, defaultBurst),
+		client: newCrtShClient(defaultHTTPTimeout, baseURL),
+	}
+}
+
+func (e *Engine) Name() string                { return engineName }
+func (e *Engine) Tier() engines.Tier          { return engines.Tier5Network }
 func (e *Engine) SupportedLanguages() []string { return nil }
-func (e *Engine) Available() bool          { return true }
-func (e *Engine) Version() string          { return "embedded" }
+func (e *Engine) Available() bool             { return true }
+func (e *Engine) Version() string             { return "embedded" }
 
 // Scan queries crt.sh for each hostname in opts.CTLookupTargets and returns a
 // UnifiedFinding per unique certificate signature algorithm observed.
@@ -61,6 +74,20 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	}
 
 	targets := deduplicateHostnames(opts.CTLookupTargets)
+	if len(targets) == 0 {
+		return nil, nil
+	}
+
+	// Filter invalid hostnames with a warning; valid ones proceed.
+	valid := targets[:0]
+	for _, h := range targets {
+		if err := validateHostname(h); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: ct-lookup: skipping invalid hostname %q: %v\n", h, err)
+			continue
+		}
+		valid = append(valid, h)
+	}
+	targets = valid
 	if len(targets) == 0 {
 		return nil, nil
 	}
@@ -86,7 +113,15 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		}
 		// Acquire semaphore in parent goroutine — prevents bursting beyond cap even
 		// momentarily (mirrors the tls-probe M1 pattern from Sprint 2).
-		sem <- struct{}{}
+		// Cancel-aware: if ctx is done while waiting for a slot, abort early.
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			break
+		}
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
 		go func(idx int, host string) {
 			defer wg.Done()
@@ -104,26 +139,31 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 				results[idx] = hostResult{hostname: host, err: err}
 				return
 			}
-			e.cache.put(host, recs)
+			if len(recs) == 0 {
+				e.cache.putShort(host, recs)
+			} else {
+				e.cache.put(host, recs)
+			}
 			results[idx] = hostResult{hostname: host, records: recs}
 		}(i, hostname)
 	}
 	wg.Wait()
 
 	var allFindings []findings.UnifiedFinding
-	var errCount int
+	var errCount, completed int
 	for _, r := range results {
 		if r.err != nil {
 			errCount++
 			fmt.Fprintf(os.Stderr, "WARNING: ct-lookup: %s: %v\n", r.hostname, r.err)
 			continue
 		}
+		completed++
 		for _, rec := range r.records {
 			allFindings = append(allFindings, certRecordToFinding(r.hostname, rec))
 		}
 	}
 	fmt.Fprintf(os.Stderr, "CT Lookup: queried %d hostname(s) — %d error(s)\n",
-		len(targets), errCount)
+		completed, errCount)
 
 	return allFindings, nil
 }
@@ -156,13 +196,12 @@ func (e *Engine) queryHost(ctx context.Context, hostname string) ([]certRecord, 
 		}
 		der, fetchErr := e.client.fetchCertDER(ctx, entry.ID)
 		if fetchErr != nil {
-			// Fall back to partial record without algorithm fields.
-			records = append(records, entryToRecord(entry))
+			fmt.Fprintf(os.Stderr, "WARNING: ct-lookup: DER fetch id=%d: %v\n", entry.ID, fetchErr)
 			continue
 		}
 		cert, parseErr := x509.ParseCertificate(der)
 		if parseErr != nil {
-			records = append(records, entryToRecord(entry))
+			fmt.Fprintf(os.Stderr, "WARNING: ct-lookup: DER parse id=%d: %v\n", entry.ID, parseErr)
 			continue
 		}
 		rec := x509ToRecord(cert)
@@ -180,15 +219,18 @@ func certRecordToFinding(hostname string, rec certRecord) findings.UnifiedFindin
 	if algoName == "" {
 		algoName = rec.PubKeyAlgorithm
 	}
-	if algoName == "" {
-		algoName = "unknown"
-	}
 
 	c := quantum.ClassifyAlgorithm(algoName, "signature", rec.PubKeySize)
 
+	// Serial prefix (8 hex chars) distinguishes multiple certs for the same host.
+	serial := rec.Serial
+	if len(serial) > 8 {
+		serial = serial[:8]
+	}
+
 	return findings.UnifiedFinding{
 		Location: findings.Location{
-			File:         "(ct-lookup)/" + hostname + "#cert",
+			File:         fmt.Sprintf("(ct-lookup)/%s#cert:%s", hostname, serial),
 			Line:         0,
 			ArtifactType: "ct-log",
 		},
@@ -198,12 +240,12 @@ func certRecordToFinding(hostname string, rec certRecord) findings.UnifiedFindin
 			KeySize:   rec.PubKeySize,
 			Curve:     rec.PubKeyCurve,
 		},
-		Confidence:   findings.ConfidenceMedium,
-		SourceEngine: engineName,
-		Reachable:    findings.ReachableYes,
+		Confidence:    findings.ConfidenceMedium,
+		SourceEngine:  engineName,
+		Reachable:     findings.ReachableYes,
 		RawIdentifier: fmt.Sprintf("ct-cert:%s|%s|%s", hostname, algoName, rec.Serial),
-		QuantumRisk:  findings.QuantumRisk(c.Risk),
-		Severity:     findings.Severity(c.Severity),
+		QuantumRisk:   findings.QuantumRisk(c.Risk),
+		Severity:      findings.Severity(c.Severity),
 		// CT lookup resolves what ECH hid — this finding is complete inventory.
 		PartialInventory: false,
 	}
