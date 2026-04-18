@@ -463,6 +463,13 @@ Example with data lifetime adjustment for healthcare:
 					hndlShelfLife, surplus, level)
 			}
 
+			// Validate --ct-lookup-targets before proceeding.
+			for _, h := range ctLookupTargets {
+				if err := ctlookup.ValidateHostname(h); err != nil {
+					return fmt.Errorf("invalid --ct-lookup-targets value %q: %w", h, err)
+				}
+			}
+
 			orch := buildOrchestrator()
 
 			ctx := context.Background()
@@ -840,6 +847,13 @@ Example:
 			}
 			if !cmd.Flags().Changed("tls-strict") && cfg.TLS.Strict {
 				tlsStrict = true
+			}
+
+			// Validate --ct-lookup-targets before proceeding.
+			for _, h := range ctLookupTargets {
+				if err := ctlookup.ValidateHostname(h); err != nil {
+					return fmt.Errorf("invalid --ct-lookup-targets value %q: %w", h, err)
+				}
 			}
 
 			opts := engines.ScanOptions{
