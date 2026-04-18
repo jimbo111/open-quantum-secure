@@ -1,0 +1,11 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	x509
+#open	2024-01-01-00:00:00
+#fields	ts	id	certificate.version	certificate.serial	certificate.subject	certificate.issuer	certificate.not_valid_before	certificate.not_valid_after	certificate.key_alg	certificate.sig_alg	certificate.key_type	certificate.key_length	certificate.exponent	certificate.curve	san.dns	san.uri	san.email	san.ip	basic_constraints.ca
+#types	time	string	count	string	string	string	time	time	string	string	string	count	count	string	vector[string]	vector[string]	vector[string]	vector[string]	bool
+1704067200.000000	Fuid01	3	01	CN=example.com	CN=TrustCA	1700000000.000000	1800000000.000000	rsaEncryption	sha256WithRSAEncryption	rsa	2048	65537	-	example.com	-	-	-	F
+1704067201.000000	Fuid02	3	02	CN=pqc.example.com	CN=PQC-CA	1700000000.000000	1800000000.000000	id-ML-DSA-65	ML-DSA-65	unknown	0	-	-	pqc.example.com	-	-	-	F
+1704067202.000000	Fuid03	3	03	CN=oid.example.com	CN=OID-CA	1700000000.000000	1800000000.000000	id-ML-DSA-65	unknown 2.16.840.1.101.3.4.3.18	unknown	0	-	-	oid.example.com	-	-	-	F

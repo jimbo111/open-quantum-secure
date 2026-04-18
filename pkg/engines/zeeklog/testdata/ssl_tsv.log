@@ -1,0 +1,12 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	ssl
+#open	2024-01-01-00:00:00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	version	cipher	curve	server_name	resumed	last_alert	next_protocol	established	ssl_history	cert_chain_fuids	client_cert_chain_fuids	subject	issuer	validation_status
+#types	time	string	addr	port	addr	port	string	string	string	string	bool	count	string	bool	string	vector[string]	vector[string]	string	string	string
+1704067200.000000	CaBC12	10.0.0.1	54321	1.2.3.4	443	TLSv13	TLS_AES_256_GCM_SHA384	X25519MLKEM768	example.com	F	-	h2	T	-	-	-	-	-	ok
+1704067201.000000	CbCD34	10.0.0.2	54322	1.2.3.4	443	TLSv13	TLS_AES_256_GCM_SHA384	X25519MLKEM768	example.com	F	-	h2	T	-	-	-	-	-	ok
+1704067202.000000	CcDE56	10.0.0.3	54323	5.6.7.8	443	TLSv12	TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384	secp256r1	legacy.example.com	F	-	-	T	-	-	-	-	-	ok
+1704067203.000000	CdEF78	10.0.0.4	54324	9.10.11.12	443	TLSv13	TLS_AES_128_GCM_SHA256	secp256r1	classical.example.com	F	-	-	F	-	-	-	-	-	ok
