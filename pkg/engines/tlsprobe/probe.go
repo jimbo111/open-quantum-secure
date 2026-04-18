@@ -29,6 +29,17 @@ type ProbeResult struct {
 	VerifyError       string // non-empty if verification failed
 	Error             error  // non-nil means handshake failed entirely
 	Duration          time.Duration
+
+	// Size-based passive detection fields (Sprint 2, S2.1–S2.3).
+	IncomingSegments    int64  // approximate number of incoming TCP segments during handshake
+	OutgoingSegments    int64  // approximate number of outgoing TCP segments during handshake
+	BytesIn             int64  // total bytes received during handshake
+	BytesOut            int64  // total bytes sent during handshake
+	HandshakeVolumeClass string // "classical", "hybrid-kem", "full-pqc", or "unknown" (S2.3)
+
+	// ECH detection fields (Sprint 2, S2.4).
+	ECHDetected bool   // true when Encrypted Client Hello is detected
+	ECHSource   string // "dns-https-rr", "tls-ext", or "" when not detected
 }
 
 // ProbeOpts configures a single TLS probe.
@@ -81,6 +92,10 @@ func probe(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
 		return result
 	}
 
+	// Wrap the raw connection in a countingConn to observe handshake byte volumes
+	// and segment counts. This is the S2.1 instrumentation layer.
+	counting := newCountingConn(rawConn)
+
 	// Capture certs via callback. Always use InsecureSkipVerify=true so the
 	// callback fires even for expired/self-signed certs (Round 3 critical finding).
 	var capturedCerts []*x509.Certificate
@@ -110,7 +125,7 @@ func probe(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
 		tlsCfg.RootCAs = pool
 	}
 
-	tlsConn := tls.Client(rawConn, tlsCfg)
+	tlsConn := tls.Client(counting, tlsCfg)
 	defer tlsConn.Close()
 
 	if err := tlsConn.HandshakeContext(dialCtx); err != nil {
@@ -128,6 +143,18 @@ func probe(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
 	// for TLS 1.2 sessions that used an RSA KEM (no ECDHE, no named group).
 	// tls.CurveID is a uint16 alias, so the conversion is always safe.
 	result.NegotiatedGroupID = uint16(state.CurveID)
+
+	// Populate S2.1 size-based observability fields from countingConn.
+	result.IncomingSegments = counting.ReadCalls()
+	result.OutgoingSegments = counting.WriteCalls()
+	result.BytesIn = counting.BytesIn()
+	result.BytesOut = counting.BytesOut()
+	result.HandshakeVolumeClass = ClassifyHandshakeVolume(result.BytesIn + result.BytesOut).String()
+
+	// Detect ECH (S2.4) after handshake data is available.
+	echDetected, echSource := detectECH(ctx, host)
+	result.ECHDetected = echDetected
+	result.ECHSource = echSource
 
 	// Extract leaf cert info.
 	if len(capturedCerts) > 0 {
