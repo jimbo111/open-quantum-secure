@@ -238,6 +238,38 @@ func TestSSHProbeOrchestrator_NoNetwork(t *testing.T) {
 	}
 }
 
+// TestSSHProbeOrchestrator_A7_SSHTargetsAloneActivatesEngine verifies that
+// passing SSHTargets without --scan-type=all (A7: orchestrator seam fix) is
+// sufficient to include the ssh-probe Tier5Network engine. Previously the engine
+// was only activated when ScanType="all" was explicitly set.
+func TestSSHProbeOrchestrator_A7_SSHTargetsAloneActivatesEngine(t *testing.T) {
+	methods := []string{"mlkem768x25519-sha256", "diffie-hellman-group14-sha256"}
+	addr := startFakeSSH(t, "SSH-2.0-OpenSSH_10.0", methods)
+
+	o := New(sshprobe.New())
+	// ScanType is intentionally omitted (defaults to source scan).
+	// A7 fix: SSHTargets alone must activate Tier5Network engines.
+	ff, err := o.Scan(context.Background(), engines.ScanOptions{
+		SSHTargets: []string{addr},
+		// ScanType deliberately omitted — the seam must handle this.
+	})
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+	if len(ff) == 0 {
+		t.Fatal("expected findings when SSHTargets set without scan-type=all (A7 seam fix)")
+	}
+	foundSSH := false
+	for _, f := range ff {
+		if f.SourceEngine == "ssh-probe" {
+			foundSSH = true
+		}
+	}
+	if !foundSSH {
+		t.Error("no findings from ssh-probe engine — SSHTargets did not activate the engine")
+	}
+}
+
 // TestSSHProbeOrchestrator_ContextCancellation verifies that cancelling the
 // context aborts the orchestrator scan cleanly.
 func TestSSHProbeOrchestrator_ContextCancellation(t *testing.T) {

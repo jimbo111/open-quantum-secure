@@ -1,6 +1,7 @@
 package sshprobe
 
 import (
+	"context"
 	"encoding/binary"
 	"net"
 	"strings"
@@ -242,4 +243,213 @@ func mustEncodeUint32(v uint32) []byte {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, v)
 	return b
+}
+
+// serveFakeSSHWithPreamble sends preamble lines before the SSH banner.
+func serveFakeSSHWithPreamble(t *testing.T, preambleLines []string, serverID string, kexMethods []string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+
+	go func() {
+		defer ln.Close()
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+		for _, line := range preambleLines {
+			_, _ = conn.Write([]byte(line + "\r\n"))
+		}
+		_, _ = conn.Write([]byte(serverID + "\r\n"))
+		buf := make([]byte, 512)
+		for {
+			n, err := conn.Read(buf)
+			if err != nil || n == 0 {
+				break
+			}
+			if strings.Contains(string(buf[:n]), "\n") {
+				break
+			}
+		}
+		pkt := buildKEXInitPacket(kexMethods)
+		_, _ = conn.Write(pkt)
+	}()
+
+	return addr
+}
+
+// A1 tests — RFC 4253 preamble line handling.
+
+func TestReadBannerWithPreamble_ZeroPreamble(t *testing.T) {
+	methods := []string{"curve25519-sha256"}
+	addr := serveFakeSSHWithPreamble(t, nil, "SSH-2.0-OpenSSH_9.0", methods)
+	result := probeSSH(t.Context(), addr, 5*time.Second, false)
+	if result.Error != nil {
+		t.Fatalf("expected success with no preamble: %v", result.Error)
+	}
+	if result.ServerID != "SSH-2.0-OpenSSH_9.0" {
+		t.Errorf("ServerID = %q; want SSH-2.0-OpenSSH_9.0", result.ServerID)
+	}
+}
+
+func TestReadBannerWithPreamble_OnePreamble(t *testing.T) {
+	methods := []string{"curve25519-sha256"}
+	addr := serveFakeSSHWithPreamble(t, []string{"This is a proxy greeting"}, "SSH-2.0-OpenSSH_9.0", methods)
+	result := probeSSH(t.Context(), addr, 5*time.Second, false)
+	if result.Error != nil {
+		t.Fatalf("expected success with 1 preamble line: %v", result.Error)
+	}
+	if result.ServerID != "SSH-2.0-OpenSSH_9.0" {
+		t.Errorf("ServerID = %q; want SSH-2.0-OpenSSH_9.0", result.ServerID)
+	}
+}
+
+func TestReadBannerWithPreamble_FivePreamble(t *testing.T) {
+	preamble := []string{
+		"Welcome to Bastion",
+		"Authorized access only",
+		"Session logged",
+		"Rate-limited: 3 per hour",
+		"Please authenticate",
+	}
+	methods := []string{"curve25519-sha256"}
+	addr := serveFakeSSHWithPreamble(t, preamble, "SSH-2.0-OpenSSH_9.0", methods)
+	result := probeSSH(t.Context(), addr, 5*time.Second, false)
+	if result.Error != nil {
+		t.Fatalf("expected success with 5 preamble lines: %v", result.Error)
+	}
+	if result.ServerID != "SSH-2.0-OpenSSH_9.0" {
+		t.Errorf("ServerID = %q; want SSH-2.0-OpenSSH_9.0", result.ServerID)
+	}
+}
+
+func TestReadBannerWithPreamble_TooManyLines(t *testing.T) {
+	// 10 preamble lines with no SSH- banner afterward → should error.
+	preamble := make([]string, maxBannerLines)
+	for i := range preamble {
+		preamble[i] = "preamble line"
+	}
+	// All lines are non-SSH-prefixed; the loop exhausts without finding a banner.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		for _, line := range preamble {
+			_, _ = conn.Write([]byte(line + "\r\n"))
+		}
+		// No SSH- banner — connection eventually closes.
+	}()
+
+	result := probeSSH(t.Context(), ln.Addr().String(), 5*time.Second, false)
+	if result.Error == nil {
+		t.Fatal("expected error when 10 preamble lines have no SSH- banner")
+	}
+}
+
+func TestReadBannerWithPreamble_NoBannerEver(t *testing.T) {
+	// Server sends only preamble lines, never an SSH- line.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		for i := 0; i < 3; i++ {
+			_, _ = conn.Write([]byte("not an ssh banner\r\n"))
+		}
+	}()
+
+	result := probeSSH(t.Context(), ln.Addr().String(), 5*time.Second, false)
+	if result.Error == nil {
+		t.Fatal("expected error when no SSH- banner was ever sent")
+	}
+}
+
+// A3 test — context cancel closes connection promptly mid-handshake.
+
+func TestProbeSSH_ContextCancelMidHandshake(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	// Stall server — accepts connection but never sends data.
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		time.Sleep(30 * time.Second) // stall indefinitely
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan ProbeResult, 1)
+	go func() {
+		done <- probeSSH(ctx, ln.Addr().String(), 10*time.Second, false)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	select {
+	case result := <-done:
+		if result.Error == nil {
+			t.Fatal("expected error after context cancel, got nil")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("probe did not return within 100ms after context cancel")
+	}
+}
+
+// B4 test — SSH-1.x banner rejection.
+
+func TestProbeSSH_SSH1xRejected(t *testing.T) {
+	cases := []struct {
+		name     string
+		serverID string
+		wantErr  bool
+	}{
+		{"ssh-2.0 accepted", "SSH-2.0-OpenSSH_9.0", false},
+		{"ssh-1.99 accepted", "SSH-1.99-OpenSSH_3.4", false},
+		{"ssh-1.5 rejected", "SSH-1.5-1.5.8", true},
+		{"ssh-1.0 rejected", "SSH-1.0-JSCH", true},
+		{"ssh-1.3 rejected", "SSH-1.3-PuTTY", true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			methods := []string{"diffie-hellman-group14-sha256"}
+			addr := serveFakeSSH(t, tc.serverID, methods)
+			result := probeSSH(t.Context(), addr, 5*time.Second, false)
+			if tc.wantErr && result.Error == nil {
+				t.Errorf("expected error for %q, got nil", tc.serverID)
+			}
+			if !tc.wantErr && result.Error != nil {
+				t.Errorf("unexpected error for %q: %v", tc.serverID, result.Error)
+			}
+		})
+	}
 }

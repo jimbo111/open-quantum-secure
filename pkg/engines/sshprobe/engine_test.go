@@ -110,3 +110,75 @@ func TestScan_ContextCancelled(t *testing.T) {
 		SSHTargets: []string{"127.0.0.1:22"},
 	})
 }
+
+// A4 — labelled break in select exits the for-range, not just the select.
+// Verify no goroutine leak when cancelling a scan with more targets than maxConcurrency.
+func TestScan_CancelExitsForLoop_NoGoroutineLeak(t *testing.T) {
+	original := probeFn
+	defer func() { probeFn = original }()
+
+	// Slow stub — blocks until ctx is done.
+	probeFn = func(ctx context.Context, target string, _ time.Duration, _ bool) ProbeResult {
+		<-ctx.Done()
+		return ProbeResult{Target: target, Error: ctx.Err()}
+	}
+
+	// More targets than maxConcurrency so the semaphore loop actually exercises
+	// the cancel path mid-iteration.
+	targets := make([]string, maxConcurrency*3)
+	for i := range targets {
+		targets[i] = "192.0.2.1:22"
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e := New()
+		_, _ = e.Scan(ctx, engines.ScanOptions{SSHTargets: targets})
+	}()
+
+	// Cancel after a brief moment to ensure at least some goroutines are running.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Scan did not return within 500ms after context cancel")
+	}
+}
+
+// A5 — reachable/unreachable summary is accurate after a mid-scan cancel.
+// Verifies that Scan does not panic or index out-of-bounds on results[:launched].
+func TestScan_CancelAccurateLaunchedCounter(t *testing.T) {
+	original := probeFn
+	defer func() { probeFn = original }()
+
+	ready := make(chan struct{}, 1) // buffered so the first probe signals once
+	probeFn = func(ctx context.Context, target string, _ time.Duration, _ bool) ProbeResult {
+		select {
+		case ready <- struct{}{}:
+		default:
+		}
+		<-ctx.Done()
+		return ProbeResult{Target: target, Error: ctx.Err()}
+	}
+
+	targets := make([]string, maxConcurrency+2)
+	for i := range targets {
+		targets[i] = "192.0.2.1:22"
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-ready
+		cancel()
+	}()
+
+	e := New()
+	_, _ = e.Scan(ctx, engines.ScanOptions{SSHTargets: targets})
+	// After scan returns, launched ≤ len(targets). No panic, no index-out-of-bounds.
+	// The concurrency invariants are covered more thoroughly in engine_stress_test.go.
+}

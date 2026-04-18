@@ -214,3 +214,69 @@ func connFromReader(t *testing.T, data []byte) net.Conn {
 	t.Cleanup(func() { c.Close() })
 	return c
 }
+
+// A6 — printable-ASCII validation in parseNameList.
+
+// buildNameListWithRaw builds a name-list payload containing exactly the raw bytes
+// provided as the single algorithm name (bypasses encodeNameList's string handling).
+func buildNameListWithRaw(name []byte) []byte {
+	buf := make([]byte, 4+len(name))
+	binary.BigEndian.PutUint32(buf, uint32(len(name)))
+	copy(buf[4:], name)
+	return buf
+}
+
+func TestParseNameList_NULByte(t *testing.T) {
+	payload := buildNameListWithRaw([]byte("curve25519-sha256\x00evil"))
+	_, _, err := parseNameList(payload, 0)
+	if err == nil {
+		t.Fatal("expected error for name containing NUL byte, got nil")
+	}
+}
+
+func TestParseNameList_ANSIEscape(t *testing.T) {
+	payload := buildNameListWithRaw([]byte("\x1b[31mcurve25519-sha256\x1b[0m"))
+	_, _, err := parseNameList(payload, 0)
+	if err == nil {
+		t.Fatal("expected error for name containing ANSI escape sequence, got nil")
+	}
+}
+
+func TestParseNameList_EmbeddedNewline(t *testing.T) {
+	payload := buildNameListWithRaw([]byte("curve25519\nsha256"))
+	_, _, err := parseNameList(payload, 0)
+	if err == nil {
+		t.Fatal("expected error for name containing embedded newline, got nil")
+	}
+}
+
+func TestParseNameList_ValidWithAtDomainSuffix(t *testing.T) {
+	// RFC 4250 §4.6.1: vendor-specific names use the form name@domain.tld.
+	// Ensure '@', '.', '-' and alphanumerics all pass validation.
+	name := "sntrup761x25519-sha512@openssh.com"
+	payload := encodeNameList([]string{name})
+	got, _, err := parseNameList(payload, 0)
+	if err != nil {
+		t.Fatalf("unexpected error for valid @domain name: %v", err)
+	}
+	if len(got) != 1 || got[0] != name {
+		t.Errorf("got %v; want [%q]", got, name)
+	}
+}
+
+func TestParseNameList_SpaceInName(t *testing.T) {
+	payload := buildNameListWithRaw([]byte("curve 25519-sha256"))
+	_, _, err := parseNameList(payload, 0)
+	if err == nil {
+		t.Fatal("expected error for name containing space (0x20), got nil")
+	}
+}
+
+func TestParseNameList_EmptyNameEntry(t *testing.T) {
+	// Two commas produce an empty name: "a,,b" → ["a", "", "b"]
+	payload := buildNameListWithRaw([]byte("curve25519-sha256,,diffie-hellman-group14-sha256"))
+	_, _, err := parseNameList(payload, 0)
+	if err == nil {
+		t.Fatal("expected error for empty algorithm name in list, got nil")
+	}
+}
