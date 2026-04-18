@@ -353,6 +353,17 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 		ff = append(ff, f)
 	}
 
+	// If ECH was detected (S2.4), annotate every finding for this probe session
+	// as partial inventory. The cipher suite and cert algorithm are hidden behind
+	// the outer ClientHello; only size-based signals and the outer handshake are
+	// observable. Sprint 3 (CT log lookup) will attempt to recover the cert info.
+	if result.ECHDetected {
+		for i := range ff {
+			ff[i].PartialInventory = true
+			ff[i].PartialInventoryReason = "ECH_ENABLED"
+		}
+	}
+
 	return ff
 }
 
