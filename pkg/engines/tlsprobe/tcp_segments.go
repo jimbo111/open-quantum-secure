@@ -7,13 +7,16 @@ import (
 )
 
 // countingConn wraps a net.Conn and atomically tracks Read/Write call counts
-// and byte totals. Each Read() call is a practical proxy for one incoming TCP
-// segment on typical Linux/Darwin because Go's TLS record layer issues a 5-byte
-// header read followed by a full-record read; the OS delivers whatever the NIC
-// received, so a single Read() call generally corresponds to one segment boundary.
-// Pre-PQ ClientHellos (~220-380 B) always fit in one segment; hybrid PQ
-// ClientHellos (~1450 B) span ≥2 segments, producing ≥2 Read() calls on the
-// server side / ≥2 Write() calls on the client side.
+// and byte totals.
+//
+// Read() calls are a noisy proxy for TCP segment boundaries: crypto/tls issues
+// a 5-byte header read followed by a full-record-body read, so a single 1500-byte
+// segment typically yields 2 Read() calls rather than 1. As a result
+// IncomingSegments (= ReadCalls) and OutgoingSegments (= WriteCalls) are
+// diagnostic-only and must not be used for classification decisions.
+//
+// BytesIn and BytesOut are the authoritative volume signal: they count raw bytes
+// transferred regardless of how the TLS layer fragments records across syscalls.
 type countingConn struct {
 	net.Conn
 
