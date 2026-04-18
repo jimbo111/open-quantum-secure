@@ -75,9 +75,9 @@ func (o *Orchestrator) EffectiveEngines(opts engines.ScanOptions) []engines.Engi
 	} else {
 		available = applyScanTypeFilter(available, opts.ScanType)
 	}
-	// Include Tier5Network engines when TLS, CT, or SSH targets are explicitly
+	// Include Tier5Network engines when TLS, CT, SSH, or file-based log paths are
 	// provided, even if they were excluded by tier/scanType filtering above.
-	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH || len(opts.SSHTargets) > 0 {
+	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH || len(opts.SSHTargets) > 0 || opts.SuricataEvePath != "" {
 		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
 	}
 	return available
@@ -449,9 +449,9 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 		available = applyScanTypeFilter(available, opts.ScanType)
 	}
 
-	// Include Tier5Network engines when TLS, CT, or SSH targets are explicitly
+	// Include Tier5Network engines when TLS, CT, SSH, or file-based log paths are
 	// provided, overriding tier/scanType filtering (even in diff/quick mode).
-	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH || len(opts.SSHTargets) > 0 {
+	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH || len(opts.SSHTargets) > 0 || opts.SuricataEvePath != "" {
 		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
 	}
 

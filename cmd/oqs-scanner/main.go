@@ -38,6 +38,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/configscanner"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/ctlookup"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/sshprobe"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/suricatalog"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cdxgen"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cipherscope"
@@ -140,7 +141,10 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 	// Tier 5: SSH probe engine (pure Go, always available; Sprint 4).
 	sshp := sshprobe.New()
 
-	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct, sshp)
+	// Tier 5: Suricata eve.json log ingestion engine (pure Go, always available; Sprint 6).
+	suri := suricatalog.New()
+
+	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct, sshp, suri)
 }
 
 // engineVersionsHash computes a stable SHA-256 hex digest over the
@@ -364,6 +368,7 @@ func scanCmd() *cobra.Command {
 		noNetwork         bool
 		sshTargets        []string
 		sshStrict         bool
+		suricataEvePath   string
 	)
 
 	cmd := &cobra.Command{
@@ -485,6 +490,11 @@ Example with data lifetime adjustment for healthcare:
 				}
 			}
 
+			// Validate --suricata-eve path (null-byte guard).
+			if err := validateSuricataEvePath(suricataEvePath); err != nil {
+				return fmt.Errorf("invalid --suricata-eve: %w", err)
+			}
+
 			orch := buildOrchestrator()
 
 			ctx := context.Background()
@@ -523,6 +533,7 @@ Example with data lifetime adjustment for healthcare:
 				CTLookupFromECH: ctLookupFromECH,
 				SSHTargets:      sshTargets,
 				SSHDenyPrivate:  sshStrict,
+				SuricataEvePath: suricataEvePath,
 			}
 
 			if incremental && noCache {
@@ -719,6 +730,9 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
 	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
 
+	// Suricata log ingestion flags (Sprint 6)
+	cmd.Flags().StringVar(&suricataEvePath, "suricata-eve", "", "Path to Suricata eve.json (plain or .gz) for passive TLS PQC inventory")
+
 	// HNDL Mosca sector preset flag
 	cmd.Flags().StringVar(&sector, "sector", "",
 		`Industry sector preset for Mosca HNDL shelf-life (case-insensitive).
@@ -758,6 +772,7 @@ func diffCmd() *cobra.Command {
 		noNetwork         bool
 		sshTargets        []string
 		sshStrict         bool
+		suricataEvePath   string
 	)
 
 	cmd := &cobra.Command{
@@ -886,6 +901,11 @@ Example:
 				}
 			}
 
+			// Validate --suricata-eve path (null-byte guard).
+			if err := validateSuricataEvePath(suricataEvePath); err != nil {
+				return fmt.Errorf("invalid --suricata-eve: %w", err)
+			}
+
 			opts := engines.ScanOptions{
 				TargetPath:      absPath,
 				Timeout:         timeout,
@@ -907,6 +927,7 @@ Example:
 				CTLookupFromECH: ctLookupFromECH,
 				SSHTargets:      sshTargets,
 				SSHDenyPrivate:  sshStrict,
+				SuricataEvePath: suricataEvePath,
 			}
 
 			selected := orch.EffectiveEngines(opts)
@@ -1060,6 +1081,9 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
 	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
 
+	// Suricata log ingestion flags (Sprint 6)
+	cmd.Flags().StringVar(&suricataEvePath, "suricata-eve", "", "Path to Suricata eve.json (plain or .gz) for passive TLS PQC inventory")
+
 	return cmd
 }
 
@@ -1083,6 +1107,19 @@ func validateSSHTarget(target string) error {
 		return nil
 	}
 	return ctlookup.ValidateHostname(host)
+}
+
+// validateSuricataEvePath rejects --suricata-eve values that contain null bytes
+// (which the OS would reject anyway, but caught here for a clear user-facing error
+// before any file open attempt).
+func validateSuricataEvePath(path string) error {
+	if path == "" {
+		return nil
+	}
+	if strings.ContainsRune(path, 0) {
+		return fmt.Errorf("path contains null byte")
+	}
+	return nil
 }
 
 // writeOutput writes the scan result in the specified format to the given destination.

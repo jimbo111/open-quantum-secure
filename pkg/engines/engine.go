@@ -94,6 +94,9 @@ type ScanOptions struct {
 	SSHTargets     []string // host:port targets to probe SSH KEX advertisement (empty = skip ssh-probe)
 	SSHTimeout     int      // per-target dial+KEXINIT timeout in seconds (0 = default 10s)
 	SSHDenyPrivate bool     // reject RFC 1918 / loopback / link-local target IPs (--ssh-strict)
+
+	// Suricata log ingestion options (Sprint 6).
+	SuricataEvePath string // path to eve.json (plain or .gz); empty = skip suricata-log engine
 }
 
 // Engine is the interface every scanner engine must implement.
