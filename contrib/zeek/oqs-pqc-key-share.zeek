@@ -118,7 +118,12 @@ event ssl_extension(c: connection, is_orig: bool, code: count, val: string)
             }
         }
 
-    if ( |groups| > 0 )
+    # Only record the client's advertisement (ClientHello key_share).
+    # ssl_extension fires for both ClientHello (is_orig=T) and ServerHello
+    # (is_orig=F). Without this guard the field gets concatenated twice,
+    # producing duplicates like "11ec,0017,11ec". The server's selected group
+    # adds no new information beyond what the client offered.
+    if ( |groups| > 0 && is_orig )
         {
         local joined = join_string_vec(groups, ",");
         if ( c$ssl?$pqc_key_share )
