@@ -392,6 +392,41 @@ func TestReadRecord_MaxLengthViaMock(t *testing.T) {
 	}
 }
 
+func TestReadRecord_InvalidContentType_PassThrough(t *testing.T) {
+	// RFC 8446 §5.1: content_type is informational at the record layer.
+	// ReadRecord returns unknown types as-is; higher layers (ReadHandshakeMsg)
+	// skip them via the default case.
+	for _, ctype := range []uint8{0x00, 0x01, 0xFF} {
+		wire := []byte{ctype, 0x03, 0x03, 0x00, 0x01, 0x42}
+		conn := &mockReadConn{r: bytes.NewReader(wire)}
+		rec, err := ReadRecord(context.Background(), conn)
+		if err != nil {
+			t.Errorf("content type 0x%02x: unexpected error %v", ctype, err)
+			continue
+		}
+		if rec.Type != ctype {
+			t.Errorf("content type 0x%02x: got 0x%02x", ctype, rec.Type)
+		}
+	}
+}
+
+func TestReadRecord_LegacyVersionValues(t *testing.T) {
+	// RFC 8446 §5.1: legacy_record_version MUST be ignored; ReadRecord accepts
+	// any version field without error.
+	for _, ver := range []uint16{0x0000, 0x0301, 0x0302, 0x0304, 0xFFFF} {
+		wire := []byte{RecordTypeHandshake, byte(ver >> 8), byte(ver), 0x00, 0x01, 0x42}
+		conn := &mockReadConn{r: bytes.NewReader(wire)}
+		rec, err := ReadRecord(context.Background(), conn)
+		if err != nil {
+			t.Errorf("version 0x%04x: unexpected error %v", ver, err)
+			continue
+		}
+		if rec.Version != ver {
+			t.Errorf("version 0x%04x: got 0x%04x", ver, rec.Version)
+		}
+	}
+}
+
 // FuzzParseRecord exercises ReadRecord against arbitrary wire bytes without
 // spawning OS sockets — must not panic on any input.
 func FuzzParseRecord(f *testing.F) {
