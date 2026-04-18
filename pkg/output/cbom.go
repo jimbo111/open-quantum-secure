@@ -352,6 +352,12 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 			props = append(props, cdxProperty{Name: "oqs:partialInventoryReason", Value: f.PartialInventoryReason})
 		}
 	}
+	if f.HandshakeVolumeClass != "" {
+		props = append(props, cdxProperty{Name: "oqs:handshakeVolumeClass", Value: f.HandshakeVolumeClass})
+	}
+	if f.HandshakeBytes > 0 {
+		props = append(props, cdxProperty{Name: "oqs:handshakeBytes", Value: fmt.Sprintf("%d", f.HandshakeBytes)})
+	}
 
 	if len(f.DataFlowPath) > 0 {
 		dfpJSON, err := json.Marshal(f.DataFlowPath)

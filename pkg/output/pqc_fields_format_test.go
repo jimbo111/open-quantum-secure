@@ -534,6 +534,174 @@ func TestPartialInventory_CBOM_Properties(t *testing.T) {
 	}
 }
 
+// ── HandshakeVolumeClass / HandshakeBytes surfacing ──────────────────────────
+
+// volumeFinding returns a finding with HandshakeVolumeClass and HandshakeBytes set,
+// simulating a TLS probe result that went through Sprint 2 size classification.
+func volumeFinding() findings.UnifiedFinding {
+	return findings.UnifiedFinding{
+		Location:             findings.Location{File: "(tls-probe)/hybrid.example.com:443#kex", ArtifactType: "tls-endpoint"},
+		Algorithm:            &findings.Algorithm{Name: "X25519MLKEM768", Primitive: "key-exchange"},
+		SourceEngine:         "tls-probe",
+		Confidence:           findings.ConfidenceHigh,
+		Reachable:            findings.ReachableYes,
+		QuantumRisk:          findings.QRSafe,
+		NegotiatedGroup:      0x11EC,
+		NegotiatedGroupName:  "X25519MLKEM768",
+		PQCPresent:           true,
+		PQCMaturity:          "final",
+		HandshakeVolumeClass: "hybrid-kem",
+		HandshakeBytes:       8192,
+	}
+}
+
+// TestHandshakeVolume_JSON_RoundTrip verifies that HandshakeVolumeClass and
+// HandshakeBytes survive a JSON marshal/unmarshal cycle.
+func TestHandshakeVolume_JSON_RoundTrip(t *testing.T) {
+	result := makePQCTestResult([]findings.UnifiedFinding{volumeFinding()})
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, result); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var got ScanResult
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(got.Findings))
+	}
+	f := got.Findings[0]
+	if f.HandshakeVolumeClass != "hybrid-kem" {
+		t.Errorf("HandshakeVolumeClass=%q, want hybrid-kem", f.HandshakeVolumeClass)
+	}
+	if f.HandshakeBytes != 8192 {
+		t.Errorf("HandshakeBytes=%d, want 8192", f.HandshakeBytes)
+	}
+}
+
+// TestHandshakeVolume_JSON_OmitEmpty verifies that HandshakeVolumeClass and
+// HandshakeBytes are absent from JSON for findings that lack them.
+func TestHandshakeVolume_JSON_OmitEmpty(t *testing.T) {
+	result := makePQCTestResult([]findings.UnifiedFinding{rsaFinding()})
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, result); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var raw struct {
+		Findings []map[string]json.RawMessage `json:"findings"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+	f := raw.Findings[0]
+	for _, key := range []string{"handshakeVolumeClass", "handshakeBytes"} {
+		if _, present := f[key]; present {
+			t.Errorf("field %q must be omitted for classical (zero-value) finding, but was present", key)
+		}
+	}
+}
+
+// TestHandshakeVolume_SARIF_Properties verifies that handshakeVolumeClass and
+// handshakeBytes appear in SARIF result.properties when set.
+func TestHandshakeVolume_SARIF_Properties(t *testing.T) {
+	result := makePQCTestResult([]findings.UnifiedFinding{volumeFinding(), rsaFinding()})
+	var buf bytes.Buffer
+	if err := WriteSARIF(&buf, result); err != nil {
+		t.Fatalf("WriteSARIF: %v", err)
+	}
+	var sarifDoc struct {
+		Runs []struct {
+			Results []struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &sarifDoc); err != nil {
+		t.Fatalf("unmarshal SARIF: %v", err)
+	}
+	if len(sarifDoc.Runs[0].Results) != 2 {
+		t.Fatalf("expected 2 SARIF results, got %d", len(sarifDoc.Runs[0].Results))
+	}
+
+	// Volume finding: both keys must be present.
+	volProps := sarifDoc.Runs[0].Results[0].Properties
+	if _, ok := volProps["handshakeVolumeClass"]; !ok {
+		t.Error("SARIF volume finding: handshakeVolumeClass absent")
+	}
+	var vc string
+	if v, ok := volProps["handshakeVolumeClass"]; ok {
+		_ = json.Unmarshal(v, &vc)
+	}
+	if vc != "hybrid-kem" {
+		t.Errorf("SARIF handshakeVolumeClass=%q, want hybrid-kem", vc)
+	}
+	if _, ok := volProps["handshakeBytes"]; !ok {
+		t.Error("SARIF volume finding: handshakeBytes absent")
+	}
+
+	// Classical RSA finding: both keys must be absent.
+	rsaProps := sarifDoc.Runs[0].Results[1].Properties
+	for _, key := range []string{"handshakeVolumeClass", "handshakeBytes"} {
+		if _, ok := rsaProps[key]; ok {
+			t.Errorf("SARIF RSA finding: %q must be absent", key)
+		}
+	}
+}
+
+// TestHandshakeVolume_CBOM_Properties verifies that oqs:handshakeVolumeClass and
+// oqs:handshakeBytes appear in CBOM component properties when set.
+func TestHandshakeVolume_CBOM_Properties(t *testing.T) {
+	result := makePQCTestResult([]findings.UnifiedFinding{volumeFinding(), rsaFinding()})
+	var buf bytes.Buffer
+	if err := WriteCBOM(&buf, result); err != nil {
+		t.Fatalf("WriteCBOM: %v", err)
+	}
+	var bom struct {
+		Components []struct {
+			Name       string `json:"name"`
+			Properties []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"properties"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &bom); err != nil {
+		t.Fatalf("unmarshal CBOM: %v", err)
+	}
+	if len(bom.Components) < 2 {
+		t.Fatalf("expected at least 2 CBOM components, got %d", len(bom.Components))
+	}
+
+	findProp := func(props []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}, name string) (string, bool) {
+		for _, p := range props {
+			if p.Name == name {
+				return p.Value, true
+			}
+		}
+		return "", false
+	}
+
+	// Volume component: oqs:handshakeVolumeClass and oqs:handshakeBytes must be present.
+	volProps := bom.Components[0].Properties
+	if v, ok := findProp(volProps, "oqs:handshakeVolumeClass"); !ok || v != "hybrid-kem" {
+		t.Errorf("CBOM: oqs:handshakeVolumeClass=%q ok=%v, want \"hybrid-kem\" present", v, ok)
+	}
+	if v, ok := findProp(volProps, "oqs:handshakeBytes"); !ok || v != "8192" {
+		t.Errorf("CBOM: oqs:handshakeBytes=%q ok=%v, want \"8192\" present", v, ok)
+	}
+
+	// RSA component: these keys must be absent.
+	rsaProps := bom.Components[1].Properties
+	for _, prop := range []string{"oqs:handshakeVolumeClass", "oqs:handshakeBytes"} {
+		if _, ok := findProp(rsaProps, prop); ok {
+			t.Errorf("CBOM RSA component: %q must be absent", prop)
+		}
+	}
+}
+
 // stripANSI removes ANSI escape sequences from s so badge checks work
 // regardless of whether colour output is enabled.
 func stripANSI(s string) string {

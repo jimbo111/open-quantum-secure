@@ -117,6 +117,13 @@ type UnifiedFinding struct {
 	// should treat these findings as requiring further enrichment.
 	PartialInventory       bool   `json:"partialInventory,omitempty"`       // true when inventory is known to be incomplete
 	PartialInventoryReason string `json:"partialInventoryReason,omitempty"` // "ECH_ENABLED" or ""
+
+	// Handshake volume fields (populated by tls-probe size-based detection, Sprint 2).
+	// HandshakeVolumeClass is the classifier output: "classical", "hybrid-kem",
+	// "full-pqc", or "unknown". HandshakeBytes is the sum of BytesIn+BytesOut for
+	// the TLS handshake exchange.
+	HandshakeVolumeClass string `json:"handshakeVolumeClass,omitempty"` // "classical", "hybrid-kem", "full-pqc", "unknown"
+	HandshakeBytes       int64  `json:"handshakeBytes,omitempty"`       // total handshake bytes (in+out)
 }
 
 // MigrationSnippet holds a language-specific PQC migration code example.
