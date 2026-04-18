@@ -83,6 +83,9 @@ func TestDeepProbe_Accepted(t *testing.T) {
 	if r.GroupID != 0x001d {
 		t.Errorf("GroupID: got 0x%04x want 0x001d", r.GroupID)
 	}
+	if r.SelectedGroup != 0x001d {
+		t.Errorf("SelectedGroup: got 0x%04x want 0x001d (server key_share group)", r.SelectedGroup)
+	}
 }
 
 func TestDeepProbe_HRR(t *testing.T) {
@@ -104,6 +107,11 @@ func TestDeepProbe_HRR(t *testing.T) {
 	}
 	if r.Outcome != OutcomeHRR {
 		t.Errorf("outcome: got %s want hrr", r.Outcome)
+	}
+	// F1: HRR selected_group must be carried back so callers know which PQC group
+	// the server is willing to accept on retry.
+	if r.SelectedGroup != 0x11ec {
+		t.Errorf("SelectedGroup: got 0x%04x want 0x11ec (X25519MLKEM768)", r.SelectedGroup)
 	}
 }
 

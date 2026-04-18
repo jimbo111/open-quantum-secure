@@ -32,10 +32,14 @@ func (o GroupOutcome) String() string {
 
 // DeepProbeGroupResult describes the server's response to probing one group.
 type DeepProbeGroupResult struct {
-	GroupID   uint16
-	Outcome   GroupOutcome
-	AlertDesc uint8 // set when Outcome == OutcomeAlert
-	Err       error // set when Outcome == OutcomeError
+	GroupID       uint16
+	// SelectedGroup is the IANA codepoint the server named in its key_share response.
+	// Set for both OutcomeAccepted (SH key_share group) and OutcomeHRR (HRR selected_group).
+	// HRR means "server will accept this group on retry" — positive PQC evidence per RFC 8446 §4.1.4.
+	SelectedGroup uint16
+	Outcome       GroupOutcome
+	AlertDesc     uint8 // set when Outcome == OutcomeAlert
+	Err           error // set when Outcome == OutcomeError
 }
 
 // DeepProbe tests a pre-resolved addr for each group in groups. For each group
@@ -127,7 +131,8 @@ func probeGroup(ctx context.Context, addr, sni string, timeout time.Duration, gr
 		}
 	}
 	if parsed.IsHRR {
-		return DeepProbeGroupResult{GroupID: groupID, Outcome: OutcomeHRR}
+		// HRR names the group the server WILL accept on retry — positive PQC evidence.
+		return DeepProbeGroupResult{GroupID: groupID, Outcome: OutcomeHRR, SelectedGroup: parsed.SelectedGroup}
 	}
-	return DeepProbeGroupResult{GroupID: groupID, Outcome: OutcomeAccepted}
+	return DeepProbeGroupResult{GroupID: groupID, Outcome: OutcomeAccepted, SelectedGroup: parsed.SelectedGroup}
 }

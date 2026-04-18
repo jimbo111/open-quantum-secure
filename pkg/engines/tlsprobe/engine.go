@@ -122,12 +122,17 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 			addr := net.JoinHostPort(r.ResolvedIP, port)
 			groupResults := rawhello.DeepProbe(ctx, addr, host, timeout, rawhello.DefaultProbeGroups)
 			for _, gr := range groupResults {
-				if gr.Outcome == rawhello.OutcomeAccepted {
+				switch gr.Outcome {
+				case rawhello.OutcomeAccepted:
 					r.DeepProbeAcceptedGroups = append(r.DeepProbeAcceptedGroups, gr.GroupID)
+				case rawhello.OutcomeHRR:
+					if gr.SelectedGroup != 0 {
+						r.DeepProbeHRRGroups = append(r.DeepProbeHRRGroups, gr.SelectedGroup)
+					}
 				}
 			}
-			fmt.Fprintf(os.Stderr, "deep-probe: %s — %d/%d groups accepted\n",
-				r.Target, len(r.DeepProbeAcceptedGroups), len(groupResults))
+			fmt.Fprintf(os.Stderr, "deep-probe: %s — %d/%d groups accepted, %d HRR\n",
+				r.Target, len(r.DeepProbeAcceptedGroups), len(groupResults), len(r.DeepProbeHRRGroups))
 		}
 	}
 

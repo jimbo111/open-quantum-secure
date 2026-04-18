@@ -47,8 +47,11 @@ type ProbeResult struct {
 	// Deep-probe fields (Sprint 7, S7.4).
 	// DeepProbeAcceptedGroups lists IANA SupportedGroup codepoints for which the
 	// server returned a ServerHello (not HRR, not Alert) during the raw probe pass.
-	// Only populated when --deep-probe is enabled.
 	DeepProbeAcceptedGroups []uint16
+	// DeepProbeHRRGroups lists IANA SupportedGroup codepoints named by the server
+	// via HelloRetryRequest. HRR means "supported but not the server's first choice" —
+	// positive PQC evidence worth recording separately from full ServerHello acceptance.
+	DeepProbeHRRGroups []uint16
 }
 
 // ProbeOpts configures a single TLS probe.

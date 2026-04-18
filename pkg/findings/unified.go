@@ -130,6 +130,10 @@ type UnifiedFinding struct {
 	// server accepted (responded with ServerHello, not HRR or Alert) during the
 	// raw probe. Only set on the kex finding for a target when --deep-probe is enabled.
 	DeepProbeSupportedGroups []uint16 `json:"deepProbeSupportedGroups,omitempty"`
+	// DeepProbeHRRGroups lists the IANA TLS SupportedGroup codepoints that the server
+	// named via HelloRetryRequest (supported-but-not-preferred). Positive PQC evidence
+	// distinct from full ServerHello acceptance. Populated by --deep-probe.
+	DeepProbeHRRGroups []uint16 `json:"deepProbeHRRGroups,omitempty"`
 }
 
 // MigrationSnippet holds a language-specific PQC migration code example.
@@ -168,6 +172,9 @@ func (f *UnifiedFinding) Clone() UnifiedFinding {
 	}
 	if f.DeepProbeSupportedGroups != nil {
 		c.DeepProbeSupportedGroups = append([]uint16(nil), f.DeepProbeSupportedGroups...)
+	}
+	if f.DeepProbeHRRGroups != nil {
+		c.DeepProbeHRRGroups = append([]uint16(nil), f.DeepProbeHRRGroups...)
 	}
 	return c
 }
