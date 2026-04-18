@@ -11,9 +11,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -361,6 +363,7 @@ func scanCmd() *cobra.Command {
 		ctLookupFromECH   bool
 		noNetwork         bool
 		sshTargets        []string
+		sshStrict         bool
 	)
 
 	cmd := &cobra.Command{
@@ -475,6 +478,13 @@ Example with data lifetime adjustment for healthcare:
 				}
 			}
 
+			// Validate --ssh-targets: must be host:port with valid hostname/IP syntax.
+			for _, t := range sshTargets {
+				if err := validateSSHTarget(t); err != nil {
+					return fmt.Errorf("invalid --ssh-targets value %q: %w", t, err)
+				}
+			}
+
 			orch := buildOrchestrator()
 
 			ctx := context.Background()
@@ -512,6 +522,7 @@ Example with data lifetime adjustment for healthcare:
 				CTLookupTargets: ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
 				SSHTargets:      sshTargets,
+				SSHDenyPrivate:  sshStrict,
 			}
 
 			if incremental && noCache {
@@ -706,6 +717,7 @@ Overrides --sector when both are provided.`)
 
 	// SSH probe flags (Sprint 4)
 	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
+	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
 
 	// HNDL Mosca sector preset flag
 	cmd.Flags().StringVar(&sector, "sector", "",
@@ -745,6 +757,7 @@ func diffCmd() *cobra.Command {
 		ctLookupFromECH   bool
 		noNetwork         bool
 		sshTargets        []string
+		sshStrict         bool
 	)
 
 	cmd := &cobra.Command{
@@ -866,6 +879,13 @@ Example:
 				}
 			}
 
+			// Validate --ssh-targets: must be host:port with valid hostname/IP syntax.
+			for _, t := range sshTargets {
+				if err := validateSSHTarget(t); err != nil {
+					return fmt.Errorf("invalid --ssh-targets value %q: %w", t, err)
+				}
+			}
+
 			opts := engines.ScanOptions{
 				TargetPath:      absPath,
 				Timeout:         timeout,
@@ -886,6 +906,7 @@ Example:
 				CTLookupTargets: ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
 				SSHTargets:      sshTargets,
+				SSHDenyPrivate:  sshStrict,
 			}
 
 			selected := orch.EffectiveEngines(opts)
@@ -1037,8 +1058,31 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 
 	// SSH probe flags (Sprint 4)
 	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
+	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
 
 	return cmd
+}
+
+// validateSSHTarget validates a single --ssh-targets entry. It must be in
+// "host:port" form with a valid port number (1–65535) and either a valid
+// hostname (RFC 1123 DNS labels) or an IP literal.
+func validateSSHTarget(target string) error {
+	host, portStr, err := net.SplitHostPort(target)
+	if err != nil {
+		return fmt.Errorf("must be in host:port format: %w", err)
+	}
+	if host == "" {
+		return fmt.Errorf("empty host")
+	}
+	portNum, convErr := strconv.Atoi(portStr)
+	if convErr != nil || portNum < 1 || portNum > 65535 {
+		return fmt.Errorf("invalid port %q (must be 1-65535)", portStr)
+	}
+	// IP literals are valid SSH targets; skip hostname validation for them.
+	if net.ParseIP(host) != nil {
+		return nil
+	}
+	return ctlookup.ValidateHostname(host)
 }
 
 // writeOutput writes the scan result in the specified format to the given destination.

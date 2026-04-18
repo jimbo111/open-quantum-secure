@@ -91,8 +91,9 @@ type ScanOptions struct {
 	CTLookupFromECH bool     // auto-query CT logs for hostnames found via ECH partial-inventory findings
 
 	// SSH probe options (Sprint 4).
-	SSHTargets []string // host:port targets to probe SSH KEX advertisement (empty = skip ssh-probe)
-	SSHTimeout int      // per-target dial+KEXINIT timeout in seconds (0 = default 10s)
+	SSHTargets     []string // host:port targets to probe SSH KEX advertisement (empty = skip ssh-probe)
+	SSHTimeout     int      // per-target dial+KEXINIT timeout in seconds (0 = default 10s)
+	SSHDenyPrivate bool     // reject RFC 1918 / loopback / link-local target IPs (--ssh-strict)
 }
 
 // Engine is the interface every scanner engine must implement.

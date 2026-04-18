@@ -27,7 +27,7 @@ import (
 // if the dial itself fails (separate from probe error expectations).
 func dialAndProbe(t *testing.T, addr string) ProbeResult {
 	t.Helper()
-	return probeSSH(t.Context(), addr, 3*time.Second)
+	return probeSSH(t.Context(), addr, 3*time.Second, false)
 }
 
 // serveOnce starts a TCP listener, accepts exactly one connection, runs handler,
@@ -193,7 +193,7 @@ func TestAdversarial_TLSClientHelloOnSSHPort(t *testing.T) {
 }
 
 // TestAdversarial_SixNonKEXINITPackets — server sends 6 non-KEXINIT packets,
-// exceeding the 5-packet skip tolerance (maxSkip=5). The probe must error.
+// exceeding the 2-packet skip tolerance (B3: maxSkip=2). The probe must error.
 func TestAdversarial_SixNonKEXINITPackets(t *testing.T) {
 	// SSH_MSG_IGNORE = 2 (a valid non-KEXINIT packet type).
 	ignorePayload := []byte{2, 0, 0, 0, 0}
@@ -209,7 +209,7 @@ func TestAdversarial_SixNonKEXINITPackets(t *testing.T) {
 
 	result := dialAndProbe(t, addr)
 	if result.Error == nil {
-		t.Error("expected error after 6 non-KEXINIT packets (exceeds maxSkip=5)")
+		t.Error("expected error after 6 non-KEXINIT packets (exceeds maxSkip=2)")
 	}
 }
 
@@ -238,10 +238,10 @@ func TestAdversarial_BillionNonASCIIBannerPreamble(t *testing.T) {
 	}
 }
 
-// TestAdversarial_FiveNonKEXINITThenKEXINIT — server sends exactly 5 non-KEXINIT
-// packets then a valid KEXINIT. The probe must succeed (5 = maxSkip-1, which is
-// still within tolerance since the loop iterates for skip 0..4).
-func TestAdversarial_FiveNonKEXINITThenKEXINIT(t *testing.T) {
+// TestAdversarial_OneNonKEXINITThenKEXINIT — B3 regression: server sends exactly
+// 1 non-KEXINIT packet then a valid KEXINIT. With maxSkip=2 the probe must succeed
+// (KEXINIT arrives on the second read, i.e. skip=1 which is within the loop bound).
+func TestAdversarial_OneNonKEXINITThenKEXINIT(t *testing.T) {
 	ignorePayload := []byte{2, 0, 0, 0, 0} // SSH_MSG_IGNORE
 
 	methods := []string{"mlkem768x25519-sha256", "curve25519-sha256"}
@@ -250,19 +250,37 @@ func TestAdversarial_FiveNonKEXINITThenKEXINIT(t *testing.T) {
 		_, _ = conn.Write([]byte("SSH-2.0-Tolerant_1.0\r\n"))
 		buf := make([]byte, 512)
 		_, _ = conn.Read(buf)
-		// Send 4 non-KEXINIT packets (skip values 0..3), then KEXINIT on skip=4.
-		for i := 0; i < 4; i++ {
-			_, _ = conn.Write(buildSSHPacket(ignorePayload))
-		}
+		// Send 1 non-KEXINIT packet (skip=0), then KEXINIT (skip=1).
+		_, _ = conn.Write(buildSSHPacket(ignorePayload))
 		_, _ = conn.Write(buildKEXInitPacket(methods))
 	})
 
 	result := dialAndProbe(t, addr)
 	if result.Error != nil {
-		t.Errorf("expected success with 4 non-KEXINIT then KEXINIT, got: %v", result.Error)
+		t.Errorf("expected success with 1 non-KEXINIT then KEXINIT (within maxSkip=2), got: %v", result.Error)
 	}
 	if len(result.KEXMethods) != len(methods) {
 		t.Errorf("KEXMethods len=%d; want %d", len(result.KEXMethods), len(methods))
+	}
+}
+
+// TestAdversarial_TwoNonKEXINITNoKEXINIT — B3 regression: server sends exactly
+// 2 non-KEXINIT packets with no KEXINIT. With maxSkip=2 this must error.
+func TestAdversarial_TwoNonKEXINITNoKEXINIT(t *testing.T) {
+	ignorePayload := []byte{2, 0, 0, 0, 0} // SSH_MSG_IGNORE
+
+	addr := serveOnce(t, func(conn net.Conn) {
+		_, _ = conn.Write([]byte("SSH-2.0-NoKEX_1.0\r\n"))
+		buf := make([]byte, 512)
+		_, _ = conn.Read(buf)
+		for i := 0; i < 2; i++ {
+			_, _ = conn.Write(buildSSHPacket(ignorePayload))
+		}
+	})
+
+	result := dialAndProbe(t, addr)
+	if result.Error == nil {
+		t.Error("expected error after 2 non-KEXINIT packets with no KEXINIT (maxSkip=2)")
 	}
 }
 

@@ -19,7 +19,7 @@ import (
 
 // panicProbe is injected as probeFn when NoNetwork=true.
 // If it is ever called, the test fails (and panics to make the failure obvious).
-func panicProbe(ctx context.Context, target string, timeout time.Duration) ProbeResult {
+func panicProbe(_ context.Context, _ string, _ time.Duration, _ bool) ProbeResult {
 	panic("probeFn called with NoNetwork=true — engine must short-circuit before reaching the probe")
 }
 
@@ -94,7 +94,7 @@ func TestNoNetwork_WithMultipleTargets(t *testing.T) {
 func TestNoNetwork_NoNetwork_False_DoesCallProbe(t *testing.T) {
 	original := probeFn
 	var called bool
-	probeFn = func(ctx context.Context, target string, timeout time.Duration) ProbeResult {
+	probeFn = func(_ context.Context, target string, _ time.Duration, _ bool) ProbeResult {
 		called = true
 		return ProbeResult{Target: target, Error: context.Canceled}
 	}

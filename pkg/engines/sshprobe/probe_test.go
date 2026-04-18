@@ -95,7 +95,7 @@ func TestProbe_ClassicalOnly(t *testing.T) {
 	}
 	addr := serveFakeSSH(t, "SSH-2.0-OpenSSH_7.4", methods)
 
-	result := probeSSH(t.Context(), addr, 5*time.Second)
+	result := probeSSH(t.Context(), addr, 5*time.Second, false)
 
 	if result.Error != nil {
 		t.Fatalf("probeSSH error: %v", result.Error)
@@ -121,7 +121,7 @@ func TestProbe_MLKEMEnabled(t *testing.T) {
 	}
 	addr := serveFakeSSH(t, "SSH-2.0-OpenSSH_10.0", methods)
 
-	result := probeSSH(t.Context(), addr, 5*time.Second)
+	result := probeSSH(t.Context(), addr, 5*time.Second, false)
 
 	if result.Error != nil {
 		t.Fatalf("probeSSH error: %v", result.Error)
@@ -148,7 +148,7 @@ func TestProbe_SntrupEnabled(t *testing.T) {
 	}
 	addr := serveFakeSSH(t, "SSH-2.0-OpenSSH_9.0", methods)
 
-	result := probeSSH(t.Context(), addr, 5*time.Second)
+	result := probeSSH(t.Context(), addr, 5*time.Second, false)
 
 	if result.Error != nil {
 		t.Fatalf("probeSSH error: %v", result.Error)
@@ -173,7 +173,7 @@ func TestProbe_MixedPQC(t *testing.T) {
 	}
 	addr := serveFakeSSH(t, "SSH-2.0-OpenSSH_10.0p1", methods)
 
-	result := probeSSH(t.Context(), addr, 5*time.Second)
+	result := probeSSH(t.Context(), addr, 5*time.Second, false)
 
 	if result.Error != nil {
 		t.Fatalf("probeSSH error: %v", result.Error)
@@ -185,7 +185,7 @@ func TestProbe_MixedPQC(t *testing.T) {
 
 func TestProbe_Unreachable(t *testing.T) {
 	// Use a port that is not listening.
-	result := probeSSH(t.Context(), "127.0.0.1:1", 1*time.Second)
+	result := probeSSH(t.Context(), "127.0.0.1:1", 1*time.Second, false)
 	if result.Error == nil {
 		t.Fatal("expected error for unreachable target, got nil")
 	}
@@ -204,7 +204,7 @@ func TestProbe_NotSSH(t *testing.T) {
 	}()
 	defer ln.Close()
 
-	result := probeSSH(t.Context(), addr, 2*time.Second)
+	result := probeSSH(t.Context(), addr, 2*time.Second, false)
 	if result.Error == nil {
 		t.Fatal("expected error for non-SSH server, got nil")
 	}

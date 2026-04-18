@@ -8,24 +8,23 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"net"
 	"strings"
 )
 
 const (
 	sshMsgKexInit  = 20
 	maxBannerLen   = 255
-	maxPacketLen   = 256 * 1024 // 256 KB safety cap per RFC 4253 §6.1
+	maxPacketLen   = 256 * 1024 // 256 KB defensive cap; RFC 4253 §6.1 requires ≥35000 bytes support, we accept larger with OOM protection
 	maxNameListLen = 64 * 1024  // 64 KB per name-list field
 )
 
 // readBanner reads the SSH identification string line (e.g. "SSH-2.0-OpenSSH_9.0").
 // It reads byte-by-byte until \n (with optional preceding \r), up to maxBannerLen.
 // Ref: RFC 4253 §4.2.
-func readBanner(conn net.Conn) (string, error) {
+func readBanner(r io.Reader) (string, error) {
 	buf := make([]byte, maxBannerLen+2)
 	for i := range buf {
-		if _, err := io.ReadFull(conn, buf[i:i+1]); err != nil {
+		if _, err := io.ReadFull(r, buf[i:i+1]); err != nil {
 			return "", fmt.Errorf("read banner: %w", err)
 		}
 		if buf[i] == '\n' {
@@ -38,9 +37,9 @@ func readBanner(conn net.Conn) (string, error) {
 
 // readPacket reads one binary SSH packet and returns the payload (without padding).
 // Ref: RFC 4253 §6 — uint32 packet_length, byte padding_length, payload, padding.
-func readPacket(conn net.Conn) ([]byte, error) {
+func readPacket(r io.Reader) ([]byte, error) {
 	var lenBuf [4]byte
-	if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
+	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
 		return nil, fmt.Errorf("read packet length: %w", err)
 	}
 	pktLen := binary.BigEndian.Uint32(lenBuf[:])
@@ -49,7 +48,7 @@ func readPacket(conn net.Conn) ([]byte, error) {
 	}
 
 	body := make([]byte, pktLen)
-	if _, err := io.ReadFull(conn, body); err != nil {
+	if _, err := io.ReadFull(r, body); err != nil {
 		return nil, fmt.Errorf("read packet body: %w", err)
 	}
 
@@ -65,6 +64,8 @@ func readPacket(conn net.Conn) ([]byte, error) {
 // parseNameList reads a comma-separated SSH name-list from payload starting at
 // offset. Returns the names, the new offset after the list, and any error.
 // Ref: RFC 4253 §5 — name-list = uint32 length + bytes (comma-separated).
+// A6: Each name is validated for printable US-ASCII per RFC 4253 §5 (bytes
+// 0x21–0x2B, 0x2D–0x7E; excludes space 0x20 and comma 0x2C).
 func parseNameList(payload []byte, offset int) ([]string, int, error) {
 	if offset+4 > len(payload) {
 		return nil, offset, fmt.Errorf("parseNameList: need 4 bytes for length at offset %d, have %d", offset, len(payload)-offset)
@@ -82,5 +83,29 @@ func parseNameList(payload []byte, offset int) ([]string, int, error) {
 	if raw == "" {
 		return nil, offset, nil
 	}
-	return strings.Split(raw, ","), offset, nil
+	names := strings.Split(raw, ",")
+	for _, name := range names {
+		if !isValidNameASCII(name) {
+			return nil, offset, fmt.Errorf("parseNameList: algorithm name contains invalid byte: %q", name)
+		}
+	}
+	return names, offset, nil
+}
+
+// isValidNameASCII reports whether every byte in s is within the printable
+// US-ASCII range permitted for SSH algorithm names per RFC 4253 §5:
+// 0x21–0x2B and 0x2D–0x7E (printable ASCII excluding space 0x20 and comma 0x2C).
+// An empty name is rejected (commas create empty fields → malformed name-list).
+func isValidNameASCII(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if (b >= 0x21 && b <= 0x2B) || (b >= 0x2D && b <= 0x7E) {
+			continue
+		}
+		return false
+	}
+	return true
 }

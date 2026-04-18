@@ -76,8 +76,8 @@ func TestScan_Integration(t *testing.T) {
 	// Inject a stub probeFn that enforces our timeout but talks to the fake server.
 	original := probeFn
 	defer func() { probeFn = original }()
-	probeFn = func(ctx context.Context, target string, timeout time.Duration) ProbeResult {
-		return probeSSH(ctx, addr, timeout)
+	probeFn = func(ctx context.Context, target string, timeout time.Duration, denyPrivate bool) ProbeResult {
+		return probeSSH(ctx, addr, timeout, denyPrivate)
 	}
 
 	ff, err := e.Scan(context.Background(), engines.ScanOptions{

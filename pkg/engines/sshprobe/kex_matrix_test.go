@@ -286,7 +286,7 @@ func TestKEXMatrix_ProbeRoundTrip(t *testing.T) {
 		t.Run(v.name+"_probe", func(t *testing.T) {
 			addr := serveFakeSSH(t, v.serverID, v.kexMethods)
 
-			result := probeSSH(t.Context(), addr, 5*time.Second)
+			result := probeSSH(t.Context(), addr, 5*time.Second, false)
 			if result.Error != nil {
 				t.Fatalf("probeSSH error: %v", result.Error)
 			}

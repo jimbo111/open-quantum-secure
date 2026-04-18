@@ -50,7 +50,9 @@ var kexTable = map[string]kexInfo{
 
 // pqcHeuristics lists substrings that suggest a PQC KEX not yet in kexTable.
 // Used to return a more informative label for unknown-but-PQC-looking methods.
-var pqcHeuristics = []string{"mlkem", "kyber", "sntrup", "frodo", "ntru", "bike", "hqc", "mceliece"}
+// B6: "ntru" removed — "sntrup" and "ntruprime" substrings already cover real
+// PQC implementations; bare "ntru" risks false positives on unrelated algorithm names.
+var pqcHeuristics = []string{"mlkem", "kyber", "sntrup", "frodo", "ntruprime", "bike", "hqc", "mceliece"}
 
 // classifyKex returns the kexInfo for a KEX method name.
 // For names not in kexTable, it applies a heuristic based on pqcHeuristics.

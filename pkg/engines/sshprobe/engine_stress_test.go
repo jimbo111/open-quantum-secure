@@ -37,7 +37,7 @@ func TestEngineStress_GoroutineCapBounded(t *testing.T) {
 
 	original := probeFn
 	defer func() { probeFn = original }()
-	probeFn = func(ctx context.Context, target string, timeout time.Duration) ProbeResult {
+	probeFn = func(ctx context.Context, target string, timeout time.Duration, _ bool) ProbeResult {
 		// Record current goroutine count while blocked — this is when concurrent
 		// probes are at their peak.
 		current := runtime.NumGoroutine()
@@ -107,7 +107,7 @@ func TestEngineStress_ContextCancelWithin100ms(t *testing.T) {
 	defer func() { probeFn = original }()
 
 	var launched atomic.Int64
-	probeFn = func(ctx context.Context, target string, timeout time.Duration) ProbeResult {
+	probeFn = func(ctx context.Context, target string, timeout time.Duration, _ bool) ProbeResult {
 		launched.Add(1)
 		// Block until context is cancelled.
 		<-ctx.Done()
@@ -158,7 +158,7 @@ func TestEngineStress_ConcurrencyRaceDetector(t *testing.T) {
 	defer func() { probeFn = original }()
 
 	// Minimal delay to ensure goroutines interleave.
-	probeFn = func(ctx context.Context, target string, timeout time.Duration) ProbeResult {
+	probeFn = func(ctx context.Context, target string, timeout time.Duration, _ bool) ProbeResult {
 		runtime.Gosched()
 		if ctx.Err() != nil {
 			return ProbeResult{Target: target, Error: ctx.Err()}
@@ -191,7 +191,7 @@ func TestEngineStress_ConcurrencyRaceDetector(t *testing.T) {
 func TestEngineStress_MaxTargetsExact(t *testing.T) {
 	original := probeFn
 	defer func() { probeFn = original }()
-	probeFn = func(ctx context.Context, target string, timeout time.Duration) ProbeResult {
+	probeFn = func(ctx context.Context, target string, timeout time.Duration, _ bool) ProbeResult {
 		return ProbeResult{Target: target, Error: fmt.Errorf("stub")}
 	}
 
