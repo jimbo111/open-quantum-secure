@@ -81,6 +81,14 @@ type ScanOptions struct {
 	TLSDenyPrivate bool     // reject RFC 1918 / loopback / link-local target IPs
 	TLSTimeout     int      // per-target dial+handshake timeout in seconds (0 = default 10s)
 	TLSCACert      string   // path to custom CA cert PEM for manual verification
+
+	// Network kill-switch: disables all outbound calls across all network engines.
+	// Equivalent to running in an air-gapped environment.
+	NoNetwork bool // when true, all Tier5Network engines return nil findings immediately
+
+	// CT log lookup options (Sprint 3).
+	CTLookupTargets []string // hostnames to query CT logs for cert algorithm discovery
+	CTLookupFromECH bool     // auto-query CT logs for hostnames found via ECH partial-inventory findings
 }
 
 // Engine is the interface every scanner engine must implement.
