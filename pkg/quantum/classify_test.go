@@ -441,3 +441,51 @@ func TestHybridRecommendations(t *testing.T) {
 		}
 	})
 }
+
+// TestClassifyAlgorithm_X25519KyberDraft_IsDeprecated pins the name-based
+// classification of X25519Kyber768Draft00 (and sibling variants) as RiskDeprecated,
+// not RiskVulnerable. Before this fix the "X25519" prefix in
+// quantumVulnerableFamilies matched first via extractBaseName, incorrectly
+// returning RiskVulnerable. The deprecated check now runs before the vulnerable
+// prefix match.
+//
+// Spec cross-reference: CLAUDE.md — "Deprecated Kyber drafts (X25519Kyber768Draft00)
+// are classified RiskDeprecated".
+func TestClassifyAlgorithm_X25519KyberDraft_IsDeprecated(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		algName   string
+		primitive string
+	}{
+		{"X25519Kyber768Draft00 kem", "X25519Kyber768Draft00", "kem"},
+		{"X25519Kyber768Draft00 key-exchange", "X25519Kyber768Draft00", "key-exchange"},
+		{"X25519Kyber768Draft00 empty-primitive", "X25519Kyber768Draft00", ""},
+		{"X25519Kyber512Draft00 kem", "X25519Kyber512Draft00", "kem"},
+		{"X25519Kyber1024Draft00 kem", "X25519Kyber1024Draft00", "kem"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ClassifyAlgorithm(tt.algName, tt.primitive, 0)
+
+			// Must be RiskDeprecated (not RiskVulnerable, not RiskSafe).
+			if got.Risk != RiskDeprecated {
+				t.Errorf("ClassifyAlgorithm(%q, %q, 0).Risk = %q, want %q (deprecated-check must fire before vulnerable-prefix-match)",
+					tt.algName, tt.primitive, got.Risk, RiskDeprecated)
+			}
+			// Severity for deprecated algorithms is Critical.
+			if got.Severity != SeverityCritical {
+				t.Errorf("ClassifyAlgorithm(%q, %q, 0).Severity = %q, want %q",
+					tt.algName, tt.primitive, got.Severity, SeverityCritical)
+			}
+			// HNDLRisk must be empty (deprecated, not a quantum harvest risk).
+			if got.HNDLRisk != "" {
+				t.Errorf("ClassifyAlgorithm(%q, %q, 0).HNDLRisk = %q, want empty",
+					tt.algName, tt.primitive, got.HNDLRisk)
+			}
+		})
+	}
+}

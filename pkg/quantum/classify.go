@@ -141,7 +141,17 @@ var quantumVulnerableFamilies = map[string]bool{
 	"KCDSA": true, "EC-KCDSA": true,
 }
 
-// deprecatedAlgorithms are classically broken regardless of quantum computing.
+// deprecatedAlgorithms are classically broken regardless of quantum computing,
+// plus deprecated IETF draft PQ hybrids that predate FIPS 203 standardisation.
+//
+// X25519Kyber768Draft00 (and its TLS codepoint aliases 0x6399/0x636D) must be
+// here so that name-based classification returns RiskDeprecated rather than
+// RiskVulnerable (which would occur if the "X25519" prefix in
+// quantumVulnerableFamilies matched first). The deprecated check runs before
+// the vulnerable-family prefix match (step 1 < step 3 in ClassifyAlgorithm).
+//
+// If further draft Kyber variants appear (e.g. X25519Kyber512Draft00,
+// X25519Kyber1024Draft00), add them here with the same pattern.
 var deprecatedAlgorithms = map[string]bool{
 	"MD5": true, "MD4": true, "MD2": true,
 	"SHA-1": true, "SHA1": true,
@@ -149,6 +159,12 @@ var deprecatedAlgorithms = map[string]bool{
 	"RC2": true, "RC4": true, "RC5": true,
 	"Blowfish": true,
 	"HAS-160": true,
+	// Deprecated IETF draft hybrid KEMs (pre-FIPS 203). These are NOT quantum-safe:
+	// the Kyber component was the pre-standardisation draft, superseded by ML-KEM.
+	// Callers should migrate to X25519MLKEM768 (codepoint 0x11EC).
+	"X25519Kyber768Draft00":  true,
+	"X25519Kyber512Draft00":  true,
+	"X25519Kyber1024Draft00": true,
 }
 
 // ClassifyAlgorithm assesses the quantum risk of a cryptographic algorithm.
