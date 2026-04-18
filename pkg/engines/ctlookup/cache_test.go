@@ -27,7 +27,7 @@ func TestCache_Miss(t *testing.T) {
 	}
 }
 
-func TestCache_TTLExpiry(t *testing.T) {
+func TestCache_TTLExpiry_Put(t *testing.T) {
 	c := newCTCache(10, 10*time.Millisecond)
 	c.put("example.com", []certRecord{{Serial: "xyz"}})
 

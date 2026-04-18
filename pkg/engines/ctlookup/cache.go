@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	defaultCacheSize = 256
-	defaultCacheTTL  = 24 * time.Hour
+	defaultCacheSize     = 256
+	defaultCacheTTL      = 24 * time.Hour
+	defaultEmptyCacheTTL = 15 * time.Minute // short TTL for empty results (often transient: 429 or outage)
 )
 
 type cacheEntry struct {
@@ -57,15 +58,25 @@ func (c *ctCache) get(key string) ([]certRecord, bool) {
 	return entry.value, true
 }
 
+// putShort stores records under key with the short (empty-result) TTL.
+// Use when value is empty to avoid caching transient misses for 24 hours.
+func (c *ctCache) putShort(key string, value []certRecord) {
+	c.putWithTTL(key, value, defaultEmptyCacheTTL)
+}
+
 // put stores records under key, evicting the LRU entry when at capacity.
 // Updating an existing key refreshes its TTL and moves it to the front.
 func (c *ctCache) put(key string, value []certRecord) {
+	c.putWithTTL(key, value, c.ttl)
+}
+
+func (c *ctCache) putWithTTL(key string, value []certRecord, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if el, ok := c.items[key]; ok {
 		entry := el.Value.(*cacheEntry)
 		entry.value = value
-		entry.expiry = time.Now().Add(c.ttl)
+		entry.expiry = time.Now().Add(ttl)
 		c.order.MoveToFront(el)
 		return
 	}
@@ -76,7 +87,7 @@ func (c *ctCache) put(key string, value []certRecord) {
 			delete(c.items, oldest.Value.(*cacheEntry).key)
 		}
 	}
-	entry := &cacheEntry{key: key, value: value, expiry: time.Now().Add(c.ttl)}
+	entry := &cacheEntry{key: key, value: value, expiry: time.Now().Add(ttl)}
 	el := c.order.PushFront(entry)
 	c.items[key] = el
 }
