@@ -1,10 +1,13 @@
 package tlsprobe
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
+	"os"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -109,15 +112,40 @@ func queryHTTPSRecordForECH(ctx context.Context, hostname string) bool {
 }
 
 // resolveSystemNS returns "ip:53" for the first nameserver in /etc/resolv.conf,
-// or falls back to "8.8.8.8:53" if it cannot be read.
+// or falls back to "1.1.1.1:53" then "8.8.8.8:53" if it cannot be read.
 func resolveSystemNS() string {
-	resolvers, err := net.DefaultResolver.LookupNS(context.Background(), ".")
-	if err == nil && len(resolvers) > 0 {
-		return net.JoinHostPort(resolvers[0].Host, "53")
+	return readSystemResolver()
+}
+
+// readSystemResolver returns the first nameserver in /etc/resolv.conf, or a
+// public fallback. On Windows there is no /etc/resolv.conf; the fallback is
+// used directly.
+func readSystemResolver() string {
+	if runtime.GOOS == "windows" {
+		return "1.1.1.1:53"
 	}
-	// Fallback: use Google Public DNS (will be filtered by DenyPrivate if needed
-	// at the engine level — ECH detection is best-effort).
-	return "8.8.8.8:53"
+	f, err := os.Open("/etc/resolv.conf")
+	if err != nil {
+		return "1.1.1.1:53"
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "nameserver") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				ip := fields[1]
+				// Validate it parses as an IP.
+				if net.ParseIP(ip) != nil {
+					return net.JoinHostPort(ip, "53")
+				}
+			}
+		}
+	}
+	// Fallback to Cloudflare then Google public DNS.
+	return "1.1.1.1:53"
 }
 
 // buildDNSQuery constructs a minimal RFC 1035 DNS query message.
