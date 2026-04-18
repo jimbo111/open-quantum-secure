@@ -242,6 +242,15 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 	if f.PQCMaturity != "" {
 		props["pqcMaturity"] = f.PQCMaturity
 	}
+	if f.PartialInventory {
+		props["partialInventory"] = f.PartialInventoryReason
+	}
+	if f.HandshakeVolumeClass != "" {
+		props["handshakeVolumeClass"] = f.HandshakeVolumeClass
+	}
+	if f.HandshakeBytes > 0 {
+		props["handshakeBytes"] = f.HandshakeBytes
+	}
 	result.Properties = props
 
 	return result

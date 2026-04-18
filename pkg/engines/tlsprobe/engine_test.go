@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -248,6 +249,118 @@ func TestEngine_MaxTargetsExceeded(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "too many targets") {
 		t.Errorf("error %q does not contain 'too many targets'", err.Error())
+	}
+}
+
+// TestEngine_SemaphoreBoundsConcurrency verifies that when more targets are given
+// than defaultConcurrency, at most defaultConcurrency probe calls are live at
+// any instant. The semaphore is acquired in the parent goroutine (M1 fix), so
+// any excess goroutines are prevented from even launching until a slot opens.
+func TestEngine_SemaphoreBoundsConcurrency(t *testing.T) {
+	const numTargets = 20
+	var live int64   // currently-executing probe calls
+	var maxLive int64 // peak observed
+
+	// Save and restore the real probeFn.
+	original := probeFn
+	defer func() { probeFn = original }()
+
+	probeFn = func(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
+		current := atomic.AddInt64(&live, 1)
+		// Track peak without a lock — atomic is sufficient here.
+		for {
+			old := atomic.LoadInt64(&maxLive)
+			if current <= old {
+				break
+			}
+			if atomic.CompareAndSwapInt64(&maxLive, old, current) {
+				break
+			}
+		}
+		// Simulate non-trivial work so that concurrent probes overlap.
+		time.Sleep(10 * time.Millisecond)
+		atomic.AddInt64(&live, -1)
+		return ProbeResult{Target: target, Error: context.DeadlineExceeded}
+	}
+
+	targets := make([]string, numTargets)
+	for i := range targets {
+		targets[i] = "192.0.2.1:443"
+	}
+
+	e := New()
+	opts := engines.ScanOptions{
+		TLSTargets:  targets,
+		TLSInsecure: true,
+		TLSTimeout:  2,
+	}
+
+	_, _ = e.Scan(context.Background(), opts)
+
+	if maxLive > defaultConcurrency {
+		t.Errorf("peak concurrent probes = %d, exceeds defaultConcurrency = %d",
+			maxLive, defaultConcurrency)
+	}
+}
+
+// TestEngine_CancellationPropagation verifies that when the context is cancelled
+// mid-scan, probes that have not yet started are skipped (context re-check inside
+// the goroutine), and the scan returns promptly.
+func TestEngine_CancellationPropagation(t *testing.T) {
+	var invocations int64
+
+	original := probeFn
+	defer func() { probeFn = original }()
+
+	// Block in the probe so we can cancel while some are running.
+	started := make(chan struct{})
+	probeFn = func(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
+		atomic.AddInt64(&invocations, 1)
+		select {
+		case started <- struct{}{}: // signal first invocation
+		default:
+		}
+		// Wait until context is cancelled or 5 s.
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+		}
+		return ProbeResult{Target: target, Error: ctx.Err()}
+	}
+
+	// 20 targets, defaultConcurrency=5.  After the first batch starts we cancel.
+	targets := make([]string, 20)
+	for i := range targets {
+		targets[i] = "192.0.2.1:443"
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		e := New()
+		opts := engines.ScanOptions{
+			TLSTargets:  targets,
+			TLSInsecure: true,
+			TLSTimeout:  10,
+		}
+		_, _ = e.Scan(ctx, opts)
+		close(done)
+	}()
+
+	// Wait for at least one probe to start, then cancel.
+	<-started
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Scan did not return within 3s after context cancellation")
+	}
+
+	// With cancellation we expect far fewer than 20 invocations.
+	if inv := atomic.LoadInt64(&invocations); inv >= 20 {
+		t.Errorf("expected fewer than 20 probe invocations after cancellation, got %d", inv)
 	}
 }
 

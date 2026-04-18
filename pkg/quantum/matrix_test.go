@@ -4,7 +4,8 @@ package quantum
 //
 // 6 sectors × 8 year values × 10 KEM algorithms = 480 sub-tests.
 // Each cell asserts:
-//  (a) Classical KEMs (RSA, ECDHE, Kyber768, draft, unknown) → HNDLImmediate + Mosca HNDL level
+//  (a) Classical KEMs (RSA, ECDHE, Kyber768, unknown) → HNDLImmediate + Mosca HNDL level
+//  (a2) Deprecated draft KEMs (X25519Kyber768Draft00) → RiskDeprecated, no HNDLRisk
 //  (b) Classical signatures (ECDSA) → HNDLDeferred + RiskVulnerable
 //  (c) Hybrid PQ KEMs (X25519MLKEM768, hyphenated, SecP256r1MLKEM768) → RiskSafe, no HNDL
 //  (d) Pure PQ KEM (ML-KEM-768) → RiskSafe, no HNDL
@@ -55,13 +56,15 @@ var kemSpecs = []kemSpec{
 		wantHNDLRisk: HNDLImmediate,
 	},
 	{
-		// X25519Kyber768Draft00: deprecated IETF draft hybrid. extractBaseName
-		// matches "X25519" prefix in quantumVulnerableFamilies → treated as
-		// classical X25519 key exchange → HNDLImmediate.
+		// X25519Kyber768Draft00: deprecated IETF draft hybrid (pre-FIPS 203 Kyber).
+		// Now in deprecatedAlgorithms so the deprecated check (step 1) fires before
+		// the quantumVulnerableFamilies prefix match (step 3). RiskDeprecated; no
+		// HNDLRisk because deprecated algorithms are classically broken, not
+		// specifically a quantum harvest risk.
 		algorithm:    "X25519Kyber768Draft00",
 		primitive:    "kem",
-		wantRisk:     RiskVulnerable,
-		wantHNDLRisk: HNDLImmediate,
+		wantRisk:     RiskDeprecated,
+		wantHNDLRisk: "",
 	},
 	{
 		// Unrecognized KEM with opaque name → conservative: HNDLImmediate.
@@ -224,8 +227,8 @@ func TestMatrix_ImmediateKEM_MoscaLevelSample(t *testing.T) {
 		{"code", 5, 10, "ECDHE-X25519", "key-exchange", HNDLLevelMedium},
 		// State (50y) + 100y crqc: 50+5-100=-45 → LOW — quantum era ends first
 		{"state", 50, 100, "RSA-2048", "kem", HNDLLevelLow},
-		// Infra (20y) + 30y crqc: 20+5-30=-5 → LOW
-		{"infra", 20, 30, "X25519Kyber768Draft00", "kem", HNDLLevelLow},
+		// Infra (20y) + 30y crqc: 20+5-30=-5 → LOW (use ECDHE to replace deprecated X25519Kyber768Draft00)
+		{"infra", 20, 30, "ECDHE", "key-exchange", HNDLLevelLow},
 		// Generic (10y) + 3y crqc: 10+5-3=12 → HIGH
 		{"generic", 10, 3, "unknown-algo-fallback", "kem", HNDLLevelHigh},
 	}

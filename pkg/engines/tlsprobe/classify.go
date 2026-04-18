@@ -353,6 +353,22 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 		ff = append(ff, f)
 	}
 
+	// If ECH was detected (S2.4), annotate every finding for this probe session
+	// as partial inventory. The cipher suite and cert algorithm are hidden behind
+	// the outer ClientHello; only size-based signals and the outer handshake are
+	// observable. Sprint 3 (CT log lookup) will attempt to recover the cert info.
+	if result.ECHDetected {
+		for i := range ff {
+			ff[i].PartialInventory = true
+			ff[i].PartialInventoryReason = "ECH_ENABLED"
+		}
+	}
+
+	// Apply session-level Sprint 2 volume fields to every finding.
+	for i := range ff {
+		applyVolumeFields(&ff[i], result)
+	}
+
 	return ff
 }
 
@@ -365,5 +381,23 @@ func applyGroupFields(f *findings.UnifiedFinding, groupID uint16, info quantum.G
 		f.NegotiatedGroupName = info.Name
 		f.PQCPresent = info.PQCPresent
 		f.PQCMaturity = info.Maturity
+	}
+}
+
+// applyVolumeFields copies the Sprint 2 size-based detection fields from a
+// ProbeResult onto a finding. These fields are session-level (same values for
+// every finding emitted for one probe) and describe the handshake byte volume
+// and its classifier output.
+func applyVolumeFields(f *findings.UnifiedFinding, result ProbeResult) {
+	if result.HandshakeVolumeClass != "" && result.HandshakeVolumeClass != "unknown" {
+		f.HandshakeVolumeClass = result.HandshakeVolumeClass
+	} else if result.HandshakeVolumeClass != "" {
+		// Preserve "unknown" so consumers can distinguish "not probed" (empty)
+		// from "probed but unclassified" ("unknown").
+		f.HandshakeVolumeClass = result.HandshakeVolumeClass
+	}
+	total := result.BytesIn + result.BytesOut
+	if total > 0 {
+		f.HandshakeBytes = total
 	}
 }

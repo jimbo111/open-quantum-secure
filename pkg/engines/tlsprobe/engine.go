@@ -83,11 +83,14 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		if ctx.Err() != nil {
 			break
 		}
+		sem <- struct{}{} // acquire in parent; blocks here if concurrency cap is reached
 		wg.Add(1)
 		go func(idx int, t string) {
 			defer wg.Done()
-			sem <- struct{}{}        // acquire
-			defer func() { <-sem }() // release
+			defer func() { <-sem }() // release when probe finishes
+			if ctx.Err() != nil {
+				return
+			}
 			results[idx] = probeFn(ctx, t, probeOpts)
 		}(i, target)
 	}
