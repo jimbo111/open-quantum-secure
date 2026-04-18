@@ -75,9 +75,10 @@ func (o *Orchestrator) EffectiveEngines(opts engines.ScanOptions) []engines.Engi
 	} else {
 		available = applyScanTypeFilter(available, opts.ScanType)
 	}
-	// Include Tier5Network engines when TLS, CT, or SSH targets are explicitly
-	// provided, even if they were excluded by tier/scanType filtering above.
-	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH || len(opts.SSHTargets) > 0 {
+	// Include Tier5Network engines when TLS, CT, SSH targets, or Zeek log paths
+	// are explicitly provided, even if they were excluded by tier/scanType filtering.
+	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH ||
+		len(opts.SSHTargets) > 0 || opts.ZeekSSLPath != "" || opts.ZeekX509Path != "" {
 		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
 	}
 	return available
