@@ -15,25 +15,28 @@ const engineName = "zeek-log"
 // Emits one finding per distinct algorithm observed in the record.
 func sslRecordToFindings(rec SSLRecord) []findings.UnifiedFinding {
 	var out []findings.UnifiedFinding
-	target := fmt.Sprintf("%s:%s", rec.RespHost, rec.RespPort)
+	// Sanitize attacker-controlled fields before they reach UnifiedFinding (B5).
+	target := sanitizeTarget(fmt.Sprintf("%s:%s", rec.RespHost, rec.RespPort))
 	if rec.ServerName != "" {
-		target = rec.ServerName
+		target = sanitizeTarget(rec.ServerName)
 	}
+	cipher := sanitizeZeekField(rec.Cipher)
+	curve := sanitizeZeekField(rec.Curve)
 
 	// cipher → algorithm (informative for TLS 1.2 KEM identity)
-	if rec.Cipher != "" {
-		prim := cipherPrimitive(rec.Cipher)
-		c := quantum.ClassifyAlgorithm(rec.Cipher, prim, 0)
-		f := buildFinding(rec.Cipher, prim, 0, c, target, rec.RespHost, rec.RespPort, "ssl.log/cipher")
+	if cipher != "" {
+		prim := cipherPrimitive(cipher)
+		c := quantum.ClassifyAlgorithm(cipher, prim, 0)
+		f := buildFinding(cipher, prim, 0, c, target, rec.RespHost, rec.RespPort, "ssl.log/cipher")
 		out = append(out, f)
 	}
 
 	// curve / key-share group
-	if rec.Curve != "" {
-		c := quantum.ClassifyAlgorithm(rec.Curve, "key-agree", 0)
-		f := buildFinding(rec.Curve, "key-agree", 0, c, target, rec.RespHost, rec.RespPort, "ssl.log/curve")
+	if curve != "" {
+		c := quantum.ClassifyAlgorithm(curve, "key-agree", 0)
+		f := buildFinding(curve, "key-agree", 0, c, target, rec.RespHost, rec.RespPort, "ssl.log/curve")
 		// Annotate PQC-presence for hybrid/pure-ML-KEM groups.
-		if gi, ok := quantum.ClassifyTLSGroup(tlsGroupCodepointByName(rec.Curve)); ok {
+		if gi, ok := quantum.ClassifyTLSGroup(tlsGroupCodepointByName(curve)); ok {
 			f.PQCPresent = gi.PQCPresent
 			f.PQCMaturity = gi.Maturity
 			f.NegotiatedGroupName = gi.Name
@@ -75,13 +78,13 @@ func sslRecordToFindings(rec SSLRecord) []findings.UnifiedFinding {
 // x509RecordToFindings converts an X509Record into UnifiedFindings.
 func x509RecordToFindings(rec X509Record) []findings.UnifiedFinding {
 	var out []findings.UnifiedFinding
-	// Use first SAN DNS entry as target, fallback to cert fuid.
-	target := rec.ID
+	// Use first SAN DNS entry as target, fallback to cert fuid. Sanitize (B5).
+	target := sanitizeTarget(rec.ID)
 	if rec.SANDNS != "" {
 		// san.dns may be comma-separated in TSV (set_separator ,)
 		parts := strings.SplitN(rec.SANDNS, ",", 2)
 		if parts[0] != "" {
-			target = parts[0]
+			target = sanitizeTarget(parts[0])
 		}
 	}
 
@@ -116,7 +119,8 @@ func buildFinding(algName, primitive string, keySize int, c quantum.Classificati
 	target, host, port, source string) findings.UnifiedFinding {
 	// File field encodes the logical source location so DedupeKey produces
 	// unique keys per (host, algorithm). Format: (zeek-log)/<target>#<alg>
-	filePath := fmt.Sprintf("(zeek-log)/%s#%s", target, algName)
+	// sanitizeTarget/sanitizeZeekField guard against URI fragmentation (B5).
+	filePath := fmt.Sprintf("(zeek-log)/%s#%s", sanitizeTarget(target), sanitizeZeekField(algName))
 
 	f := findings.UnifiedFinding{
 		Location: findings.Location{
@@ -152,6 +156,11 @@ func keyTypeToPrimitive(kt string) string {
 		return "signature"
 	case "dh":
 		return "key-agree"
+	// C5: post-standardization PQC key_type values Zeek may emit.
+	case "ml-dsa", "mldsa", "dilithium":
+		return "signature"
+	case "ml-kem", "mlkem", "kyber":
+		return "key-encap"
 	}
 	return ""
 }
