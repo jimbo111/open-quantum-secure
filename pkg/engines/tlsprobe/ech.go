@@ -50,9 +50,13 @@ const echSvcParamKey = uint16(0x0005)
 // timeout controls the DNS query deadline cap: if zero, defaults to 3s; if
 // positive but < 3s, the tighter value is used.
 //
+// denyPrivate mirrors --tls-strict: when true, a private/loopback system resolver
+// is bypassed in favour of public fallbacks (1.1.1.1:53, 8.8.8.8:53) so that no
+// traffic is sent to RFC 1918 addresses.
+//
 // Returns (true, source) when ECH is detected; (false, "") when not detected.
 // source is "dns-https-rr" or "tls-ext".
-func detectECH(ctx context.Context, hostname string, timeout time.Duration) (bool, string) {
+func detectECH(ctx context.Context, hostname string, timeout time.Duration, denyPrivate bool) (bool, string) {
 	// Short-circuit for IP-literal hostnames: HTTPS RRs are keyed on names,
 	// never bare IPs, so the query would always return NXDOMAIN after wasting
 	// up to `timeout` seconds. RFC 9460 §2.4.3 confirms this.
@@ -64,7 +68,7 @@ func detectECH(ctx context.Context, hostname string, timeout time.Duration) (boo
 	// We implement a minimal raw DNS query (Type=65) to avoid the stdlib
 	// limitation. Budget: kept under 100 LOC by querying only the first
 	// name server returned by the OS and parsing only the RDATA we need.
-	if ok := queryHTTPSRecordForECH(ctx, hostname, timeout); ok {
+	if ok := queryHTTPSRecordForECH(ctx, hostname, timeout, denyPrivate); ok {
 		return true, "dns-https-rr"
 	}
 
@@ -83,6 +87,11 @@ func detectECH(ctx context.Context, hostname string, timeout time.Duration) (boo
 	return false, ""
 }
 
+// publicFallbackNS are the DNS resolvers used when denyPrivate is true and the
+// system resolver is a private/loopback address. Cloudflare is tried first,
+// Google DNS is the secondary fallback.
+var publicFallbackNS = []string{"1.1.1.1:53", "8.8.8.8:53"}
+
 // queryHTTPSRecordForECH performs a raw DNS query for the HTTPS RR (type 65)
 // of hostname. It returns true when the response includes SvcParamKey 0x0005
 // (ECH config list), indicating the host supports ECH.
@@ -93,9 +102,32 @@ func detectECH(ctx context.Context, hostname string, timeout time.Duration) (boo
 //     retries the same query over TCP (RFC 7766 §6.2).
 //   - Parses only the RDATA portion minimally: walks SvcParams looking for key 5.
 //   - DNS failure modes (NXDOMAIN, timeout, SERVFAIL) all return false silently.
-func queryHTTPSRecordForECH(ctx context.Context, hostname string, timeout time.Duration) bool {
+//   - When denyPrivate is true, a private/loopback system resolver is bypassed
+//     in favour of publicFallbackNS to honour --tls-strict semantics.
+func queryHTTPSRecordForECH(ctx context.Context, hostname string, timeout time.Duration, denyPrivate bool) bool {
 	// Resolve the system's default nameserver address.
 	nsAddr := resolveSystemNS()
+
+	if denyPrivate {
+		// Validate the system resolver: if it is private/loopback, use public fallbacks.
+		host, _, err := net.SplitHostPort(nsAddr)
+		if err != nil || isPrivateIP(net.ParseIP(host)) {
+			// System resolver is private. Try public fallbacks in order.
+			nsAddr = ""
+			for _, fb := range publicFallbackNS {
+				fbHost, _, fbErr := net.SplitHostPort(fb)
+				if fbErr == nil && !isPrivateIP(net.ParseIP(fbHost)) {
+					nsAddr = fb
+					break
+				}
+			}
+			if nsAddr == "" {
+				// All fallbacks are also private (extremely unusual) — bail safely.
+				return false
+			}
+		}
+	}
+
 	if nsAddr == "" {
 		return false
 	}

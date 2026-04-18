@@ -24,7 +24,7 @@ import (
 // short-circuits before any DNS lookup.
 func TestDetectECH_IPLiteral_IPv4(t *testing.T) {
 	t.Parallel()
-	detected, src := detectECH(context.Background(), "192.0.2.1", 100*time.Millisecond)
+	detected, src := detectECH(context.Background(), "192.0.2.1", 100*time.Millisecond, false)
 	if detected {
 		t.Errorf("detectECH(IPv4 literal): want false, got true (src=%q)", src)
 	}
@@ -37,7 +37,7 @@ func TestDetectECH_IPLiteral_IPv4(t *testing.T) {
 // short-circuits before any DNS lookup.
 func TestDetectECH_IPLiteral_IPv6(t *testing.T) {
 	t.Parallel()
-	detected, src := detectECH(context.Background(), "2001:db8::1", 100*time.Millisecond)
+	detected, src := detectECH(context.Background(), "2001:db8::1", 100*time.Millisecond, false)
 	if detected {
 		t.Errorf("detectECH(IPv6 literal): want false, got true (src=%q)", src)
 	}
@@ -57,7 +57,7 @@ func TestDetectECH_EmptyHostname(t *testing.T) {
 	}()
 	// Empty hostname: net.ParseIP("") returns nil so it falls through to DNS path.
 	// The DNS path will fail immediately (empty label) and return false.
-	detected, src := detectECH(context.Background(), "", 50*time.Millisecond)
+	detected, src := detectECH(context.Background(), "", 50*time.Millisecond, false)
 	if detected {
 		t.Errorf("detectECH(empty): want false, got true (src=%q)", src)
 	}
@@ -74,7 +74,7 @@ func TestDetectECH_RootDot(t *testing.T) {
 			t.Fatalf("detectECH(\".\") panicked: %v", r)
 		}
 	}()
-	detected, src := detectECH(context.Background(), ".", 50*time.Millisecond)
+	detected, src := detectECH(context.Background(), ".", 50*time.Millisecond, false)
 	if detected {
 		t.Errorf("detectECH(\".\"): want false, got true (src=%q)", src)
 	}
@@ -101,7 +101,7 @@ func TestDetectECH_LongHostname(t *testing.T) {
 		}
 	}()
 	// Any result is acceptable; we only assert no panic.
-	_, _ = detectECH(context.Background(), hostname, 50*time.Millisecond)
+	_, _ = detectECH(context.Background(), hostname, 50*time.Millisecond, false)
 }
 
 // TestDetectECH_TrailingDot verifies that a hostname with a trailing dot
@@ -117,7 +117,7 @@ func TestDetectECH_TrailingDot(t *testing.T) {
 	}()
 	// Route to an IP so we short-circuit; trailing-dot hostnames that look like
 	// IPs won't parse, so it goes through the DNS path which will time out quickly.
-	_, _ = detectECH(context.Background(), "example.com.", 50*time.Millisecond)
+	_, _ = detectECH(context.Background(), "example.com.", 50*time.Millisecond, false)
 }
 
 // ── ScanBytesForECHExtension matrix ──────────────────────────────────────────

@@ -155,7 +155,8 @@ func probe(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
 	result.HandshakeVolumeClass = ClassifyHandshakeVolume(result.BytesIn + result.BytesOut).String()
 
 	// Detect ECH (S2.4) after handshake data is available.
-	echDetected, echSource := detectECH(ctx, host, opts.Timeout)
+	// Pass DenyPrivate so that --tls-strict prevents DNS queries to private resolvers.
+	echDetected, echSource := detectECH(ctx, host, opts.Timeout, opts.DenyPrivate)
 	result.ECHDetected = echDetected
 	result.ECHSource = echSource
 
