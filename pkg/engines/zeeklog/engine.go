@@ -6,11 +6,16 @@ package zeeklog
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 )
+
+// maxZeekRecords caps dedup map growth to prevent unbounded memory use on
+// adversarially large or pathological log files.
+const maxZeekRecords = 500_000
 
 // Engine reads Zeek ssl.log and x509.log to produce passive TLS PQC findings.
 // It is always available (pure Go, file-based) and never dials the network.
@@ -36,13 +41,12 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	var all []findings.UnifiedFinding
 
 	if opts.ZeekSSLPath != "" {
-		// Check context before each file to allow cancellation.
 		select {
 		case <-ctx.Done():
 			return all, ctx.Err()
 		default:
 		}
-		recs, err := readSSLLog(opts.ZeekSSLPath)
+		recs, err := readSSLLog(ctx, opts.ZeekSSLPath)
 		if err != nil {
 			return nil, fmt.Errorf("zeek-log: ssl.log: %w", err)
 		}
@@ -58,7 +62,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 			return all, ctx.Err()
 		default:
 		}
-		recs, err := readX509Log(opts.ZeekX509Path)
+		recs, err := readX509Log(ctx, opts.ZeekX509Path)
 		if err != nil {
 			return nil, fmt.Errorf("zeek-log: x509.log: %w", err)
 		}
@@ -71,32 +75,48 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	return all, nil
 }
 
-// readSSLLog opens the file at path (with transparent gzip) and parses ssl.log.
-func readSSLLog(path string) ([]SSLRecord, error) {
+// openLogFile opens path for reading with symlink/non-regular-file rejection and
+// transparent gzip decompression. The returned ReadCloser is always size-capped
+// at maxDecompressedBytes. Caller must call Close() on the returned value.
+func openLogFile(path string) (io.ReadCloser, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("zeeklog: refuses to follow symlink: %s", path)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("zeeklog: not a regular file: %s", path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 	r, err := openMaybeGzip(f, path)
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return r, nil
+}
+
+// readSSLLog opens the file at path (with transparent gzip) and parses ssl.log.
+func readSSLLog(ctx context.Context, path string) ([]SSLRecord, error) {
+	r, err := openLogFile(path)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
-	return parseSSLLog(r)
+	return parseSSLLog(ctx, r)
 }
 
 // readX509Log opens the file at path (with transparent gzip) and parses x509.log.
-func readX509Log(path string) ([]X509Record, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	r, err := openMaybeGzip(f, path)
+func readX509Log(ctx context.Context, path string) ([]X509Record, error) {
+	r, err := openLogFile(path)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
-	return parseX509Log(r)
+	return parseX509Log(ctx, r)
 }
