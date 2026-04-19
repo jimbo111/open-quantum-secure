@@ -51,24 +51,39 @@ func findingToCSVRecord(f findings.UnifiedFinding) []string {
 		handshakeBytes = strconv.FormatInt(f.HandshakeBytes, 10)
 	}
 
+	nf := neutralizeFormula
 	return []string{
-		string(f.Severity),
-		string(f.Confidence),
-		algName,
-		primitive,
+		nf(string(f.Severity)),
+		nf(string(f.Confidence)),
+		nf(algName),
+		nf(primitive),
 		keySize,
-		string(f.QuantumRisk),
+		nf(string(f.QuantumRisk)),
 		strconv.FormatBool(f.PQCPresent),
-		f.PQCMaturity,
-		f.NegotiatedGroupName,
-		f.HandshakeVolumeClass,
+		nf(f.PQCMaturity),
+		nf(f.NegotiatedGroupName),
+		nf(f.HandshakeVolumeClass),
 		handshakeBytes,
-		f.Location.File,
+		nf(f.Location.File),
 		strconv.Itoa(f.Location.Line),
-		f.SourceEngine,
-		string(f.Reachable),
+		nf(f.SourceEngine),
+		nf(string(f.Reachable)),
 		strconv.FormatBool(f.PartialInventory),
-		f.PartialInventoryReason,
-		f.DedupeKey(),
+		nf(f.PartialInventoryReason),
+		nf(f.DedupeKey()),
 	}
+}
+
+// neutralizeFormula prepends a single quote to fields whose first character
+// could trigger formula execution in spreadsheet applications (Excel DDE,
+// Google Sheets WEBSERVICE, etc.). The OWASP CSV injection defence.
+func neutralizeFormula(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
 }

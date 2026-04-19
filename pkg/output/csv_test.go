@@ -231,6 +231,43 @@ func TestWriteCSV_ThreeFindings(t *testing.T) {
 	}
 }
 
+// TestWriteCSV_FormulaInjectionNeutralized verifies that fields starting with
+// formula-triggering characters are prefixed with a single quote.
+func TestWriteCSV_FormulaInjectionNeutralized(t *testing.T) {
+	result := ScanResult{
+		Findings: []findings.UnifiedFinding{
+			{
+				Location:     findings.Location{File: "=cmd", Line: 1},
+				Confidence:   findings.ConfidenceHigh,
+				SourceEngine: "+engine",
+				Reachable:    findings.ReachableYes,
+				Algorithm: &findings.Algorithm{
+					Name:      "-RSA",
+					Primitive: "signature",
+				},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteCSV(&buf, result); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(buf.String(), "\r\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+	fields := parseCSVLine(strings.TrimRight(lines[1], "\r"))
+	if fields[2] != "'-RSA" { // algorithm
+		t.Errorf("algorithm field = %q, want \"'-RSA\"", fields[2])
+	}
+	if fields[11] != "'=cmd" { // file
+		t.Errorf("file field = %q, want \"'=cmd\"", fields[11])
+	}
+	if fields[13] != "'+engine" { // sourceEngine
+		t.Errorf("sourceEngine field = %q, want \"'+engine\"", fields[13])
+	}
+}
+
 // parseCSVLine splits a CSV line by commas, respecting quoted fields.
 // This is a simplified parser for test verification only.
 func parseCSVLine(line string) []string {
