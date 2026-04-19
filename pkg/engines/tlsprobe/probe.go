@@ -225,7 +225,11 @@ func probe(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
 			if pqcName := quantum.LookupPQCSigAlgName(sigAlgOID); pqcName != "" {
 				sigAlgName = pqcName
 			} else if sigAlgOID != "" {
-				sigAlgName = "unknown-" + sigAlgOID
+				oid := sigAlgOID
+				if len(oid) > 128 {
+					oid = oid[:128]
+				}
+				sigAlgName = "unknown-" + oid
 			}
 		}
 		result.LeafCertSigAlgo = sigAlgName
