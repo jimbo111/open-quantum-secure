@@ -38,13 +38,20 @@ var fullEnumGroups = []uint16{
 // one target during --enumerate-groups.
 type GroupEnumResult struct {
 	// AcceptedGroups are codepoints for which the server responded with a
-	// ServerHello (group accepted for key exchange).
+	// ServerHello (group accepted for key exchange). Populated with the server's
+	// SelectedGroup from the ServerHello key_share (which for Accepted is
+	// always equal to the probed group).
 	AcceptedGroups []uint16
-	// HRRGroups are codepoints named by the server via HelloRetryRequest.
-	// HRR means "supported but not my first choice" — positive PQC evidence.
+	// HRRGroups are codepoints NAMED BY THE SERVER via HelloRetryRequest.
+	// HRR means "supported but not my first choice — please retry with this
+	// group instead". HRR is positive PQC evidence when the named group is a
+	// PQC codepoint. Populated with parsed.SelectedGroup, NOT the probed group
+	// (the probed group is what we OFFERED; the named group is what the server
+	// WILL ACCEPT on retry). Zero-valued selections are dropped.
 	HRRGroups []uint16
 	// RejectedGroups are codepoints for which the server sent a TLS Alert,
-	// indicating the group is not supported.
+	// indicating the group is not supported. Populated with the probed group
+	// since no server-chosen value is available on alert.
 	RejectedGroups []uint16
 }
 
@@ -70,9 +77,25 @@ func enumerateGroups(ctx context.Context, addr, sni string, timeout time.Duratio
 	for _, r := range rawResults {
 		switch r.Outcome {
 		case rawhello.OutcomeAccepted:
-			result.AcceptedGroups = append(result.AcceptedGroups, r.GroupID)
+			// On Accepted, SelectedGroup == probed GroupID (server echoes the
+			// key_share we offered). Either works; use SelectedGroup for
+			// consistency with OutcomeHRR.
+			if r.SelectedGroup != 0 {
+				result.AcceptedGroups = append(result.AcceptedGroups, r.SelectedGroup)
+			} else {
+				// Defensive fallback if parser didn't populate SelectedGroup.
+				result.AcceptedGroups = append(result.AcceptedGroups, r.GroupID)
+			}
 		case rawhello.OutcomeHRR:
-			result.HRRGroups = append(result.HRRGroups, r.GroupID)
+			// CRITICAL: use SelectedGroup (what the SERVER named in HRR),
+			// NOT GroupID (what we offered). A server rejecting X25519 in favor
+			// of X25519MLKEM768 should record X25519MLKEM768 as a supported
+			// group, not X25519. Matches the S7 DeepProbe pattern at
+			// engine.go:137. Zero SelectedGroup means the HRR lacked a
+			// key_share hint — drop rather than record a false positive.
+			if r.SelectedGroup != 0 {
+				result.HRRGroups = append(result.HRRGroups, r.SelectedGroup)
+			}
 		case rawhello.OutcomeAlert:
 			result.RejectedGroups = append(result.RejectedGroups, r.GroupID)
 		// OutcomeError: transport/protocol failure — omitted from classification.

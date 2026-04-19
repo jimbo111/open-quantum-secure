@@ -240,7 +240,16 @@ func TestEnumerateGroups_AcceptedGroup(t *testing.T) {
 
 // TestEnumerateGroups_HRRGroup covers the OutcomeHRR branch
 // (server sends HelloRetryRequest for the first probe).
+//
+// Regression for Bug 1 (cross-sprint review): HRRGroups must contain the
+// SERVER-NAMED codepoint (parsed.SelectedGroup, 0x11ec), NOT the PROBED
+// codepoint (fullEnumGroups[0] = 0x001d X25519). Before the fix, r.GroupID
+// was appended instead, producing "server accepts X25519 via HRR" when the
+// server actually wanted X25519MLKEM768 — a false positive in SupportedGroups.
 func TestEnumerateGroups_HRRGroup(t *testing.T) {
+	const serverNamedGroup uint16 = 0x11ec // X25519MLKEM768
+	const probedFirstGroup uint16 = 0x001d // X25519 (fullEnumGroups[0])
+
 	responded := make(chan struct{}, 1)
 	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
 		buf := make([]byte, 8192)
@@ -248,16 +257,28 @@ func TestEnumerateGroups_HRRGroup(t *testing.T) {
 		c.Read(buf)                                                //nolint:errcheck
 		select {
 		case responded <- struct{}{}:
-			sendMinimalHRR(c, 0x11ec) // first probe: HRR selecting X25519MLKEM768
+			sendMinimalHRR(c, serverNamedGroup) // HRR names X25519MLKEM768
 		default:
 			sendAlertRecord(c)
 		}
 	})
 	result, _ := enumerateGroups(context.Background(), addr, "", 2*time.Second)
 	if len(result.HRRGroups) == 0 {
-		t.Error("expected ≥1 HRR group when server sends HRR for first probe")
+		t.Fatal("expected ≥1 HRR group when server sends HRR for first probe")
 	}
 	if len(result.AcceptedGroups) > 0 {
 		t.Errorf("expected 0 accepted groups, got %d", len(result.AcceptedGroups))
+	}
+	// Bug 1 regression assertion: first HRR entry must be server-named, not probed.
+	if result.HRRGroups[0] != serverNamedGroup {
+		t.Errorf("HRRGroups[0] = 0x%04x, want 0x%04x (server-named, not probed 0x%04x)",
+			result.HRRGroups[0], serverNamedGroup, probedFirstGroup)
+	}
+	// Extra guard: the probed group must NOT appear in HRRGroups unless the
+	// server also named it, which this mock does not do.
+	for _, g := range result.HRRGroups {
+		if g == probedFirstGroup {
+			t.Errorf("HRRGroups contains probed codepoint 0x%04x — indicates Bug 1 regression", g)
+		}
 	}
 }
