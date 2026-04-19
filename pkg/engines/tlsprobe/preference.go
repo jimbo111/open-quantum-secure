@@ -31,6 +31,24 @@ type ServerPreferenceResult struct {
 	Mode string
 }
 
+// classicalECDHGroups is the set of IANA SupportedGroup codepoints that use
+// only classical ECDH key material. Used by detectServerGroupPreference to
+// build a mixed key_share offering (1 classical + up to 2 hybrid/PQC).
+var classicalECDHGroups = map[uint16]bool{
+	0x001d: true, // x25519
+	0x0017: true, // secp256r1
+	0x0018: true, // secp384r1
+	0x0019: true, // secp521r1
+}
+
+// maxPrefKeyShares caps the number of key_share entries in each preference
+// probe ClientHello. ≥3 hybrid key shares push ClientHello past 7 KB,
+// which trips some middlebox rate-limiters and inflates RTT on the probe
+// connection. The cap preserves the preference signal while keeping the
+// ClientHello within a safe size. Tradeoff: servers that only accept groups
+// not in the capped subset may return Alert, causing PrefIndeterminate.
+const maxPrefKeyShares = 3
+
 // detectServerGroupPreference determines whether the server has a fixed group
 // preference or respects the client's offered ordering.
 //
@@ -41,6 +59,9 @@ type ServerPreferenceResult struct {
 // If both probes return the same selected group → PrefServerFixed.
 // If they differ → PrefClientOrder.
 // <2 valid groups or transport error → PrefIndeterminate.
+//
+// At most maxPrefKeyShares (3) groups are offered per probe, preferring a
+// mix of 1 classical ECDH + 2 hybrid/PQC to keep ClientHello below 7 KB.
 //
 // addr must be a pre-resolved "ip:port" string (SSRF guard applied here).
 // ctx bounds overall time; timeout bounds each individual TCP connection.
@@ -72,6 +93,13 @@ func detectServerGroupPreference(ctx context.Context, addr, sni string, timeout 
 	}
 	if len(validGroupsFwd) < 2 {
 		// Fewer than 2 valid groups after filtering — indeterminate.
+		return indeterminate, nil
+	}
+
+	// Cap to maxPrefKeyShares (3) to keep ClientHello below 7 KB.
+	// Prefer 1 classical + up to 2 hybrid/PQC for a representative mix.
+	validGroupsFwd, keySharesFwd = selectPrefGroups(validGroupsFwd, keySharesFwd)
+	if len(validGroupsFwd) < 2 {
 		return indeterminate, nil
 	}
 
@@ -146,6 +174,58 @@ func probeOrder(ctx context.Context, addr, sni string, timeout time.Duration, gr
 	}
 	// Both ServerHello and HRR carry SelectedGroup = the server's chosen group.
 	return parsed.SelectedGroup, nil
+}
+
+// selectPrefGroups caps groups + keyShares to maxPrefKeyShares entries,
+// preferring 1 classical ECDH + up to 2 hybrid/PQC for a representative mix.
+// It preserves the input ordering within each tier.
+func selectPrefGroups(groups []uint16, keyShares []rawhello.KeyShareEntry) ([]uint16, []rawhello.KeyShareEntry) {
+	if len(groups) <= maxPrefKeyShares {
+		return groups, keyShares
+	}
+
+	var selGroups []uint16
+	var selShares []rawhello.KeyShareEntry
+
+	classicalQuota, hybridQuota := 1, maxPrefKeyShares-1
+
+	// First pass: pick classical groups up to quota.
+	for i, g := range groups {
+		if classicalECDHGroups[g] && classicalQuota > 0 {
+			selGroups = append(selGroups, g)
+			selShares = append(selShares, keyShares[i])
+			classicalQuota--
+		}
+	}
+	// Second pass: fill remaining slots with hybrid/PQC groups.
+	for i, g := range groups {
+		if len(selGroups) >= maxPrefKeyShares {
+			break
+		}
+		if !classicalECDHGroups[g] && hybridQuota > 0 {
+			selGroups = append(selGroups, g)
+			selShares = append(selShares, keyShares[i])
+			hybridQuota--
+		}
+	}
+	// If still under cap (e.g. no classical groups), fill from any remaining.
+	for i, g := range groups {
+		if len(selGroups) >= maxPrefKeyShares {
+			break
+		}
+		alreadySelected := false
+		for _, sg := range selGroups {
+			if sg == g {
+				alreadySelected = true
+				break
+			}
+		}
+		if !alreadySelected {
+			selGroups = append(selGroups, g)
+			selShares = append(selShares, keyShares[i])
+		}
+	}
+	return selGroups, selShares
 }
 
 // reverseGroups returns a new slice with the elements of s in reverse order.
