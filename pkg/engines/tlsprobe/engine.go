@@ -146,18 +146,26 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		}
 	}
 
+	// maxProbes and per-target probe counts span S8 enumeration and S9 TLS 1.2
+	// fallback so that both passes share the same budget.
+	// Default 30 guards against the ~39-probe worst case
+	// (1 initial + 6 deep + 13 group-enum + 17 sigalg + 2 preference + 1 tls12).
+	maxProbes := opts.MaxProbesPerTarget
+	if maxProbes == 0 {
+		maxProbes = 30
+	}
+	probesUsedPerTarget := make([]int, len(results))
+	for idx := range probesUsedPerTarget {
+		probesUsedPerTarget[idx] = 1 // initial TLS probe
+		if opts.DeepProbe {
+			probesUsedPerTarget[idx] += len(rawhello.DefaultProbeGroups())
+		}
+	}
+
 	// Sprint 8 enumeration passes: run after deep-probe so addr is already resolved.
 	// Passes run sequentially per target (same rate-limit rationale as deep-probe).
 	// Total per-target budget: 60 s enforced by a child context.
 	if opts.EnumerateGroups || opts.EnumerateSigAlgs || opts.DetectServerPreference {
-		// maxProbes: total TCP connection cap across all passes per target.
-		// 0 = unlimited. Default 30 guards against the ~39-probe worst case
-		// (1 initial + 6 deep + 13 group-enum + 17 sigalg + 2 preference).
-		maxProbes := opts.MaxProbesPerTarget
-		if maxProbes == 0 {
-			maxProbes = 30
-		}
-
 		for i := range results {
 			r := &results[i]
 			if r.Error != nil || r.ResolvedIP == "" {
@@ -173,15 +181,8 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 			}
 			addr := net.JoinHostPort(r.ResolvedIP, port)
 
-			// Track probe connections used for this target.
-			// Initial probe + deep-probe (if enabled) already ran before this block.
-			probesUsed := 1 // initial TLS probe
-			if opts.DeepProbe {
-				probesUsed += len(rawhello.DefaultProbeGroups())
-			}
-
 			budgetExhausted := func() bool {
-				return probesUsed >= maxProbes
+				return probesUsedPerTarget[i] >= maxProbes
 			}
 			markBudgetExhausted := func() {
 				r.EnumTruncated = true
@@ -204,7 +205,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 				} else {
 					gr, gErr := enumerateGroups(enumCtx, addr, host, timeout)
 					hasGroups := len(gr.AcceptedGroups) > 0 || len(gr.HRRGroups) > 0
-					probesUsed += len(gr.AcceptedGroups) + len(gr.HRRGroups) + len(gr.RejectedGroups)
+					probesUsedPerTarget[i] += len(gr.AcceptedGroups) + len(gr.HRRGroups) + len(gr.RejectedGroups)
 					if gErr != nil && !hasGroups {
 						if opts.Verbose {
 							fmt.Fprintf(os.Stderr, "enumerate-groups: %s: %v\n", r.Target, gErr)
@@ -234,7 +235,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 					markBudgetExhausted()
 				} else {
 					sr, sErr := enumerateSigAlgs(enumCtx, addr, host, timeout)
-					probesUsed += len(sr.AcceptedSigAlgs) + len(sr.RejectedSigAlgs)
+					probesUsedPerTarget[i] += len(sr.AcceptedSigAlgs) + len(sr.RejectedSigAlgs)
 					if sErr != nil && len(sr.AcceptedSigAlgs) == 0 {
 						if opts.Verbose {
 							fmt.Fprintf(os.Stderr, "enumerate-sigalgs: %s: %v\n", r.Target, sErr)
@@ -258,9 +259,9 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 					prefCandidates = r.DeepProbeAcceptedGroups
 				}
 				// Preference probe costs 2 connections (forward + reverse ordering).
-				if len(prefCandidates) >= 2 && !budgetExhausted() && probesUsed+2 <= maxProbes {
+				if len(prefCandidates) >= 2 && !budgetExhausted() && probesUsedPerTarget[i]+2 <= maxProbes {
 					prefResult, pErr := detectServerGroupPreference(enumCtx, addr, host, timeout, prefCandidates)
-					probesUsed += 2
+					probesUsedPerTarget[i] += 2
 					if pErr != nil {
 						if opts.Verbose {
 							fmt.Fprintf(os.Stderr, "detect-server-preference: %s: %v\n", r.Target, pErr)
@@ -290,10 +291,6 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	// detect downgrade vulnerability. Runs sequentially (same rate-limit rationale
 	// as deep-probe). Counts +1 toward MaxProbesPerTarget per PQC target.
 	if !opts.SkipTLS12Fallback {
-		maxProbes := opts.MaxProbesPerTarget
-		if maxProbes == 0 {
-			maxProbes = 30
-		}
 		for i := range results {
 			r := &results[i]
 			if r.Error != nil || r.ResolvedIP == "" {
@@ -309,9 +306,10 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 				continue
 			}
 
-			// Respect the probe budget.
-			if maxProbes > 0 && r.EnumTruncated {
-				// Budget already exhausted by S8 enumeration; skip.
+			// Respect the probe budget (shared with S8 enumeration passes).
+			if maxProbes > 0 && probesUsedPerTarget[i] >= maxProbes {
+				r.EnumTruncated = true
+				r.EnumTruncationReason = "PROBE_BUDGET_EXHAUSTED"
 				continue
 			}
 
@@ -332,6 +330,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 				}
 				continue
 			}
+			probesUsedPerTarget[i]++
 			r.AcceptedTLS12 = tls12Res.AcceptedTLS12
 			r.TLS12CipherSuite = tls12Res.CipherSuiteID
 			r.TLS12CipherSuiteName = tls12Res.CipherSuiteName
