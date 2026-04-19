@@ -10,7 +10,7 @@ import (
 // TestFullSigAlgList_Sanity verifies the sig alg list has no duplicates and
 // covers the major algorithm families.
 func TestFullSigAlgList_Sanity(t *testing.T) {
-	const want = 14
+	const want = 17
 	if got := len(fullSigAlgList); got != want {
 		t.Errorf("len(fullSigAlgList) = %d, want %d", got, want)
 	}
@@ -23,6 +23,12 @@ func TestFullSigAlgList_Sanity(t *testing.T) {
 		seen[s] = true
 	}
 
+	// ML-DSA (PQ) must be present.
+	for _, s := range []uint16{0x0904, 0x0905, 0x0906} {
+		if !seen[s] {
+			t.Errorf("mldsa sig alg 0x%04x missing from fullSigAlgList", s)
+		}
+	}
 	// RSA-PSS (modern) must be present.
 	for _, s := range []uint16{0x0804, 0x0805, 0x0806} {
 		if !seen[s] {
@@ -46,6 +52,9 @@ func TestSigAlgName_KnownSchemes(t *testing.T) {
 		scheme uint16
 		want   string
 	}{
+		{0x0904, "mldsa44"},
+		{0x0905, "mldsa65"},
+		{0x0906, "mldsa87"},
 		{0x0804, "rsa_pss_rsae_sha256"},
 		{0x0403, "ecdsa_secp256r1_sha256"},
 		{0x0807, "ed25519"},

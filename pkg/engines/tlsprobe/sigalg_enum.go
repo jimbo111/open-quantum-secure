@@ -10,11 +10,23 @@ import (
 )
 
 // fullSigAlgList is the comprehensive list of TLS 1.3 SignatureScheme codepoints
-// probed during --enumerate-sigalgs. Covers RSA-PSS, ECDSA, EdDSA, and legacy
-// RSA-PKCS1 schemes per IANA TLS SignatureScheme registry (RFC 8446 §4.2.3).
-// PQ signature algorithms are not yet assigned stable IANA codepoints; this list
-// will be extended in a future sprint as IANA assignments are finalised.
+// probed during --enumerate-sigalgs. Covers ML-DSA (FIPS 204 / draft-tls-mldsa),
+// RSA-PSS, ECDSA, EdDSA, and legacy RSA-PKCS1 per IANA TLS SignatureScheme registry.
+//
+// ML-DSA codepoints (0x0904–0x0906) are from draft-ietf-tls-mldsa. Servers that
+// support post-quantum signatures will accept these; classical servers will Alert.
+//
+// TODO(sprint-8-followup): after a successful full handshake, inspect
+// cert.SignatureAlgorithm (via crypto/x509) for a definitive server sigalg signal.
+// Our current raw probe can only infer acceptance from the presence or absence of
+// an Alert — it cannot read CertificateVerify because TLS 1.3 encrypts it.
 var fullSigAlgList = []uint16{
+	// ML-DSA (FIPS 204, draft-ietf-tls-mldsa) — PQ signature algorithms.
+	// Accept/reject signal is weaker than group enumeration: we cannot decrypt
+	// CertificateVerify to confirm the server actually used the scheme.
+	0x0904, // mldsa44 (ML-DSA security level 2)
+	0x0905, // mldsa65 (ML-DSA security level 3)
+	0x0906, // mldsa87 (ML-DSA security level 5)
 	// RSA-PSS with rsaEncryption key (modern, recommended).
 	0x0804, // rsa_pss_rsae_sha256
 	0x0805, // rsa_pss_rsae_sha384
@@ -161,6 +173,9 @@ func probeSigAlg(ctx context.Context, addr, sni string, timeout time.Duration, s
 // Returns a hex string for unknown codepoints.
 func SigAlgName(scheme uint16) string {
 	names := map[uint16]string{
+		0x0904: "mldsa44",
+		0x0905: "mldsa65",
+		0x0906: "mldsa87",
 		0x0804: "rsa_pss_rsae_sha256",
 		0x0805: "rsa_pss_rsae_sha384",
 		0x0806: "rsa_pss_rsae_sha512",
