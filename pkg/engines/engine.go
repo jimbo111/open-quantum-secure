@@ -116,6 +116,12 @@ type ScanOptions struct {
 	// Sprint 8 flags are enabled simultaneously (worst case ~39 connections).
 	MaxProbesPerTarget int
 
+	// SkipTLS12Fallback disables the TLS 1.2 fallback probe (Sprint 9, Feature 3).
+	// When false (the default), after a primary TLS 1.3 probe that detects PQC
+	// key exchange, the engine runs a secondary TLS 1.2 handshake to detect
+	// downgrade vulnerabilities. Set to true to suppress this extra connection.
+	SkipTLS12Fallback bool
+
 	// Verbose enables detailed progress logging to stderr. When false (the
 	// default), enum pass progress is suppressed to avoid leaking inventory
 	// counts (accepted groups, preferred codepoints) into CI logs.

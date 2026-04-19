@@ -16,6 +16,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe/rawhello"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
+	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
 )
 
 const (
@@ -281,6 +282,59 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 
 			enumCancel()
 			<-sem // release semaphore slot after all enum passes for this target
+		}
+	}
+
+	// TLS 1.2 fallback probe (Sprint 9, Feature 3): for each target that
+	// negotiated a PQC key-share via TLS 1.3, attempt a TLS 1.2 handshake to
+	// detect downgrade vulnerability. Runs sequentially (same rate-limit rationale
+	// as deep-probe). Counts +1 toward MaxProbesPerTarget per PQC target.
+	if !opts.SkipTLS12Fallback {
+		maxProbes := opts.MaxProbesPerTarget
+		if maxProbes == 0 {
+			maxProbes = 30
+		}
+		for i := range results {
+			r := &results[i]
+			if r.Error != nil || r.ResolvedIP == "" {
+				continue
+			}
+			if ctx.Err() != nil {
+				break
+			}
+
+			// Only probe targets that negotiated a PQC key-share in TLS 1.3.
+			groupInfo, groupKnown := quantum.ClassifyTLSGroup(r.NegotiatedGroupID)
+			if !groupKnown || !groupInfo.PQCPresent {
+				continue
+			}
+
+			// Respect the probe budget.
+			if maxProbes > 0 && r.EnumTruncated {
+				// Budget already exhausted by S8 enumeration; skip.
+				continue
+			}
+
+			host, port, err := parseHostPort(r.Target)
+			if err != nil {
+				continue
+			}
+			addr := net.JoinHostPort(r.ResolvedIP, port)
+
+			// Acquire per-target semaphore slot (Sprint 2, 5-concurrent cap).
+			sem <- struct{}{}
+			tls12Res, tls12Err := tls12probeFn(ctx, addr, host, timeout, probeOpts.DenyPrivate)
+			<-sem
+
+			if tls12Err != nil {
+				if opts.Verbose {
+					fmt.Fprintf(os.Stderr, "tls12-fallback: %s: %v\n", r.Target, tls12Err)
+				}
+				continue
+			}
+			r.AcceptedTLS12 = tls12Res.AcceptedTLS12
+			r.TLS12CipherSuite = tls12Res.CipherSuiteID
+			r.TLS12CipherSuiteName = tls12Res.CipherSuiteName
 		}
 	}
 
