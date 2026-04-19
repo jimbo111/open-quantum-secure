@@ -38,6 +38,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/configscanner"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/ctlookup"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/sshprobe"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/suricatalog"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/zeeklog"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cdxgen"
@@ -145,7 +146,10 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 	// Reads ssl.log + x509.log produced by Zeek network monitoring.
 	zeek := zeeklog.New()
 
-	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct, sshp, zeek)
+	// Tier 5: Suricata eve.json log ingestion engine (pure Go, always available; Sprint 6).
+	suri := suricatalog.New()
+
+	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct, sshp, zeek, suri)
 }
 
 // engineVersionsHash computes a stable SHA-256 hex digest over the
@@ -378,6 +382,7 @@ func scanCmd() *cobra.Command {
 		skipTLS12Fallback bool
 		zeekSSLPath       string
 		zeekX509Path      string
+		suricataEvePath   string
 	)
 
 	cmd := &cobra.Command{
@@ -512,12 +517,16 @@ Example with data lifetime adjustment for healthcare:
 				}
 			}
 
-			// Validate --zeek-*-log paths (A3).
+			// Validate --zeek-*-log paths (Sprint 5 A3).
 			if err := validateZeekLogPath(zeekSSLPath); err != nil {
 				return fmt.Errorf("invalid --zeek-ssl-log: %w", err)
 			}
 			if err := validateZeekLogPath(zeekX509Path); err != nil {
 				return fmt.Errorf("invalid --zeek-x509-log: %w", err)
+			}
+			// Validate --suricata-eve path (Sprint 6 null-byte guard).
+			if err := validateSuricataEvePath(suricataEvePath); err != nil {
+				return fmt.Errorf("invalid --suricata-eve: %w", err)
 			}
 
 			orch := buildOrchestrator()
@@ -567,6 +576,7 @@ Example with data lifetime adjustment for healthcare:
 				SSHDenyPrivate:         sshStrict,
 				ZeekSSLPath:            zeekSSLPath,
 				ZeekX509Path:           zeekX509Path,
+				SuricataEvePath:        suricataEvePath,
 			}
 
 			if incremental && noCache {
@@ -775,6 +785,9 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().StringVar(&zeekSSLPath, "zeek-ssl-log", "", "Path to Zeek ssl.log (TSV, JSON, or .gz) for passive TLS PQC inventory")
 	cmd.Flags().StringVar(&zeekX509Path, "zeek-x509-log", "", "Path to Zeek x509.log (TSV, JSON, or .gz) for passive certificate PQC inventory")
 
+	// Suricata log ingestion flags (Sprint 6)
+	cmd.Flags().StringVar(&suricataEvePath, "suricata-eve", "", "Path to Suricata eve.json (plain or .gz) for passive TLS PQC inventory")
+
 	// HNDL Mosca sector preset flag
 	cmd.Flags().StringVar(&sector, "sector", "",
 		`Industry sector preset for Mosca HNDL shelf-life (case-insensitive).
@@ -823,6 +836,7 @@ func diffCmd() *cobra.Command {
 		skipTLS12Fallback bool
 		zeekSSLPath       string
 		zeekX509Path      string
+		suricataEvePath   string
 	)
 
 	cmd := &cobra.Command{
@@ -963,12 +977,16 @@ Example:
 				}
 			}
 
-			// Validate --zeek-*-log paths (A3).
+			// Validate --zeek-*-log paths (Sprint 5 A3).
 			if err := validateZeekLogPath(zeekSSLPath); err != nil {
 				return fmt.Errorf("invalid --zeek-ssl-log: %w", err)
 			}
 			if err := validateZeekLogPath(zeekX509Path); err != nil {
 				return fmt.Errorf("invalid --zeek-x509-log: %w", err)
+			}
+			// Validate --suricata-eve path (Sprint 6 null-byte guard).
+			if err := validateSuricataEvePath(suricataEvePath); err != nil {
+				return fmt.Errorf("invalid --suricata-eve: %w", err)
 			}
 
 			opts := engines.ScanOptions{
@@ -996,11 +1014,12 @@ Example:
 				Verbose:                verbose,
 				NoNetwork:              noNetwork,
 				CTLookupTargets:        ctLookupTargets,
-				CTLookupFromECH: ctLookupFromECH,
-				SSHTargets:      sshTargets,
-				SSHDenyPrivate:  sshStrict,
-				ZeekSSLPath:     zeekSSLPath,
-				ZeekX509Path:    zeekX509Path,
+				CTLookupFromECH:        ctLookupFromECH,
+				SSHTargets:             sshTargets,
+				SSHDenyPrivate:         sshStrict,
+				ZeekSSLPath:            zeekSSLPath,
+				ZeekX509Path:           zeekX509Path,
+				SuricataEvePath:        suricataEvePath,
 			}
 
 			selected := orch.EffectiveEngines(opts)
@@ -1166,6 +1185,9 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().StringVar(&zeekSSLPath, "zeek-ssl-log", "", "Path to Zeek ssl.log (TSV, JSON, or .gz) for passive TLS PQC inventory")
 	cmd.Flags().StringVar(&zeekX509Path, "zeek-x509-log", "", "Path to Zeek x509.log (TSV, JSON, or .gz) for passive certificate PQC inventory")
 
+	// Suricata log ingestion flags (Sprint 6)
+	cmd.Flags().StringVar(&suricataEvePath, "suricata-eve", "", "Path to Suricata eve.json (plain or .gz) for passive TLS PQC inventory")
+
 	return cmd
 }
 
@@ -1202,6 +1224,19 @@ func validateSSHTarget(target string) error {
 		return nil
 	}
 	return ctlookup.ValidateHostname(host)
+}
+
+// validateSuricataEvePath rejects --suricata-eve values that contain null bytes
+// (which the OS would reject anyway, but caught here for a clear user-facing error
+// before any file open attempt).
+func validateSuricataEvePath(path string) error {
+	if path == "" {
+		return nil
+	}
+	if strings.ContainsRune(path, 0) {
+		return fmt.Errorf("path contains null byte")
+	}
+	return nil
 }
 
 // writeOutput writes the scan result in the specified format to the given destination.

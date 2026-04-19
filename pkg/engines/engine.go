@@ -130,6 +130,9 @@ type ScanOptions struct {
 	// Zeek log ingestion options (Sprint 5).
 	ZeekSSLPath  string // path to ssl.log (TSV, JSON, or .gz); empty = skip zeek-log engine
 	ZeekX509Path string // path to x509.log (TSV, JSON, or .gz); empty = skip when no ssl path either
+
+	// Suricata log ingestion options (Sprint 6).
+	SuricataEvePath string // path to eve.json (plain or .gz); empty = skip suricata-log engine
 }
 
 // Engine is the interface every scanner engine must implement.
