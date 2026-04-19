@@ -1,8 +1,15 @@
 package tlsprobe
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
@@ -166,6 +173,36 @@ func TestObservationToFindings_UnknownCertSigAlg(t *testing.T) {
 	// Name should start with "unknown-"
 	if !strings.HasPrefix(certSigFinding.Algorithm.Name, "unknown-") {
 		t.Errorf("#cert-sig Algorithm.Name = %q, want prefix 'unknown-'", certSigFinding.Algorithm.Name)
+	}
+}
+
+// TestExtractSigAlgOIDFromRawTBS_ECDSACert verifies that extractSigAlgOIDFromRawTBS
+// returns the correct OID for a real ECDSA self-signed certificate.
+func TestExtractSigAlgOIDFromRawTBS_ECDSACert(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	derBytes, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(derBytes)
+	if err != nil {
+		t.Fatalf("parse certificate: %v", err)
+	}
+
+	got := extractSigAlgOIDFromRawTBS(cert.RawTBSCertificate)
+	// ecdsa-with-SHA256 OID per RFC 5480 / ANSI X9.62
+	const wantOID = "1.2.840.10045.4.3.2"
+	if got != wantOID {
+		t.Errorf("extractSigAlgOIDFromRawTBS = %q, want %q", got, wantOID)
 	}
 }
 
