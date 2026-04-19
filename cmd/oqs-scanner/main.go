@@ -416,6 +416,7 @@ Example with data lifetime adjustment for healthcare:
 			if err := validateFailOn(failOn); err != nil {
 				return err
 			}
+			complianceFlags = expandComplianceAll(complianceFlags)
 			if err := validateComplianceFlags(complianceFlags); err != nil {
 				return err
 			}
@@ -847,6 +848,7 @@ Example:
 			if err := validateFailOn(failOn); err != nil {
 				return err
 			}
+			complianceFlags = expandComplianceAll(complianceFlags)
 			if err := validateComplianceFlags(complianceFlags); err != nil {
 				return err
 			}
@@ -2077,24 +2079,50 @@ func evaluateCompliance(standards []string, results []findings.UnifiedFinding) e
 	return nil
 }
 
+// expandComplianceAll expands the "all" sentinel value to the full list of
+// registered framework IDs. If ids contains "all" anywhere, it is replaced in
+// place by compliance.SupportedIDs() (deduplicated with any other IDs the user
+// may have listed alongside). Called BEFORE validateComplianceFlags so downstream
+// evaluation sees concrete IDs. Fix for ultrareview bug_007 — without expansion,
+// "all" passed validation but failed inside evaluateCompliance after a multi-
+// minute scan.
+func expandComplianceAll(ids []string) []string {
+	expanded := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id == "all" {
+			for _, fid := range compliance.SupportedIDs() {
+				if !seen[fid] {
+					seen[fid] = true
+					expanded = append(expanded, fid)
+				}
+			}
+			continue
+		}
+		if !seen[id] {
+			seen[id] = true
+			expanded = append(expanded, id)
+		}
+	}
+	return expanded
+}
+
 // validateComplianceFlags validates all --compliance framework IDs before the scan
 // runs. All unknown IDs are reported together in a single error message so the user
-// can fix them all at once rather than discovering them one by one.
+// can fix them all at once rather than discovering them one by one. Call
+// expandComplianceAll FIRST to resolve the "all" sentinel.
 func validateComplianceFlags(ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	var unknown []string
 	for _, id := range ids {
-		if id == "all" {
-			continue
-		}
 		if _, ok := compliance.Get(id); !ok {
 			unknown = append(unknown, id)
 		}
 	}
 	if len(unknown) > 0 {
-		return fmt.Errorf("--compliance: unknown framework ID(s): %s (supported: %s)",
+		return fmt.Errorf("--compliance: unknown framework ID(s): %s (supported: %s, or \"all\")",
 			strings.Join(unknown, ", "), strings.Join(compliance.SupportedIDs(), ", "))
 	}
 	return nil
