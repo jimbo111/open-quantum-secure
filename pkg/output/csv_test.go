@@ -14,11 +14,11 @@ func TestWriteCSV_HeaderOnly(t *testing.T) {
 	if err := WriteCSV(&buf, result); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(buf.String(), "\r\n"), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 line (header only), got %d", len(lines))
 	}
-	if !strings.HasPrefix(lines[0], "severity,confidence,algorithm") {
+	if !strings.HasPrefix(strings.TrimRight(lines[0], "\r"), "severity,confidence,algorithm") {
 		t.Errorf("unexpected header: %s", lines[0])
 	}
 }
@@ -100,10 +100,10 @@ func TestWriteCSV_FieldWithNewline(t *testing.T) {
 	if err := WriteCSV(&buf, result); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// The output should contain a quoted field with the embedded newline.
+	// UseCRLF=true converts embedded \n in fields to \r\n per RFC 4180.
 	out := buf.String()
-	if !strings.Contains(out, "\"signature\nwith newline\"") {
-		t.Errorf("expected quoted newline in output; got:\n%s", out)
+	if !strings.Contains(out, "\"signature\r\nwith newline\"") {
+		t.Errorf("expected CRLF-quoted newline in output; got:\n%s", out)
 	}
 }
 
@@ -256,7 +256,7 @@ func TestWriteCSV_FormulaInjectionNeutralized(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 lines, got %d", len(lines))
 	}
-	fields := parseCSVLine(strings.TrimRight(lines[1], "\r"))
+	fields := parseCSVLine(lines[1])
 	if fields[2] != "'-RSA" { // algorithm
 		t.Errorf("algorithm field = %q, want \"'-RSA\"", fields[2])
 	}
@@ -269,8 +269,9 @@ func TestWriteCSV_FormulaInjectionNeutralized(t *testing.T) {
 }
 
 // parseCSVLine splits a CSV line by commas, respecting quoted fields.
-// This is a simplified parser for test verification only.
+// Strips a trailing \r so callers do not need to handle CRLF endings.
 func parseCSVLine(line string) []string {
+	line = strings.TrimRight(line, "\r")
 	var fields []string
 	var current strings.Builder
 	inQuote := false

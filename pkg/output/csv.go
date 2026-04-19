@@ -13,6 +13,7 @@ import (
 // encoding/csv handles all quoting (commas, quotes, newlines in fields).
 func WriteCSV(w io.Writer, result ScanResult) error {
 	cw := csv.NewWriter(w)
+	cw.UseCRLF = true // RFC 4180 §2 requires CRLF line endings
 
 	header := []string{
 		"severity", "confidence", "algorithm", "primitive", "keySize", "risk",
