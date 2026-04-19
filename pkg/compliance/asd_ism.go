@@ -80,6 +80,25 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
+		// --- Rule: hybrid KEM with sub-1024 ML-KEM grade ---
+		// ASD ISM mandates ML-KEM-1024 even within hybrid combinations. A hybrid
+		// like X25519MLKEM768 uses ML-KEM-768 (insufficient grade) and must fail.
+		// This branch runs BEFORE isMLKEMName so hybrids are caught first.
+		// Mirrors CNSA 2.0's cnsa2-hybrid-sub-1024 pattern (cnsa2.go:136).
+		if isHybridKEM(f) {
+			variant := mlVariantLevel(name)
+			if variant > 0 && variant < 1024 {
+				violations = append(violations, Violation{
+					Algorithm:   name,
+					Rule:        "asd-hybrid-sub-1024",
+					Message:     "ASD ISM requires ML-KEM-1024; " + name + " is a hybrid KEM using a sub-1024 ML-KEM variant",
+					Deadline:    asdDeadlineKEX,
+					Remediation: "Use a hybrid with ML-KEM-1024 (e.g. X25519MLKEM1024, SecP384r1MLKEM1024) or pure ML-KEM-1024",
+				})
+			}
+			continue
+		}
+
 		// --- Rule: ML-KEM minimum grade: 1024 ---
 		// ASD ISM mandates ML-KEM-1024; lower parameter sets are insufficient.
 		// Matches both hyphenated ("ML-KEM-768") and hyphen-less ("MLKEM768") forms.
@@ -119,6 +138,25 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
+		// --- Rule: non-AES symmetric ciphers NOT approved ---
+		// ASD ISM requires AES-256 for symmetric encryption. Non-AES ciphers
+		// (ChaCha20-Poly1305, Camellia, ARIA, SEED, Serpent, Twofish, 3DES, RC4)
+		// are NOT approved regardless of key size. Catches ciphers that would
+		// otherwise fall through to the end without a violation.
+		if strings.HasPrefix(upper, "CHACHA") || strings.HasPrefix(upper, "CAMELLIA") ||
+			strings.HasPrefix(upper, "ARIA") || strings.HasPrefix(upper, "SEED") ||
+			strings.HasPrefix(upper, "SERPENT") || strings.HasPrefix(upper, "TWOFISH") ||
+			strings.HasPrefix(upper, "3DES") || upper == "RC4" {
+			violations = append(violations, Violation{
+				Algorithm:   name,
+				Rule:        "asd-symmetric-unapproved",
+				Message:     name + " is not an ASD ISM approved symmetric cipher; only AES-256 is approved",
+				Deadline:    asdDeadlineFull,
+				Remediation: "Replace with AES-256",
+			})
+			continue
+		}
+
 		// --- Rule: AES-256 required ---
 		if strings.HasPrefix(upper, "AES") {
 			effective := resolveSymmetricKeySize(upper, keySize)
@@ -134,8 +172,26 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
-		// --- Rule: SHA-384/512 required ---
+		// --- Rule: SHA-384/512 (SHA-2 family) required ---
 		if isHashFamily(upper) {
+			// Distinguish SHA-2 from SHA-3 and BLAKE. ASD ISM approves only SHA-2.
+			// SHA-3 variants use prefix "SHA-3-" or "SHA3-" or are bare "SHA-3"/"SHA3".
+			// "SHA-384" starts with "SHA-3" letter-wise, so the SHA-3 check needs the trailing dash.
+			isSHA3 := strings.HasPrefix(upper, "SHA3-") || strings.HasPrefix(upper, "SHA-3-") ||
+				upper == "SHA3" || upper == "SHA-3"
+			isSHA2 := (strings.HasPrefix(upper, "SHA-") || strings.HasPrefix(upper, "SHA2") ||
+				upper == "SHA256" || upper == "SHA384" || upper == "SHA512") && !isSHA3
+			isHMACSHA2 := strings.HasPrefix(upper, "HMAC-SHA") && !strings.Contains(upper, "SHA3")
+			if !isSHA2 && !isHMACSHA2 {
+				violations = append(violations, Violation{
+					Algorithm:   name,
+					Rule:        "asd-hash-unapproved",
+					Message:     name + " is not an ASD ISM approved hash; only SHA-384 and SHA-512 (SHA-2 family) are approved",
+					Deadline:    asdDeadlineFull,
+					Remediation: "Replace with SHA-384 or SHA-512 (SHA-2 family); SHA-3 and BLAKE are not approved",
+				})
+				continue
+			}
 			size := resolveHashOutputSize(upper, keySize)
 			if size > 0 && size < 384 {
 				violations = append(violations, Violation{

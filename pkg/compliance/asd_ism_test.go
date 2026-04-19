@@ -238,6 +238,127 @@ func TestASD_EmptyInput(t *testing.T) {
 	}
 }
 
+// TestASD_HybridSubGrade is the regression test for ultrareview merged_bug_006
+// gap 1: ASD ISM was silently passing hybrid KEMs like X25519MLKEM768 even
+// though the framework mandates ML-KEM-1024 grade (this is the most common
+// production PQC TLS hybrid — Cloudflare/Chrome default).
+func TestASD_HybridSubGrade(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantViolate bool
+		wantRule    string
+	}{
+		{"X25519MLKEM768", true, "asd-hybrid-sub-1024"},
+		{"X25519MLKEM512", true, "asd-hybrid-sub-1024"},
+		{"X25519MLKEM1024", false, ""},
+		{"SecP256r1MLKEM768", true, "asd-hybrid-sub-1024"},
+		{"SecP384r1MLKEM1024", false, ""},
+		{"curveSM2MLKEM768", true, "asd-hybrid-sub-1024"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := asdFinding(tt.algName, "kem", 0, findings.QRSafe)
+			v := asd.Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantViolate {
+				if len(v) != 1 {
+					t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+				}
+				if v[0].Rule != tt.wantRule {
+					t.Errorf("rule = %q, want %q", v[0].Rule, tt.wantRule)
+				}
+			} else {
+				if len(v) != 0 {
+					t.Errorf("expected no violations, got: %+v", v)
+				}
+			}
+		})
+	}
+}
+
+// TestASD_SymmetricUnapproved is the regression test for ultrareview
+// merged_bug_006 gap 2: ASD ISM's stated "AES-256 only" policy was silently
+// passing ChaCha20-Poly1305, Camellia, ARIA, etc. because the symmetric branch
+// only checked AES key size and had no catch-all for non-AES ciphers.
+func TestASD_SymmetricUnapproved(t *testing.T) {
+	for _, alg := range []string{
+		"ChaCha20-Poly1305",
+		"ChaCha20",
+		"Camellia-256",
+		"ARIA-256",
+		"SEED",
+		"Serpent-256",
+		"Twofish-256",
+		"3DES",
+		"RC4",
+	} {
+		t.Run(alg, func(t *testing.T) {
+			f := asdFinding(alg, "symmetric", 256, findings.QRSafe)
+			v := asd.Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 1 {
+				t.Fatalf("expected 1 violation for %s, got %d: %+v", alg, len(v), v)
+			}
+			if v[0].Rule != "asd-symmetric-unapproved" {
+				t.Errorf("%s: rule = %q, want asd-symmetric-unapproved", alg, v[0].Rule)
+			}
+		})
+	}
+}
+
+// TestASD_SymmetricApprovedStillPasses guards against the new
+// symmetric-unapproved rule over-rejecting valid AES-256 findings.
+func TestASD_SymmetricApprovedStillPasses(t *testing.T) {
+	for _, alg := range []string{"AES-256-GCM", "AES-256-CBC", "AES-256"} {
+		t.Run(alg, func(t *testing.T) {
+			f := asdFinding(alg, "symmetric", 256, findings.QRSafe)
+			v := asd.Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 0 {
+				t.Errorf("%s: expected no violations, got: %+v", alg, v)
+			}
+		})
+	}
+}
+
+// TestASD_HashUnapproved is the regression test for ultrareview
+// merged_bug_006 gap 3: ASD ISM's stated "SHA-2 only" policy was silently
+// passing SHA-3-384/512 and BLAKE2-384/512 because the size check didn't
+// distinguish SHA-2 from other SHA families.
+func TestASD_HashUnapproved(t *testing.T) {
+	tests := []struct {
+		algName  string
+		keySize  int
+		wantRule string
+	}{
+		{"SHA3-384", 384, "asd-hash-unapproved"},
+		{"SHA3-512", 512, "asd-hash-unapproved"},
+		{"SHA-3-256", 256, "asd-hash-unapproved"},
+		{"BLAKE2b-512", 512, "asd-hash-unapproved"},
+		{"BLAKE3-384", 384, "asd-hash-unapproved"},
+		{"SHA-256", 256, "asd-hash-output-size"},   // SHA-2 but too small
+		{"SHA-384", 384, ""},                        // SHA-2 approved
+		{"SHA-512", 512, ""},                        // SHA-2 approved
+		{"HMAC-SHA-256", 256, "asd-hash-output-size"},
+		{"HMAC-SHA-384", 384, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := asdFinding(tt.algName, "hash", tt.keySize, findings.QRSafe)
+			v := asd.Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantRule == "" {
+				if len(v) != 0 {
+					t.Errorf("%s: expected no violations, got: %+v", tt.algName, v)
+				}
+				return
+			}
+			if len(v) != 1 {
+				t.Fatalf("%s: expected 1 violation, got %d: %+v", tt.algName, len(v), v)
+			}
+			if v[0].Rule != tt.wantRule {
+				t.Errorf("%s: rule = %q, want %q", tt.algName, v[0].Rule, tt.wantRule)
+			}
+		})
+	}
+}
+
 func TestASD_RegistrationAndID(t *testing.T) {
 	fw, ok := Get("asd-ism")
 	if !ok {
