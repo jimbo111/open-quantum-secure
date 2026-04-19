@@ -33,10 +33,11 @@ func probeTLS12(ctx context.Context, addr, sni string, timeout time.Duration, de
 	}
 
 	// Honour DenyPrivate: reject addresses that resolve to private/loopback ranges.
-	// addr is already a resolved IP:port (not a hostname), so we check it directly.
+	// addr is already a resolved IP:port; a nil ParseIP means an unexpected hostname
+	// slipped through — reject it to avoid bypassing the guard.
 	if denyPrivate {
 		ip := net.ParseIP(host)
-		if ip != nil && isPrivateIP(ip) {
+		if ip == nil || isPrivateIP(ip) {
 			return TLS12ProbeResult{}, fmt.Errorf("probeTLS12: private IP rejected: %s", host)
 		}
 	}
@@ -51,8 +52,8 @@ func probeTLS12(ctx context.Context, addr, sni string, timeout time.Duration, de
 	dialer := &net.Dialer{}
 	rawConn, err := dialer.DialContext(dialCtx, "tcp", addr)
 	if err != nil {
-		return TLS12ProbeResult{Error: fmt.Errorf("probeTLS12 TCP dial %s: %w", addr, err)},
-			fmt.Errorf("probeTLS12 TCP dial %s: %w", addr, err)
+		dialErr := fmt.Errorf("probeTLS12 TCP dial %s: %w", addr, err)
+		return TLS12ProbeResult{Error: dialErr}, dialErr
 	}
 
 	tlsCfg := &tls.Config{
