@@ -5,12 +5,16 @@ import (
 	"fmt"
 )
 
-// DefaultCipherSuites are the TLS 1.3 cipher suites advertised in probes.
-var DefaultCipherSuites = []uint16{
+// defaultCipherSuites are the TLS 1.3 cipher suites advertised in probes.
+var defaultCipherSuites = []uint16{
 	0x1301, // TLS_AES_128_GCM_SHA256
 	0x1302, // TLS_AES_256_GCM_SHA384
 	0x1303, // TLS_CHACHA20_POLY1305_SHA256
 }
+
+// DefaultCipherSuites returns a copy of the default TLS 1.3 cipher suite list.
+// A copy is returned so callers cannot mutate the package-level slice.
+func DefaultCipherSuites() []uint16 { return append([]uint16(nil), defaultCipherSuites...) }
 
 // defaultSigAlgs is the default signature_algorithms list for probes.
 var defaultSigAlgs = []uint16{
@@ -26,9 +30,9 @@ var defaultSigAlgs = []uint16{
 	0x0601, // rsa_pkcs1_sha512
 }
 
-// DefaultProbeGroups are the SupportedGroup codepoints tested by --deep-probe.
+// defaultProbeGroups are the SupportedGroup codepoints tested by --deep-probe.
 // Each group is probed individually to isolate server acceptance.
-var DefaultProbeGroups = []uint16{
+var defaultProbeGroups = []uint16{
 	0x001d, // X25519 (classical baseline)
 	0x11ec, // X25519MLKEM768 (hybrid, final)
 	0x11eb, // SecP256r1MLKEM768 (hybrid, final)
@@ -36,6 +40,10 @@ var DefaultProbeGroups = []uint16{
 	0x0202, // MLKEM1024 (pure PQ, final)
 	0x0200, // MLKEM512 (pure PQ, final)
 }
+
+// DefaultProbeGroups returns a copy of the default group codepoint list probed
+// by --deep-probe. A copy is returned so callers cannot mutate the package-level slice.
+func DefaultProbeGroups() []uint16 { return append([]uint16(nil), defaultProbeGroups...) }
 
 // KeyShareEntry is a single key_share advertised in the ClientHello key_share extension.
 // PublicKey must contain the correct number of bytes for the group (see ProbeKeyShare).
@@ -60,7 +68,7 @@ type ClientHelloOpts struct {
 func BuildClientHello(opts ClientHelloOpts) ([]byte, error) {
 	ciphers := opts.CipherSuites
 	if len(ciphers) == 0 {
-		ciphers = DefaultCipherSuites
+		ciphers = defaultCipherSuites
 	}
 	sigAlgs := opts.SigAlgs
 	if len(sigAlgs) == 0 {

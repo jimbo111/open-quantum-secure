@@ -220,7 +220,7 @@ func TestBuildClientHello_DefaultCiphers(t *testing.T) {
 	off += 2
 	cipherBytes := body[off : off+csLen]
 
-	wantCiphers := DefaultCipherSuites
+	wantCiphers := defaultCipherSuites
 	if csLen != len(wantCiphers)*2 {
 		t.Errorf("cipher suite list length: got %d want %d", csLen, len(wantCiphers)*2)
 	}
@@ -455,7 +455,7 @@ func FuzzBuildClientHello(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, sni string, addGrp bool, addKS bool, grpIndex uint8) {
 		opts := ClientHelloOpts{SNI: sni}
-		groups := DefaultProbeGroups
+		groups := defaultProbeGroups
 		if addGrp {
 			idx := int(grpIndex) % len(groups)
 			opts.SupportedGroups = []uint16{groups[idx]}
