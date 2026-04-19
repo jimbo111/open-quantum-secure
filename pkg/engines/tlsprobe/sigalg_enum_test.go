@@ -3,6 +3,7 @@ package tlsprobe
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -144,5 +145,140 @@ func TestProbeSigAlg_AlertBeforeSH(t *testing.T) {
 	}
 	if accepted {
 		t.Error("expected accepted=false for server that sent Alert before SH")
+	}
+}
+
+// TestProbeSigAlg_ZeroTimeout covers the timeout==0 default path in probeSigAlg.
+func TestProbeSigAlg_ZeroTimeout(t *testing.T) {
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 4096)
+		c.SetReadDeadline(time.Now().Add(200 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		sendAlertRecord(c)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	accepted, err := probeSigAlg(ctx, addr, "", 0, 0x0804) // timeout=0 → defaults to 10 s
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if accepted {
+		t.Error("expected accepted=false for alert-only server")
+	}
+}
+
+// TestProbeSigAlg_AcceptedProvisionally covers the return-true path:
+// server sends ServerHello then closes the connection; ReadRecord gets EOF and
+// the sig alg is provisionally accepted.
+func TestProbeSigAlg_AcceptedProvisionally(t *testing.T) {
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 8192)
+		c.SetReadDeadline(time.Now().Add(500 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		sendMinimalServerHello(c, 0x001d) // SH; connection closes when handler returns
+	})
+	accepted, err := probeSigAlg(context.Background(), addr, "", 5*time.Second, 0x0804)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !accepted {
+		t.Error("expected accepted=true when server sends ServerHello then closes")
+	}
+}
+
+// TestProbeSigAlg_PostSHAlert covers the post-ServerHello Alert path: server
+// sends SH followed immediately by an Alert → provisionally rejected, no error.
+func TestProbeSigAlg_PostSHAlert(t *testing.T) {
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 8192)
+		c.SetReadDeadline(time.Now().Add(500 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		sendMinimalServerHello(c, 0x001d)
+		sendAlertRecord(c) // Alert immediately after SH
+	})
+	accepted, err := probeSigAlg(context.Background(), addr, "", 5*time.Second, 0x0804)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if accepted {
+		t.Error("expected accepted=false when server sends Alert immediately after ServerHello")
+	}
+}
+
+// TestEnumerateSigAlgs_ZeroTimeout covers the timeout==0 default in enumerateSigAlgs.
+func TestEnumerateSigAlgs_ZeroTimeout(t *testing.T) {
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 4096)
+		c.SetReadDeadline(time.Now().Add(200 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		sendAlertRecord(c)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, _ := enumerateSigAlgs(ctx, addr, "", 0) // timeout=0 → defaults to 10 s/probe
+	if len(result.AcceptedSigAlgs) > 0 {
+		t.Errorf("expected no accepted sig algs from alert-only server, got %d", len(result.AcceptedSigAlgs))
+	}
+}
+
+// TestEnumerateSigAlgs_AcceptedScheme covers the AcceptedSigAlgs and RejectedSigAlgs
+// paths: first scheme gets SH (provisionally accepted); remaining schemes get Alert
+// (rejected).
+func TestEnumerateSigAlgs_AcceptedScheme(t *testing.T) {
+	var once sync.Once
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 8192)
+		c.SetReadDeadline(time.Now().Add(500 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		var first bool
+		once.Do(func() { first = true })
+		if first {
+			sendMinimalServerHello(c, 0x001d) // first scheme: provisionally accepted
+		} else {
+			sendAlertRecord(c) // all other schemes: rejected
+		}
+	})
+	result, _ := enumerateSigAlgs(context.Background(), addr, "", 2*time.Second)
+	if len(result.AcceptedSigAlgs) == 0 {
+		t.Error("expected ≥1 accepted sig alg when server sends ServerHello for first scheme")
+	}
+	if len(result.RejectedSigAlgs) == 0 {
+		t.Error("expected ≥1 rejected sig alg for remaining alert-only schemes")
+	}
+}
+
+// TestEnumerateSigAlgs_TransportError covers the lastErr-set path: all connections
+// are refused immediately so every probeSigAlg call returns a dial error.
+func TestEnumerateSigAlgs_TransportError(t *testing.T) {
+	// Grab a port then close the listener immediately so all dials are refused.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	_, lastErr := enumerateSigAlgs(context.Background(), addr, "", 500*time.Millisecond)
+	if lastErr == nil {
+		t.Error("expected non-nil lastErr when all connections are refused")
+	}
+}
+
+// TestProbeSigAlg_NoResponse covers the ParseServerResponse-error path: server
+// drains the ClientHello then closes without sending anything, so ParseServerResponse
+// returns an EOF error and probeSigAlg returns (false, nil).
+func TestProbeSigAlg_NoResponse(t *testing.T) {
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 4096)
+		c.SetReadDeadline(time.Now().Add(200 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		// handler returns → defer c.Close() → EOF for the client
+	})
+	accepted, err := probeSigAlg(context.Background(), addr, "", 5*time.Second, 0x0804)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if accepted {
+		t.Error("expected accepted=false when server sends no response")
 	}
 }

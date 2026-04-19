@@ -204,3 +204,99 @@ func TestDetectServerGroupPreference_UnknownGroupsFiltered(t *testing.T) {
 		t.Errorf("expected mode=%q when only 1 valid group survives filter, got %q", PrefIndeterminate, res.Mode)
 	}
 }
+
+// TestDetectServerGroupPreference_ZeroTimeout covers the timeout==0 default path.
+func TestDetectServerGroupPreference_ZeroTimeout(t *testing.T) {
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 8192)
+		c.SetReadDeadline(time.Now().Add(300 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		sendAlertRecord(c)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, _ := detectServerGroupPreference(ctx, addr, "", 0, []uint16{0x001d, 0x11ec})
+	if res.Mode != PrefIndeterminate {
+		t.Errorf("expected %q for alert-only server with zero timeout, got %q", PrefIndeterminate, res.Mode)
+	}
+}
+
+// TestDetectServerGroupPreference_ForwardProbeFails covers the fwdErr != nil path in
+// detectServerGroupPreference and the dial-error path in probeOrder: the listener is
+// closed before any dial, so the forward probe gets "connection refused".
+func TestDetectServerGroupPreference_ForwardProbeFails(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close() // immediately closed — all dials refused
+
+	res, fwdErr := detectServerGroupPreference(
+		context.Background(), addr, "",
+		2*time.Second,
+		[]uint16{0x001d, 0x11ec},
+	)
+	if fwdErr == nil {
+		t.Error("expected error when forward probe dial fails")
+	}
+	if res.Mode != PrefIndeterminate {
+		t.Errorf("expected mode=%q, got %q", PrefIndeterminate, res.Mode)
+	}
+}
+
+// TestDetectServerGroupPreference_ReverseProbeFails covers the revErr != nil path:
+// forward probe succeeds; reverse probe server closes without responding so
+// ParseServerResponse returns an error.
+func TestDetectServerGroupPreference_ReverseProbeFails(t *testing.T) {
+	var connCount atomic.Int32
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 8192)
+		c.SetReadDeadline(time.Now().Add(300 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		if connCount.Add(1) == 1 {
+			sendMinimalServerHello(c, 0x001d) // forward probe: success
+		}
+		// second connection: no response → ParseServerResponse EOF → revErr set
+	})
+
+	res, revErr := detectServerGroupPreference(
+		context.Background(), addr, "",
+		5*time.Second,
+		[]uint16{0x001d, 0x11ec},
+	)
+	if revErr == nil {
+		t.Error("expected error when reverse probe receives no response")
+	}
+	if res.Mode != PrefIndeterminate {
+		t.Errorf("expected mode=%q, got %q", PrefIndeterminate, res.Mode)
+	}
+}
+
+// TestDetectServerGroupPreference_RevGroupZero covers the revGroup==0 path:
+// forward probe selects a group; reverse probe returns an Alert (revGroup=0, no error).
+func TestDetectServerGroupPreference_RevGroupZero(t *testing.T) {
+	var connCount atomic.Int32
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 8192)
+		c.SetReadDeadline(time.Now().Add(300 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		if connCount.Add(1) == 1 {
+			sendMinimalServerHello(c, 0x001d) // forward probe: group selected
+		} else {
+			sendAlertRecord(c) // reverse probe: Alert → revGroup=0
+		}
+	})
+
+	res, err := detectServerGroupPreference(
+		context.Background(), addr, "",
+		5*time.Second,
+		[]uint16{0x001d, 0x11ec},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Mode != PrefIndeterminate {
+		t.Errorf("expected mode=%q when reverse probe returns Alert, got %q", PrefIndeterminate, res.Mode)
+	}
+}

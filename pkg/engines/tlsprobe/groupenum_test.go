@@ -7,6 +7,52 @@ import (
 	"time"
 )
 
+// sendMinimalHRR writes a HelloRetryRequest TLS record selecting groupID.
+// HRR is encoded as ServerHello with the RFC 8446 §4.1.4 magic random.
+func sendMinimalHRR(c net.Conn, groupID uint16) {
+	hrrMagic := [32]byte{
+		0xcf, 0x21, 0xad, 0x74, 0xe5, 0x9a, 0x61, 0x11,
+		0xbe, 0x1d, 0x8c, 0x02, 0x1e, 0x65, 0xb8, 0x91,
+		0xc2, 0xa2, 0x11, 0x16, 0x7a, 0xbb, 0x8c, 0x5e,
+		0x07, 0x9e, 0x09, 0xe2, 0xc8, 0xa8, 0x33, 0x9c,
+	}
+	// HRR key_share ext body: selected_group only (2 bytes, no key_exchange).
+	ksData := []byte{byte(groupID >> 8), byte(groupID)}
+
+	var exts []byte
+	exts = append(exts, 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04) // supported_versions TLS 1.3
+	exts = append(exts, 0x00, 0x33)
+	exts = append(exts, byte(len(ksData)>>8), byte(len(ksData)))
+	exts = append(exts, ksData...)
+
+	var body []byte
+	body = append(body, 0x03, 0x03)
+	body = append(body, hrrMagic[:]...)
+	body = append(body, 0x00)
+	body = append(body, 0x13, 0x01)
+	body = append(body, 0x00)
+	body = append(body, byte(len(exts)>>8), byte(len(exts)))
+	body = append(body, exts...)
+
+	msg := make([]byte, 4+len(body))
+	msg[0] = 0x02
+	msg[1] = byte(len(body) >> 16)
+	msg[2] = byte(len(body) >> 8)
+	msg[3] = byte(len(body))
+	copy(msg[4:], body)
+
+	rec := make([]byte, 5+len(msg))
+	rec[0] = 0x16
+	rec[1] = 0x03
+	rec[2] = 0x03
+	rec[3] = byte(len(msg) >> 8)
+	rec[4] = byte(len(msg))
+	copy(rec[5:], msg)
+
+	c.SetWriteDeadline(time.Now().Add(500 * time.Millisecond)) //nolint:errcheck
+	c.Write(rec)                                                //nolint:errcheck
+}
+
 // TestFullEnumGroups_Sanity verifies the fullEnumGroups list has the expected
 // entries and no duplicates. 13 entries: 4 classical + 4 hybrid + 3 pure-PQ + 2 deprecated.
 func TestFullEnumGroups_Sanity(t *testing.T) {
@@ -149,5 +195,69 @@ func TestGroupEnumResult_EmptyDefault(t *testing.T) {
 	}
 	if r.RejectedGroups != nil {
 		t.Error("RejectedGroups must be nil in zero value")
+	}
+}
+
+// TestEnumerateGroups_ZeroTimeout covers the timeout==0 default path (→ 10 s/probe).
+func TestEnumerateGroups_ZeroTimeout(t *testing.T) {
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 4096)
+		c.SetReadDeadline(time.Now().Add(200 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		sendAlertRecord(c)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, _ := enumerateGroups(ctx, addr, "", 0)
+	if len(result.AcceptedGroups) > 0 {
+		t.Errorf("expected no accepted groups from alert-only server, got %d", len(result.AcceptedGroups))
+	}
+}
+
+// TestEnumerateGroups_AcceptedGroup covers the OutcomeAccepted branch
+// (server sends a valid ServerHello for the first probe).
+func TestEnumerateGroups_AcceptedGroup(t *testing.T) {
+	responded := make(chan struct{}, 1) // buffer of 1 — first sender wins
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 8192)
+		c.SetReadDeadline(time.Now().Add(300 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		select {
+		case responded <- struct{}{}:
+			sendMinimalServerHello(c, 0x001d) // first probe: ServerHello accepted
+		default:
+			sendAlertRecord(c) // subsequent probes: rejected
+		}
+	})
+	result, _ := enumerateGroups(context.Background(), addr, "", 2*time.Second)
+	if len(result.AcceptedGroups) == 0 {
+		t.Error("expected ≥1 accepted group when server sends ServerHello for first probe")
+	}
+	if len(result.HRRGroups) > 0 {
+		t.Errorf("expected 0 HRR groups, got %d", len(result.HRRGroups))
+	}
+}
+
+// TestEnumerateGroups_HRRGroup covers the OutcomeHRR branch
+// (server sends HelloRetryRequest for the first probe).
+func TestEnumerateGroups_HRRGroup(t *testing.T) {
+	responded := make(chan struct{}, 1)
+	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
+		buf := make([]byte, 8192)
+		c.SetReadDeadline(time.Now().Add(300 * time.Millisecond)) //nolint:errcheck
+		c.Read(buf)                                                //nolint:errcheck
+		select {
+		case responded <- struct{}{}:
+			sendMinimalHRR(c, 0x11ec) // first probe: HRR selecting X25519MLKEM768
+		default:
+			sendAlertRecord(c)
+		}
+	})
+	result, _ := enumerateGroups(context.Background(), addr, "", 2*time.Second)
+	if len(result.HRRGroups) == 0 {
+		t.Error("expected ≥1 HRR group when server sends HRR for first probe")
+	}
+	if len(result.AcceptedGroups) > 0 {
+		t.Errorf("expected 0 accepted groups, got %d", len(result.AcceptedGroups))
 	}
 }
