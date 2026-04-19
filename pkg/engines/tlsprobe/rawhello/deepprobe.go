@@ -49,6 +49,11 @@ type DeepProbeGroupResult struct {
 // addr must be a pre-resolved "ip:port" string — SSRF protection must be applied
 // by the caller before invoking DeepProbe. sni is used for the SNI extension.
 //
+// TODO(sprint-8): when sni is empty the SNI extension is omitted, which causes
+// virtual-hosting servers to respond with their default certificate. Consider
+// requiring a non-empty SNI for production probes, or deriving it from the
+// original hostname before resolution.
+//
 // Groups are probed sequentially to avoid rate-limiting a single server
 // (mirrors the per-target concurrency cap rationale in tlsprobe/engine.go).
 func DeepProbe(ctx context.Context, addr, sni string, timeout time.Duration, groups []uint16) ([]DeepProbeGroupResult, error) {
