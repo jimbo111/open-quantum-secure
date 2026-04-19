@@ -17,7 +17,7 @@ func TestDeepProbe_Cloudflare(t *testing.T) {
 	defer cancel()
 
 	// cloudflare.com supports X25519MLKEM768 (0x11ec) as of 2024.
-	results := DeepProbe(ctx, "1.1.1.1:443", "cloudflare.com", 10*time.Second, []uint16{
+	results, _ := DeepProbe(ctx, "1.1.1.1:443", "cloudflare.com", 10*time.Second, []uint16{
 		0x001d, // X25519 — classical baseline, must be accepted
 		0x11ec, // X25519MLKEM768 — PQC hybrid, should be accepted by Cloudflare
 	})

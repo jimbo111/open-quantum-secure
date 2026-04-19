@@ -69,7 +69,7 @@ func TestDeepProbe_Accepted(t *testing.T) {
 		})
 	})
 
-	results := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0x001d})
+	results, _ := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0x001d})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -97,7 +97,7 @@ func TestDeepProbe_HRR(t *testing.T) {
 		})
 	})
 
-	results := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0x11ec})
+	results, _ := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0x11ec})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -128,7 +128,7 @@ func TestDeepProbe_Alert(t *testing.T) {
 		})
 	})
 
-	results := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0x001d})
+	results, _ := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0x001d})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -147,7 +147,7 @@ func TestDeepProbe_Alert(t *testing.T) {
 func TestDeepProbe_ConnRefused(t *testing.T) {
 	// Use a port that is not listening.
 	ctx := context.Background()
-	results := DeepProbe(ctx, "127.0.0.1:1", "", 500*time.Millisecond, []uint16{0x001d})
+	results, _ := DeepProbe(ctx, "127.0.0.1:1", "", 500*time.Millisecond, []uint16{0x001d})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -164,7 +164,7 @@ func TestDeepProbe_UnknownGroup(t *testing.T) {
 	ctx := context.Background()
 	addr := newLocalServer(t, func(c net.Conn) {})
 
-	results := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0xDEAD})
+	results, _ := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0xDEAD})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -178,10 +178,13 @@ func TestDeepProbe_ContextAlreadyCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before calling
 
-	results := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0x001d, 0x11ec})
+	results, err := DeepProbe(ctx, addr, "", 5*time.Second, []uint16{0x001d, 0x11ec})
 	// All groups should be skipped due to cancelled context.
 	if len(results) != 0 {
 		t.Errorf("expected 0 results with cancelled ctx, got %d", len(results))
+	}
+	if err == nil {
+		t.Error("expected non-nil error for cancelled context")
 	}
 }
 
@@ -198,7 +201,7 @@ func TestDeepProbe_MultipleGroups(t *testing.T) {
 	})
 
 	groups := []uint16{0x001d, 0x11ec}
-	results := DeepProbe(ctx, addr, "", 5*time.Second, groups)
+	results, _ := DeepProbe(ctx, addr, "", 5*time.Second, groups)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
@@ -211,7 +214,7 @@ func TestDeepProbe_MultipleGroups(t *testing.T) {
 
 func TestDeepProbe_EmptyGroupList(t *testing.T) {
 	ctx := context.Background()
-	results := DeepProbe(ctx, "127.0.0.1:1", "", 5*time.Second, []uint16{})
+	results, _ := DeepProbe(ctx, "127.0.0.1:1", "", 5*time.Second, []uint16{})
 	if len(results) != 0 {
 		t.Errorf("expected 0 results for empty group list, got %d", len(results))
 	}

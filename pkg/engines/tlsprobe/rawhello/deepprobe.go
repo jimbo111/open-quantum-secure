@@ -51,16 +51,16 @@ type DeepProbeGroupResult struct {
 //
 // Groups are probed sequentially to avoid rate-limiting a single server
 // (mirrors the per-target concurrency cap rationale in tlsprobe/engine.go).
-func DeepProbe(ctx context.Context, addr, sni string, timeout time.Duration, groups []uint16) []DeepProbeGroupResult {
+func DeepProbe(ctx context.Context, addr, sni string, timeout time.Duration, groups []uint16) ([]DeepProbeGroupResult, error) {
 	results := make([]DeepProbeGroupResult, 0, len(groups))
 	for _, groupID := range groups {
-		if ctx.Err() != nil {
-			break
+		if err := ctx.Err(); err != nil {
+			return results, err
 		}
 		r := probeGroup(ctx, addr, sni, timeout, groupID)
 		results = append(results, r)
 	}
-	return results
+	return results, nil
 }
 
 // probeGroup opens a TCP connection to addr and probes a single group codepoint.
