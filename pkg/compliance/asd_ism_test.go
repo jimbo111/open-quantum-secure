@@ -168,6 +168,70 @@ func TestASD_HashOutputSize(t *testing.T) {
 	}
 }
 
+// TestASD_HyphenlessMLKEM verifies that hyphen-less ML-KEM names are caught by
+// the grade check (C2 reproducer — same root cause as CNSA 2.0 C1).
+func TestASD_HyphenlessMLKEM(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantViolate bool
+	}{
+		{"MLKEM512", true},
+		{"MLKEM768", true},
+		{"MLKEM1024", false},
+		{"MLKEM", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := asdFinding(tt.algName, "kem", 0, findings.QRSafe)
+			v := asd.Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantViolate {
+				if len(v) != 1 {
+					t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+				}
+				if v[0].Rule != "asd-ml-kem-grade" {
+					t.Errorf("rule = %q, want asd-ml-kem-grade", v[0].Rule)
+				}
+			} else {
+				if len(v) != 0 {
+					t.Errorf("expected no violations, got: %+v", v)
+				}
+			}
+		})
+	}
+}
+
+// TestASD_HyphenlessMLDSA verifies that hyphen-less ML-DSA names are caught by
+// the grade check (C2 reproducer).
+func TestASD_HyphenlessMLDSA(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantViolate bool
+	}{
+		{"MLDSA44", true},
+		{"MLDSA65", true},
+		{"MLDSA87", false},
+		{"MLDSA", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := asdFinding(tt.algName, "signature", 0, findings.QRSafe)
+			v := asd.Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantViolate {
+				if len(v) != 1 {
+					t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+				}
+				if v[0].Rule != "asd-ml-dsa-grade" {
+					t.Errorf("rule = %q, want asd-ml-dsa-grade", v[0].Rule)
+				}
+			} else {
+				if len(v) != 0 {
+					t.Errorf("expected no violations, got: %+v", v)
+				}
+			}
+		})
+	}
+}
+
 func TestASD_EmptyInput(t *testing.T) {
 	if v := asd.Evaluate(nil); v != nil {
 		t.Errorf("expected nil for nil input, got %v", v)

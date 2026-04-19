@@ -1,10 +1,44 @@
 package compliance
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 )
+
+// variantSuffixRe matches the trailing digit sequence of a parameter-set name,
+// e.g. "768" in "MLKEM768" or "ML-KEM-768" (after hyphens are stripped).
+var variantSuffixRe = regexp.MustCompile(`(\d+)$`)
+
+// mlVariantLevel extracts the numeric parameter level from an ML-KEM or ML-DSA name.
+// It strips hyphens before searching for the trailing digits, so both hyphenated
+// ("ML-KEM-768") and hyphen-less ("MLKEM768") forms return the correct value.
+// Returns 0 when no numeric suffix is present (e.g. bare "ML-KEM" or "MLKEM").
+func mlVariantLevel(name string) int {
+	stripped := strings.ReplaceAll(strings.ToUpper(name), "-", "")
+	m := variantSuffixRe.FindString(stripped)
+	if m == "" {
+		return 0
+	}
+	n, _ := strconv.Atoi(m)
+	return n
+}
+
+// isMLKEMName returns true when name denotes an ML-KEM algorithm, whether in
+// hyphenated ("ML-KEM-768") or hyphen-less ("MLKEM768") form.
+func isMLKEMName(name string) bool {
+	upper := strings.ToUpper(name)
+	return strings.HasPrefix(upper, "ML-KEM") || strings.HasPrefix(upper, "MLKEM")
+}
+
+// isMLDSAName returns true when name denotes an ML-DSA algorithm, whether in
+// hyphenated ("ML-DSA-87") or hyphen-less ("MLDSA44") form.
+func isMLDSAName(name string) bool {
+	upper := strings.ToUpper(name)
+	return strings.HasPrefix(upper, "ML-DSA") || strings.HasPrefix(upper, "MLDSA")
+}
 
 // isHybridKEM returns true when the finding represents a hybrid PQC+classical
 // key exchange (e.g. X25519MLKEM768, SecP256r1MLKEM768). It checks
@@ -45,8 +79,7 @@ func isPureMLKEM(f *findings.UnifiedFinding) bool {
 	if name == "" && f.Algorithm != nil {
 		name = f.Algorithm.Name
 	}
-	upper := strings.ToUpper(strings.ReplaceAll(name, "-", ""))
-	return strings.HasPrefix(upper, "MLKEM") && !hybridKEMName(name)
+	return isMLKEMName(name) && !hybridKEMName(name)
 }
 
 // isMLKEMKEX returns true when the finding is a key-exchange (KEM) finding
@@ -69,14 +102,33 @@ func algNameUpper(f *findings.UnifiedFinding) string {
 	return ""
 }
 
-// mlKEMVariant extracts the numeric variant from an ML-KEM name, e.g.
-// "ML-KEM-768" → 768, "MLKEM1024" → 1024. Returns 0 for bare "ML-KEM".
-func mlKEMVariant(name string) int {
-	return mlVariantLevel(name) // reuse cnsa2.go helper
+// isKEMPrimitive returns true when the finding's primitive suggests key exchange.
+// This includes TLS probe findings (NegotiatedGroupName set) and code findings
+// with a KEM or key-exchange primitive.
+func isKEMPrimitive(f *findings.UnifiedFinding) bool {
+	if f.NegotiatedGroupName != "" {
+		return true
+	}
+	if f.Algorithm == nil {
+		return false
+	}
+	prim := strings.ToLower(f.Algorithm.Primitive)
+	return prim == "kem" || prim == "key-exchange" || prim == "kex" || prim == "key_exchange"
 }
 
-// mlDSAVariant extracts the numeric variant from an ML-DSA name, e.g.
-// "ML-DSA-87" → 87, "MLDSA44" → 44. Returns 0 for bare "ML-DSA".
-func mlDSAVariant(name string) int {
-	return mlVariantLevel(name) // reuse cnsa2.go helper
+// depViolation returns a Violation for a quantum-vulnerable dependency finding
+// (Algorithm == nil && QuantumRisk == QRVulnerable), or nil otherwise.
+// This eliminates the repeated nil-Algorithm block across framework Evaluate methods.
+func depViolation(f *findings.UnifiedFinding, rule, message, deadline, remediation string) *Violation {
+	if f.Algorithm != nil || f.QuantumRisk != findings.QRVulnerable {
+		return nil
+	}
+	v := Violation{
+		Algorithm:   f.RawIdentifier,
+		Rule:        rule,
+		Message:     message,
+		Deadline:    deadline,
+		Remediation: remediation,
+	}
+	return &v
 }

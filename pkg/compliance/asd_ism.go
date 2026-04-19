@@ -85,8 +85,9 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 
 		// --- Rule: ML-KEM minimum grade: 1024 ---
 		// ASD ISM mandates ML-KEM-1024; lower parameter sets are insufficient.
-		if strings.HasPrefix(upper, "ML-KEM") || strings.HasPrefix(strings.ReplaceAll(upper, "-", ""), "MLKEM") {
-			variant := mlKEMVariant(name)
+		// Matches both hyphenated ("ML-KEM-768") and hyphen-less ("MLKEM768") forms.
+		if isMLKEMName(name) {
+			variant := mlVariantLevel(name)
 			if variant > 0 && variant < 1024 {
 				violations = append(violations, Violation{
 					Algorithm:   name,
@@ -101,8 +102,9 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 
 		// --- Rule: ML-DSA minimum grade: 87 ---
 		// ASD ISM mandates ML-DSA-87; lower parameter sets are insufficient.
-		if strings.HasPrefix(upper, "ML-DSA") || strings.HasPrefix(strings.ReplaceAll(upper, "-", ""), "MLDSA") {
-			variant := mlDSAVariant(name)
+		// Matches both hyphenated ("ML-DSA-44") and hyphen-less ("MLDSA44") forms.
+		if isMLDSAName(name) {
+			variant := mlVariantLevel(name)
 			if variant > 0 && variant < 87 {
 				violations = append(violations, Violation{
 					Algorithm:   name,

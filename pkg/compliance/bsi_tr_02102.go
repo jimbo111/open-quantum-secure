@@ -116,16 +116,3 @@ func init() {
 	Register(bsiTR02102Framework{})
 }
 
-// isKEMPrimitive returns true when the finding's primitive suggests key exchange.
-// This includes TLS probe findings (NegotiatedGroupName set) and code findings
-// with a KEM or key-exchange primitive.
-func isKEMPrimitive(f *findings.UnifiedFinding) bool {
-	if f.NegotiatedGroupName != "" {
-		return true
-	}
-	if f.Algorithm == nil {
-		return false
-	}
-	prim := strings.ToLower(f.Algorithm.Primitive)
-	return prim == "kem" || prim == "key-exchange" || prim == "kex" || prim == "key_exchange"
-}

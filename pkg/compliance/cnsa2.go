@@ -130,9 +130,26 @@ func (cnsa20Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
+		// --- Rule: hybrid KEM below ML-KEM-1024 grade ---
+		// CNSA 2.0 requires ML-KEM-1024 for key exchange. Hybrid KEMs that use a
+		// sub-1024 ML-KEM variant (e.g. X25519MLKEM768) do not meet the grade requirement.
+		if isHybridKEM(f) {
+			variant := mlVariantLevel(name)
+			if variant > 0 && variant < 1024 {
+				violations = append(violations, newCNSA2Violation(
+					name,
+					"cnsa2-hybrid-sub-1024",
+					"CNSA 2.0 requires ML-KEM-1024; "+name+" is a hybrid KEM using a sub-1024 ML-KEM variant — upgrade to use ML-KEM-1024",
+					deadlineKeyExchange,
+				))
+			}
+			continue
+		}
+
 		// --- Rule: ML-KEM key size minimum ---
 		// CNSA 2.0 requires ML-KEM-1024. ML-KEM-512 and ML-KEM-768 are insufficient.
-		if strings.HasPrefix(upper, "ML-KEM") {
+		// Matches both hyphenated ("ML-KEM-768") and hyphen-less ("MLKEM768") forms.
+		if isMLKEMName(name) {
 			variant := mlVariantLevel(name)
 			if variant > 0 && variant < 1024 {
 				violations = append(violations, newCNSA2Violation(
@@ -147,7 +164,8 @@ func (cnsa20Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 
 		// --- Rule: ML-DSA parameter set minimum ---
 		// CNSA 2.0 requires ML-DSA-87. ML-DSA-44 and ML-DSA-65 are insufficient.
-		if strings.HasPrefix(upper, "ML-DSA") {
+		// Matches both hyphenated ("ML-DSA-44") and hyphen-less ("MLDSA44") forms.
+		if isMLDSAName(name) {
 			variant := mlVariantLevel(name)
 			if variant > 0 && variant < 87 {
 				violations = append(violations, newCNSA2Violation(
@@ -259,25 +277,6 @@ func deadlineForHNDL(hndlRisk string) string {
 	return deadlineFull
 }
 
-// mlVariantLevel extracts the numeric parameter level from an ML-KEM or ML-DSA
-// name. For example: "ML-KEM-768" → 768, "ML-DSA-44" → 44, "ML-KEM" → 0.
-// Returns 0 when no numeric suffix is present.
-func mlVariantLevel(name string) int {
-	idx := strings.LastIndex(name, "-")
-	if idx < 0 || idx == len(name)-1 {
-		return 0
-	}
-	suffix := name[idx+1:]
-	n := 0
-	for _, ch := range suffix {
-		if ch < '0' || ch > '9' {
-			return 0
-		}
-		n = n*10 + int(ch-'0')
-	}
-	return n
-}
-
 // resolveSymmetricKeySize returns the effective key size for a symmetric algorithm.
 // It tries the provided keySize first, then infers from the name.
 func resolveSymmetricKeySize(upperName string, keySize int) int {
@@ -347,6 +346,8 @@ func remediationForRule(rule, algorithm string) string {
 		default:
 			return "Replace with an approved CNSA 2.0 algorithm (ML-KEM-1024, ML-DSA-87, AES-256, SHA-384/SHA-512)"
 		}
+	case "cnsa2-hybrid-sub-1024":
+		return "Upgrade the ML-KEM component to ML-KEM-1024; CNSA 2.0 requires the 1024 parameter set regardless of hybrid configuration"
 	case "cnsa2-ml-kem-key-size":
 		return "Upgrade to ML-KEM-1024; ML-KEM-512 and ML-KEM-768 do not meet CNSA 2.0 minimum"
 	case "cnsa2-ml-dsa-param-set":

@@ -434,6 +434,7 @@ func TestMlVariantLevel(t *testing.T) {
 		name string
 		want int
 	}{
+		// hyphenated forms
 		{"ML-KEM-512", 512},
 		{"ML-KEM-768", 768},
 		{"ML-KEM-1024", 1024},
@@ -443,12 +444,125 @@ func TestMlVariantLevel(t *testing.T) {
 		{"ML-DSA-87", 87},
 		{"ML-DSA", 0},
 		{"SLH-DSA-128f", 0}, // suffix is "128f" — not purely numeric
+		// hyphen-less forms (TLS probe emits these)
+		{"MLKEM512", 512},
+		{"MLKEM768", 768},
+		{"MLKEM1024", 1024},
+		{"MLKEM", 0},
+		{"MLDSA44", 44},
+		{"MLDSA65", 65},
+		{"MLDSA87", 87},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := mlVariantLevel(tt.name)
 			if got != tt.want {
 				t.Errorf("mlVariantLevel(%q) = %d, want %d", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCNSA2_HyphenlessMLKEM verifies that hyphen-less ML-KEM names (emitted by
+// the TLS probe) are correctly caught by the grade check (C1 reproducer).
+func TestCNSA2_HyphenlessMLKEM(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantViolate bool
+		wantRule    string
+	}{
+		{"MLKEM512", true, "cnsa2-ml-kem-key-size"},
+		{"MLKEM768", true, "cnsa2-ml-kem-key-size"},
+		{"MLKEM1024", false, ""},
+		{"MLKEM", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := algFinding(tt.algName, "kem", 0, findings.QRSafe, "immediate")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantViolate {
+				if len(v) != 1 {
+					t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+				}
+				if v[0].Rule != tt.wantRule {
+					t.Errorf("rule = %q, want %q", v[0].Rule, tt.wantRule)
+				}
+				if v[0].Deadline != deadlineKeyExchange {
+					t.Errorf("deadline = %q, want %q", v[0].Deadline, deadlineKeyExchange)
+				}
+			} else {
+				if len(v) != 0 {
+					t.Errorf("expected no violations, got: %+v", v)
+				}
+			}
+		})
+	}
+}
+
+// TestCNSA2_HyphenlessMLDSA verifies that hyphen-less ML-DSA names are correctly
+// caught by the param-set check (C1 reproducer).
+func TestCNSA2_HyphenlessMLDSA(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantViolate bool
+	}{
+		{"MLDSA44", true},
+		{"MLDSA65", true},
+		{"MLDSA87", false},
+		{"MLDSA", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := algFinding(tt.algName, "signature", 0, findings.QRSafe, "deferred")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantViolate {
+				if len(v) != 1 {
+					t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+				}
+				if v[0].Rule != "cnsa2-ml-dsa-param-set" {
+					t.Errorf("rule = %q, want cnsa2-ml-dsa-param-set", v[0].Rule)
+				}
+			} else {
+				if len(v) != 0 {
+					t.Errorf("expected no violations, got: %+v", v)
+				}
+			}
+		})
+	}
+}
+
+// TestCNSA2_HybridSubGrade verifies that hybrid KEMs using a sub-1024 ML-KEM
+// variant produce a cnsa2-hybrid-sub-1024 violation (C3 reproducer).
+func TestCNSA2_HybridSubGrade(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantViolate bool
+		wantRule    string
+	}{
+		{"X25519MLKEM768", true, "cnsa2-hybrid-sub-1024"},
+		{"X25519MLKEM512", true, "cnsa2-hybrid-sub-1024"},
+		{"X25519MLKEM1024", false, ""},
+		{"SecP256r1MLKEM768", true, "cnsa2-hybrid-sub-1024"},
+		{"SecP384r1MLKEM1024", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := algFinding(tt.algName, "kem", 0, findings.QRSafe, "immediate")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantViolate {
+				if len(v) != 1 {
+					t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+				}
+				if v[0].Rule != tt.wantRule {
+					t.Errorf("rule = %q, want %q", v[0].Rule, tt.wantRule)
+				}
+				if v[0].Deadline != deadlineKeyExchange {
+					t.Errorf("deadline = %q, want %q", v[0].Deadline, deadlineKeyExchange)
+				}
+			} else {
+				if len(v) != 0 {
+					t.Errorf("expected no violations, got: %+v", v)
+				}
 			}
 		})
 	}
