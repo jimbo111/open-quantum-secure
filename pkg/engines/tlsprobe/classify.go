@@ -410,6 +410,16 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 		}
 	}
 
+	// R1: propagate truncation signal — partial enum results mean the inventory
+	// is incomplete. Mark all findings for this target so callers can signal
+	// that further probing may reveal additional supported groups or sig algs.
+	if result.EnumTruncated {
+		for i := range ff {
+			ff[i].PartialInventory = true
+			ff[i].PartialInventoryReason = "ENUMERATION_TRUNCATED"
+		}
+	}
+
 	return ff
 }
 

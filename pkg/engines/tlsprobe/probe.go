@@ -73,6 +73,11 @@ type ProbeResult struct {
 	EnumServerPrefMode string
 	// EnumerationMode records which S8 passes ran; joined by "+" (e.g. "groups+preference").
 	EnumerationMode string
+	// EnumTruncated is true when at least one enumeration pass returned partial results
+	// (some probes succeeded before the context expired or a transport error occurred).
+	EnumTruncated bool
+	// EnumTruncationReason is a human-readable explanation set when EnumTruncated is true.
+	EnumTruncationReason string
 }
 
 // ProbeOpts configures a single TLS probe.

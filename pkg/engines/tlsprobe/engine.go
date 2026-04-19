@@ -167,14 +167,18 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 
 			if opts.EnumerateGroups {
 				gr, gErr := enumerateGroups(enumCtx, addr, host, timeout)
-				if gErr != nil && len(gr.AcceptedGroups) == 0 && len(gr.HRRGroups) == 0 {
+				hasGroups := len(gr.AcceptedGroups) > 0 || len(gr.HRRGroups) > 0
+				if gErr != nil && !hasGroups {
 					fmt.Fprintf(os.Stderr, "enumerate-groups: %s: %v\n", r.Target, gErr)
 				} else {
 					r.EnumAcceptedGroups = gr.AcceptedGroups
 					r.EnumHRRGroups = gr.HRRGroups
 					modes = append(modes, "groups")
-					fmt.Fprintf(os.Stderr, "enumerate-groups: %s — %d accepted, %d HRR, %d rejected\n",
-						r.Target, len(gr.AcceptedGroups), len(gr.HRRGroups), len(gr.RejectedGroups))
+					if gErr != nil {
+						// Partial results — some probes succeeded before context/transport error.
+						r.EnumTruncated = true
+						r.EnumTruncationReason = "enumerate-groups: " + gErr.Error()
+					}
 				}
 			}
 
@@ -185,8 +189,11 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 				} else {
 					r.EnumSupportedSigAlgs = sr.AcceptedSigAlgs
 					modes = append(modes, "sigalgs")
-					fmt.Fprintf(os.Stderr, "enumerate-sigalgs: %s — %d accepted\n",
-						r.Target, len(sr.AcceptedSigAlgs))
+					if sErr != nil {
+						// Partial results — some probes succeeded before context/transport error.
+						r.EnumTruncated = true
+						r.EnumTruncationReason = "enumerate-sigalgs: " + sErr.Error()
+					}
 				}
 			}
 
