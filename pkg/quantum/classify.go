@@ -586,8 +586,6 @@ func normalizePrimitive(p string) string {
 		return "key-agree"
 	case "signature", "sign", "digital-signature":
 		return "signature"
-	case "asymmetric":
-		return "pke"
 	case "hash", "digest":
 		return "hash"
 	case "mac", "hmac":

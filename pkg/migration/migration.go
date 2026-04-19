@@ -68,6 +68,53 @@ func isSafePQC(alg string) bool {
 	return false
 }
 
+// familyFromTargetAlg infers snippet family ("sign" or "kem") from the PQC target
+// algorithm. ML-KEM → "kem", ML-DSA/SLH-DSA → "sign". Returns "" when the target
+// does not map to a known PQC family.
+//
+// Used by GenerateSnippet as an override: when the primitive hint disagrees with
+// the classical algorithm's hardcoded family (e.g. quantum pkg recommends ML-KEM
+// for RSA used as encryption, but classicalAlgFamily("RSA") returns "sign"), the
+// target-derived family wins so the emitted code matches the recommended algorithm.
+func familyFromTargetAlg(targetAlg string) string {
+	upper := strings.ToUpper(targetAlg)
+	switch {
+	case strings.HasPrefix(upper, "ML-KEM") || strings.HasPrefix(upper, "MLKEM"):
+		return "kem"
+	case strings.HasPrefix(upper, "ML-DSA") || strings.HasPrefix(upper, "MLDSA"),
+		strings.HasPrefix(upper, "SLH-DSA") || strings.HasPrefix(upper, "SLHDSA"):
+		return "sign"
+	}
+	return ""
+}
+
+// pqcStdSuffix returns a parenthetical FIPS standard suffix for a PQC target,
+// or an empty string when the target is unknown. Used to build explanation
+// strings without hardcoding the standard number — so SLH-DSA targets render
+// as "(FIPS 205)" instead of the incorrect "(FIPS 204)".
+func pqcStdSuffix(targetAlg string) string {
+	std := fipsStandardFor(targetAlg)
+	if std == "" {
+		return ""
+	}
+	return " (" + std + ")"
+}
+
+// fipsStandardFor returns the NIST FIPS publication that standardises targetAlg.
+// ML-KEM → FIPS 203, ML-DSA → FIPS 204, SLH-DSA → FIPS 205. Returns "" otherwise.
+func fipsStandardFor(targetAlg string) string {
+	upper := strings.ToUpper(targetAlg)
+	switch {
+	case strings.HasPrefix(upper, "ML-KEM") || strings.HasPrefix(upper, "MLKEM"):
+		return "FIPS 203"
+	case strings.HasPrefix(upper, "ML-DSA") || strings.HasPrefix(upper, "MLDSA"):
+		return "FIPS 204"
+	case strings.HasPrefix(upper, "SLH-DSA") || strings.HasPrefix(upper, "SLHDSA"):
+		return "FIPS 205"
+	}
+	return ""
+}
+
 // classicalAlgFamily maps an arbitrary classical algorithm name (case-insensitive)
 // to a canonical two-value family: "sign" or "kem".
 // Returns "" when the algorithm is already PQC-safe or is unrecognised.
@@ -205,6 +252,15 @@ func GenerateSnippet(filePath, classicalAlg, primitive, targetAlg string) *Snipp
 		}
 	}
 
+	// Target-derived family overrides classical family when they disagree.
+	// Prevents the bug where RSA (classicalAlgFamily="sign") paired with a
+	// KEM target (e.g. ML-KEM-768, picked by pkg/quantum for RSA used in
+	// encryption/KEM context) produced signing code calling oqs.Signature
+	// on a KEM algorithm — runtime-invalid and misleading.
+	if tf := familyFromTargetAlg(target); tf != "" && tf != family {
+		family = tf
+	}
+
 	switch lang {
 	case "go":
 		return goSnippet(classicalAlg, primitive, family, target)
@@ -259,7 +315,7 @@ isValid, _ := signer.Verify(message, sig, pub)`
 			Language:    "go",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + " (FIPS 204) via liboqs-go.",
+			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via liboqs-go.",
 		}
 
 	case "kem":
@@ -284,7 +340,7 @@ ciphertext, sharedSecret, _ := kem.EncapSecret(pub)`
 			Language:    "go",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace ECDH/X25519 key exchange with " + targetAlg + " (FIPS 203) via liboqs-go.",
+			Explanation: "Replace ECDH/X25519 key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via liboqs-go.",
 		}
 	}
 	return nil
@@ -313,7 +369,7 @@ with oqs.Signature("` + targetAlg + `") as signer:
 			Language:    "python",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + " (FIPS 204) via liboqs-python.",
+			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via liboqs-python.",
 		}
 
 	case "kem":
@@ -332,7 +388,7 @@ with oqs.KeyEncapsulation("` + targetAlg + `") as kem:
 			Language:    "python",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace ECDH key exchange with " + targetAlg + " (FIPS 203) via liboqs-python.",
+			Explanation: "Replace ECDH key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via liboqs-python.",
 		}
 	}
 	return nil
@@ -381,7 +437,7 @@ KeyPair kp = kpg.generateKeyPair();`
 			Language:    "java",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA with " + targetAlg + " (FIPS 204) using Bouncy Castle BCPQC provider.",
+			Explanation: "Replace RSA/ECDSA with " + targetAlg + pqcStdSuffix(targetAlg) + " using Bouncy Castle BCPQC provider.",
 		}
 
 	case "kem":
@@ -403,7 +459,7 @@ KeyPair kp = kpg.generateKeyPair();`
 			Language:    "java",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace ECDH key agreement with " + targetAlg + " (FIPS 203) using Bouncy Castle BCPQC provider.",
+			Explanation: "Replace ECDH key agreement with " + targetAlg + pqcStdSuffix(targetAlg) + " using Bouncy Castle BCPQC provider.",
 		}
 	}
 	return nil
@@ -437,7 +493,7 @@ sig.verify(message, &signature, &pk)?;`
 			Language:    "rust",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + " (FIPS 204) via the oqs crate.",
+			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via the oqs crate.",
 		}
 
 	case "kem":
@@ -457,7 +513,7 @@ let (ciphertext, shared_secret) = kem.encapsulate(&pk)?;`
 			Language:    "rust",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace X25519/ECDH key exchange with " + targetAlg + " (FIPS 203) via the oqs crate.",
+			Explanation: "Replace X25519/ECDH key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via the oqs crate.",
 		}
 	}
 	return nil
@@ -665,7 +721,7 @@ const signature = sig.sign(message);`
 			Language:    lang,
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + " (FIPS 204) via liboqs-node.",
+			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via liboqs-node.",
 		}
 
 	case "kem":
@@ -687,7 +743,7 @@ const { ciphertext, sharedSecret } = kem.encapSecret(publicKey);`
 			Language:    lang,
 			Before:      before,
 			After:       after,
-			Explanation: "Replace ECDH key exchange with " + targetAlg + " (FIPS 203) via liboqs-node.",
+			Explanation: "Replace ECDH key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via liboqs-node.",
 		}
 	}
 	return nil
@@ -719,7 +775,7 @@ EVP_PKEY_keygen(ctx, &pkey);`
 			Language:    lang,
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA key generation with " + targetAlg + " (FIPS 204) via OpenSSL 3.5+ or oqs-provider.",
+			Explanation: "Replace RSA/ECDSA key generation with " + targetAlg + pqcStdSuffix(targetAlg) + " via OpenSSL 3.5+ or oqs-provider.",
 		}
 
 	case "kem":
@@ -741,7 +797,7 @@ EVP_PKEY_keygen(ctx, &pkey);`
 			Language:    lang,
 			Before:      before,
 			After:       after,
-			Explanation: "Replace ECDH/X25519 key exchange with " + targetAlg + " (FIPS 203) via OpenSSL 3.5+ or oqs-provider.",
+			Explanation: "Replace ECDH/X25519 key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via OpenSSL 3.5+ or oqs-provider.",
 		}
 	}
 	return nil
@@ -769,7 +825,7 @@ var keyPair = keyGen.GenerateKeyPair();`
 			Language:    "csharp",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + " (FIPS 204) via BouncyCastle for .NET.",
+			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via BouncyCastle for .NET.",
 		}
 
 	case "kem":
@@ -789,7 +845,7 @@ var keyPair = keyGen.GenerateKeyPair();`
 			Language:    "csharp",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace ECDH key exchange with " + targetAlg + " (FIPS 203) via BouncyCastle for .NET.",
+			Explanation: "Replace ECDH key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via BouncyCastle for .NET.",
 		}
 	}
 	return nil
