@@ -15,6 +15,7 @@ package tlsprobe
 
 import (
 	"crypto/tls"
+	"strings"
 	"testing"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
@@ -208,5 +209,76 @@ func TestClassifyAlgorithm_ClassicalGroup_IsVulnerable(t *testing.T) {
 	cls := quantum.ClassifyAlgorithm(info.Name, "key-exchange", 0)
 	if cls.Risk != quantum.RiskVulnerable {
 		t.Errorf("ClassifyAlgorithm(%q).Risk=%v, want RiskVulnerable", info.Name, cls.Risk)
+	}
+}
+
+// TestObservationToFindings_ECHPlusEnumTruncation_ComposedReason is the regression
+// test for Bug 2 (cross-sprint review). Before the fix, S8's EnumTruncated block
+// unconditionally overwrote S2's PartialInventoryReason="ECH_ENABLED" with the
+// truncation reason, silently breaking the S3 CT-lookup auto-chain. The fix
+// composes reasons with "+" so both signals survive; consumers use HasPrefix
+// (orchestrator.go, ctlookup/correlate.go) to detect ECH within composed values.
+func TestObservationToFindings_ECHPlusEnumTruncation_ComposedReason(t *testing.T) {
+	t.Parallel()
+
+	result := ProbeResult{
+		Target:                 "ech-host.example.com:443",
+		TLSVersion:             tls.VersionTLS13,
+		CipherSuiteID:          tls.TLS_AES_128_GCM_SHA256,
+		CipherSuiteName:        "TLS_AES_128_GCM_SHA256",
+		NegotiatedGroupID:      0x001d, // X25519
+		ECHDetected:            true,   // S2 ECH signal
+		EnumerationMode:        "groups",
+		EnumTruncated:          true, // S8 truncation signal
+		EnumTruncationReason:   "enumerate-groups: context deadline exceeded",
+	}
+	ff := observationToFindings(result)
+	if len(ff) == 0 {
+		t.Fatal("expected findings")
+	}
+
+	// Every finding must be marked partial with a composed reason.
+	for i, f := range ff {
+		if !f.PartialInventory {
+			t.Errorf("finding[%d]: PartialInventory=false, want true", i)
+		}
+		if !strings.HasPrefix(f.PartialInventoryReason, "ECH_ENABLED") {
+			t.Errorf("finding[%d]: PartialInventoryReason=%q, want HasPrefix(%q)",
+				i, f.PartialInventoryReason, "ECH_ENABLED")
+		}
+		if !strings.Contains(f.PartialInventoryReason, "enumerate-groups") {
+			t.Errorf("finding[%d]: PartialInventoryReason=%q, want Contains truncation reason",
+				i, f.PartialInventoryReason)
+		}
+	}
+}
+
+// TestObservationToFindings_EnumTruncationOnly_SoloReason verifies that when
+// EnumTruncated fires WITHOUT ECH, the reason is not prefixed with "+" (no
+// empty-string composition). Regression guard for the fix's else-branch.
+func TestObservationToFindings_EnumTruncationOnly_SoloReason(t *testing.T) {
+	t.Parallel()
+
+	result := ProbeResult{
+		Target:               "plain-host.example.com:443",
+		TLSVersion:           tls.VersionTLS13,
+		CipherSuiteID:        tls.TLS_AES_128_GCM_SHA256,
+		CipherSuiteName:      "TLS_AES_128_GCM_SHA256",
+		NegotiatedGroupID:    0x001d,
+		ECHDetected:          false, // no ECH
+		EnumerationMode:      "groups",
+		EnumTruncated:        true,
+		EnumTruncationReason: "PROBE_BUDGET_EXHAUSTED",
+	}
+	ff := observationToFindings(result)
+	if len(ff) == 0 {
+		t.Fatal("expected findings")
+	}
+
+	for i, f := range ff {
+		if f.PartialInventoryReason != "PROBE_BUDGET_EXHAUSTED" {
+			t.Errorf("finding[%d]: solo reason=%q, want %q (no '+' prefix)",
+				i, f.PartialInventoryReason, "PROBE_BUDGET_EXHAUSTED")
+		}
 	}
 }

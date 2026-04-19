@@ -413,6 +413,10 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 	// R1: propagate truncation signal — partial enum results mean the inventory
 	// is incomplete. Mark all findings for this target so callers can signal
 	// that further probing may reveal additional supported groups or sig algs.
+	// If an earlier reason was set (e.g. S2's "ECH_ENABLED"), compose with "+"
+	// so both signals survive — consumers use strings.HasPrefix/Contains to
+	// detect specific reasons. A plain overwrite here would clobber the ECH
+	// signal and break the S3 CT-lookup auto-chain (orchestrator.go:1178).
 	if result.EnumTruncated {
 		reason := result.EnumTruncationReason
 		if reason == "" {
@@ -420,7 +424,11 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 		}
 		for i := range ff {
 			ff[i].PartialInventory = true
-			ff[i].PartialInventoryReason = reason
+			if ff[i].PartialInventoryReason != "" {
+				ff[i].PartialInventoryReason = ff[i].PartialInventoryReason + "+" + reason
+			} else {
+				ff[i].PartialInventoryReason = reason
+			}
 		}
 	}
 

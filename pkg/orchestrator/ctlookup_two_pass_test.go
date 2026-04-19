@@ -223,3 +223,58 @@ func TestOrchestrator_CTLookupFromECH_NoECHFindings(t *testing.T) {
 		}
 	}
 }
+
+// TestOrchestrator_CTLookupFromECH_ComposedReason verifies that when an ECH target
+// has its PartialInventoryReason composed with a later signal (e.g. S8 enumeration
+// truncation producing "ECH_ENABLED+ENUMERATION_TRUNCATED"), the orchestrator still
+// extracts the hostname for CT lookup. Regression test for Bug 2 — the composed
+// reason silently broke the S2→S3 auto-chain in the original S8 implementation.
+func TestOrchestrator_CTLookupFromECH_ComposedReason(t *testing.T) {
+	const echHost = "ech-truncated.example.com"
+
+	composedProbe := &mockEngine{
+		name:      "tls-probe",
+		tier:      engines.Tier5Network,
+		available: true,
+		results: []findings.UnifiedFinding{
+			{
+				Location:               findings.Location{File: "(tls-probe)/" + echHost + ":443#kex"},
+				Algorithm:              &findings.Algorithm{Name: "ECDHE", Primitive: "key-exchange"},
+				Confidence:             findings.ConfidenceMedium,
+				SourceEngine:           "tls-probe",
+				Reachable:              findings.ReachableYes,
+				PartialInventory:       true,
+				PartialInventoryReason: "ECH_ENABLED+ENUMERATION_TRUNCATED",
+			},
+		},
+	}
+	ctLookup := &spyCTLookupEngine{}
+
+	o := New(composedProbe, ctLookup)
+
+	_, err := o.Scan(context.Background(), engines.ScanOptions{
+		CTLookupFromECH: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+
+	ctLookup.mu.Lock()
+	defer ctLookup.mu.Unlock()
+
+	if len(ctLookup.callOpts) == 0 {
+		t.Fatal("ct-lookup engine was never called")
+	}
+
+	var found bool
+	for _, target := range ctLookup.callOpts[0].CTLookupTargets {
+		if target == echHost {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("composed reason: CTLookupTargets = %v, expected to contain %q",
+			ctLookup.callOpts[0].CTLookupTargets, echHost)
+	}
+}
