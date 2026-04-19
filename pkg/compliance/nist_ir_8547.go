@@ -57,14 +57,11 @@ func (nistIR8547Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		f := &ff[i]
 
 		if f.Algorithm == nil {
-			if f.QuantumRisk == findings.QRVulnerable {
-				violations = append(violations, Violation{
-					Algorithm:   f.RawIdentifier,
-					Rule:        "nist8547-quantum-vulnerable",
-					Message:     "quantum-vulnerable dependency must be replaced per NIST IR 8547 federal civilian PQC transition schedule",
-					Deadline:    nist8547DeprecateDate,
-					Remediation: "Migrate to NIST FIPS 203 (ML-KEM) or FIPS 204 (ML-DSA) per NIST IR 8547; disallowed by 2035-12-31",
-				})
+			if v := depViolation(f, "nist8547-quantum-vulnerable",
+				"quantum-vulnerable dependency must be replaced per NIST IR 8547 federal civilian PQC transition schedule",
+				nist8547DeprecateDate,
+				"Migrate to NIST FIPS 203 (ML-KEM) or FIPS 204 (ML-DSA) per NIST IR 8547; disallowed by 2035-12-31"); v != nil {
+				violations = append(violations, *v)
 			}
 			continue
 		}

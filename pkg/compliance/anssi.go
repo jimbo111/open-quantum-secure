@@ -55,14 +55,11 @@ func (anssiFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		f := &ff[i]
 
 		if f.Algorithm == nil {
-			if f.QuantumRisk == findings.QRVulnerable {
-				violations = append(violations, Violation{
-					Algorithm:   f.RawIdentifier,
-					Rule:        "anssi-quantum-vulnerable",
-					Message:     "quantum-vulnerable dependency must be replaced; ANSSI requires PQC or hybrid migration",
-					Deadline:    anssiDeadlineKEX,
-					Remediation: "Migrate to a hybrid PQC+classical library per ANSSI guidance",
-				})
+			if v := depViolation(f, "anssi-quantum-vulnerable",
+				"quantum-vulnerable dependency must be replaced; ANSSI requires PQC or hybrid migration",
+				anssiDeadlineKEX,
+				"Migrate to a hybrid PQC+classical library per ANSSI guidance"); v != nil {
+				violations = append(violations, *v)
 			}
 			continue
 		}

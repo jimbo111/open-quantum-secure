@@ -55,14 +55,11 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		f := &ff[i]
 
 		if f.Algorithm == nil {
-			if f.QuantumRisk == findings.QRVulnerable {
-				violations = append(violations, Violation{
-					Algorithm:   f.RawIdentifier,
-					Rule:        "asd-quantum-vulnerable",
-					Message:     "quantum-vulnerable dependency must be replaced; ASD ISM requires PQC migration for Australian government systems",
-					Deadline:    asdDeadlineKEX,
-					Remediation: "Migrate to an ASD ISM approved PQC library (ML-KEM-1024 for key exchange, ML-DSA-87 for signatures)",
-				})
+			if v := depViolation(f, "asd-quantum-vulnerable",
+				"quantum-vulnerable dependency must be replaced; ASD ISM requires PQC migration for Australian government systems",
+				asdDeadlineKEX,
+				"Migrate to an ASD ISM approved PQC library (ML-KEM-1024 for key exchange, ML-DSA-87 for signatures)"); v != nil {
+				violations = append(violations, *v)
 			}
 			continue
 		}

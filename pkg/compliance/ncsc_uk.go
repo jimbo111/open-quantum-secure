@@ -54,14 +54,11 @@ func (ncscUKFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		f := &ff[i]
 
 		if f.Algorithm == nil {
-			if f.QuantumRisk == findings.QRVulnerable {
-				violations = append(violations, Violation{
-					Algorithm:   f.RawIdentifier,
-					Rule:        "ncsc-quantum-vulnerable",
-					Message:     "quantum-vulnerable dependency must be replaced; NCSC UK guidance requires PQC migration",
-					Deadline:    ncscDeadlineKEX,
-					Remediation: "Migrate to an NCSC-recommended PQC algorithm per the NCSC post-quantum cryptography whitepaper",
-				})
+			if v := depViolation(f, "ncsc-quantum-vulnerable",
+				"quantum-vulnerable dependency must be replaced; NCSC UK guidance requires PQC migration",
+				ncscDeadlineKEX,
+				"Migrate to an NCSC-recommended PQC algorithm per the NCSC post-quantum cryptography whitepaper"); v != nil {
+				violations = append(violations, *v)
 			}
 			continue
 		}

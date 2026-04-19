@@ -416,6 +416,9 @@ Example with data lifetime adjustment for healthcare:
 			if err := validateFailOn(failOn); err != nil {
 				return err
 			}
+			if err := validateComplianceFlags(complianceFlags); err != nil {
+				return err
+			}
 			if err := validateCIMode(ciMode); err != nil {
 				return err
 			}
@@ -842,6 +845,9 @@ Example:
 			}
 			applyCommonConfigFallbacks(cmd, cfg, &format, &timeout, &maxFileMB, &engineNames, &excludePatterns, &failOn)
 			if err := validateFailOn(failOn); err != nil {
+				return err
+			}
+			if err := validateComplianceFlags(complianceFlags); err != nil {
 				return err
 			}
 			if err := validateCIMode(ciMode); err != nil {
@@ -2071,6 +2077,29 @@ func evaluateCompliance(standards []string, results []findings.UnifiedFinding) e
 	return nil
 }
 
+// validateComplianceFlags validates all --compliance framework IDs before the scan
+// runs. All unknown IDs are reported together in a single error message so the user
+// can fix them all at once rather than discovering them one by one.
+func validateComplianceFlags(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var unknown []string
+	for _, id := range ids {
+		if id == "all" {
+			continue
+		}
+		if _, ok := compliance.Get(id); !ok {
+			unknown = append(unknown, id)
+		}
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("--compliance: unknown framework ID(s): %s (supported: %s)",
+			strings.Join(unknown, ", "), strings.Join(compliance.SupportedIDs(), ", "))
+	}
+	return nil
+}
+
 // validateCIMode validates the --ci-mode flag value.
 func validateCIMode(mode string) error {
 	switch mode {
@@ -2966,28 +2995,30 @@ upload:
 
 func complianceReportCmd() *cobra.Command {
 	var (
-		targetPath    string
-		outputFile    string
-		projectOvr    string
-		reportStandard string
+		targetPath      string
+		outputFile      string
+		projectOvr      string
+		reportStandards []string
 	)
 	cmd := &cobra.Command{
 		Use:   "compliance-report",
-		Short: "Generate a compliance report in markdown for a selected framework",
+		Short: "Generate a compliance report in markdown for one or more frameworks",
 		Long: `Scan a directory for cryptographic usage and generate a formal compliance
-report in markdown format for the selected framework (default: cnsa-2.0). The report
+report in markdown format for the selected framework(s) (default: cnsa-2.0). When multiple
+frameworks are specified the reports are concatenated with --- separators. Each report
 includes an executive summary, per-algorithm compliance status, violation details,
 approved algorithm reference, and key deadlines. Output can be written to a file or stdout.
 
 Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if reportStandard == "" {
-				reportStandard = string(compliance.StandardCNSA20)
+			if len(reportStandards) == 0 {
+				reportStandards = []string{string(compliance.StandardCNSA20)}
 			}
-			fw, ok := compliance.Get(reportStandard)
-			if !ok {
-				return fmt.Errorf("--compliance: unsupported standard %q (supported: %s)",
-					reportStandard, strings.Join(compliance.SupportedIDs(), ", "))
+
+			// Validate all framework IDs before scanning so the user gets a complete
+			// error message listing every unknown ID rather than a first-match failure.
+			if err := validateComplianceFlags(reportStandards); err != nil {
+				return err
 			}
 
 			absPath, err := filepath.Abs(targetPath)
@@ -3014,7 +3045,8 @@ Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 			if len(selected) == 0 {
 				return fmt.Errorf("no scanner engines found — run 'oqs-scanner engines install --all' or ensure binaries are in PATH")
 			}
-			fmt.Fprintf(os.Stderr, "Scanning %s with %d engine(s) for %s compliance report...\n", absPath, len(selected), fw.Name())
+			fmt.Fprintf(os.Stderr, "Scanning %s with %d engine(s) for compliance report (%s)...\n",
+				absPath, len(selected), strings.Join(reportStandards, ", "))
 
 			scanStart := time.Now()
 			ff, _, err := orch.ScanWithImpact(ctx, opts)
@@ -3023,9 +3055,6 @@ Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 				return fmt.Errorf("scan failed: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "Scan completed in %s — %d findings\n", scanDuration.Round(time.Millisecond), len(ff))
-
-			violations := fw.Evaluate(ff)
-			data := compliance.BuildReportData(fw, ff, violations, project, version, time.Now())
 
 			var w io.Writer = os.Stdout
 			var outFile *os.File
@@ -3038,12 +3067,33 @@ Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 				w = f
 			}
 
-			if err := compliance.GenerateMarkdown(w, data); err != nil {
-				if outFile != nil {
-					outFile.Close()
+			scanDate := time.Now()
+			var totalViolations int
+			anyFail := false
+			for i, fwID := range reportStandards {
+				fw, _ := compliance.Get(fwID) // already validated above
+				violations := fw.Evaluate(ff)
+				data := compliance.BuildReportData(fw, ff, violations, project, version, scanDate)
+				if i > 0 {
+					if _, err := fmt.Fprint(w, "\n---\n\n"); err != nil {
+						if outFile != nil {
+							outFile.Close()
+						}
+						return fmt.Errorf("write separator: %w", err)
+					}
 				}
-				return fmt.Errorf("generate report: %w", err)
+				if err := compliance.GenerateMarkdown(w, data); err != nil {
+					if outFile != nil {
+						outFile.Close()
+					}
+					return fmt.Errorf("generate report for %s: %w", fwID, err)
+				}
+				totalViolations += len(violations)
+				if !data.Compliant {
+					anyFail = true
+				}
 			}
+
 			if outFile != nil {
 				if err := outFile.Sync(); err != nil {
 					outFile.Close()
@@ -3056,8 +3106,8 @@ Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 
 			if outputFile != "" {
 				status := "PASS"
-				if !data.Compliant {
-					status = fmt.Sprintf("FAIL (%d violation(s))", len(violations))
+				if anyFail {
+					status = fmt.Sprintf("FAIL (%d total violation(s))", totalViolations)
 				}
 				fmt.Fprintf(os.Stderr, "Compliance report written to %s — %s\n", outputFile, status)
 			}
@@ -3067,7 +3117,8 @@ Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 	cmd.Flags().StringVar(&targetPath, "path", ".", "Directory to scan")
 	cmd.Flags().StringVar(&outputFile, "output", "", "Output file path (default: stdout)")
 	cmd.Flags().StringVar(&projectOvr, "project", "", "Project name for report header (default: inferred from git)")
-	cmd.Flags().StringVar(&reportStandard, "compliance", string(compliance.StandardCNSA20), "Compliance framework to report on (supported: "+strings.Join(compliance.SupportedIDs(), ", ")+")")
+	cmd.Flags().StringSliceVar(&reportStandards, "compliance", []string{string(compliance.StandardCNSA20)},
+		"Compliance framework(s) to report on, comma-separated or repeated (supported: "+strings.Join(compliance.SupportedIDs(), ", ")+")")
 	return cmd
 }
 

@@ -358,6 +358,29 @@ func TestGenerateMarkdown_VersionPrefix(t *testing.T) {
 	}
 }
 
+// TestGenerateMarkdown_MarkdownInjection verifies that newlines in algorithm names
+// cannot inject fake markdown headers into the report output (M1 security fix).
+func TestGenerateMarkdown_MarkdownInjection(t *testing.T) {
+	injection := "RSA-2048\n# HIJACKED\n**Status: PASS**"
+	ff := []findings.UnifiedFinding{
+		{
+			Algorithm:   &findings.Algorithm{Name: injection, Primitive: "kem"},
+			QuantumRisk: findings.QRVulnerable,
+			HNDLRisk:    "immediate",
+		},
+	}
+	violations := testFW.Evaluate(ff)
+	data := BuildReportData(testFW, ff, violations, "test", "1.0", fixedDate)
+	var sb strings.Builder
+	if err := GenerateMarkdown(&sb, data); err != nil {
+		t.Fatalf("GenerateMarkdown returned error: %v", err)
+	}
+	out := sb.String()
+	if strings.Contains(out, "\n# HIJACKED") {
+		t.Error("markdown injection: newline in algorithm name created a fake header in output")
+	}
+}
+
 func assertContains(t *testing.T, body, needle string) {
 	t.Helper()
 	if !strings.Contains(body, needle) {

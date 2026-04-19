@@ -63,6 +63,8 @@ type Framework interface {
 	Deadlines() []DeadlineRef
 }
 
+// Note: Register must only be called from init(); the registry is read without
+// locks at runtime. Concurrent Register + Get is a data race.
 var registry = map[string]Framework{}
 
 // Register adds fw to the registry. Each framework calls this from its init().

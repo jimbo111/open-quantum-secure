@@ -56,14 +56,11 @@ func (bsiTR02102Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		f := &ff[i]
 
 		if f.Algorithm == nil {
-			if f.QuantumRisk == findings.QRVulnerable {
-				violations = append(violations, Violation{
-					Algorithm:   f.RawIdentifier,
-					Rule:        "bsi-quantum-vulnerable",
-					Message:     "quantum-vulnerable dependency must be replaced; BSI TR-02102 requires PQC or hybrid migration",
-					Deadline:    bsiDeadlineKEX,
-					Remediation: "Migrate dependency to a PQC or hybrid-PQC library per BSI TR-02102-1",
-				})
+			if v := depViolation(f, "bsi-quantum-vulnerable",
+				"quantum-vulnerable dependency must be replaced; BSI TR-02102 requires PQC or hybrid migration",
+				bsiDeadlineKEX,
+				"Migrate dependency to a PQC or hybrid-PQC library per BSI TR-02102-1"); v != nil {
+				violations = append(violations, *v)
 			}
 			continue
 		}
