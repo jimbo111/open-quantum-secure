@@ -222,7 +222,14 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 			}
 
 			if opts.EnumerateSigAlgs {
-				if budgetExhausted() {
+				// TLS 1.3 encrypts the sig-alg negotiation (CertificateVerify); probing is
+				// only meaningful on TLS 1.3 connections. Skip for TLS ≤ 1.2 to avoid
+				// returning zero results that look like "no sig algs supported".
+				// 0x0304 = TLS 1.3. TLSVersion=0 means handshake failed; also skip.
+				const tls13Version = 0x0304
+				if r.TLSVersion != 0 && r.TLSVersion < tls13Version {
+					modes = append(modes, "sigalgs-skipped-tls12")
+				} else if budgetExhausted() {
 					markBudgetExhausted()
 				} else {
 					sr, sErr := enumerateSigAlgs(enumCtx, addr, host, timeout)
