@@ -117,7 +117,7 @@ func probeGroup(ctx context.Context, addr, sni string, timeout time.Duration, gr
 	}
 
 	// Write the raw record directly — it already includes the TLS record header.
-	conn.SetWriteDeadline(effectiveDeadline(dialCtx))
+	conn.SetWriteDeadline(effectiveDeadline(dialCtx)) //nolint:errcheck
 	if _, err := conn.Write(ch); err != nil {
 		return DeepProbeGroupResult{
 			GroupID: groupID,

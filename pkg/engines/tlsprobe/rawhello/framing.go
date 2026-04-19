@@ -57,7 +57,7 @@ func WriteRecord(ctx context.Context, conn net.Conn, rec Record) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	conn.SetWriteDeadline(effectiveDeadline(ctx))
+	conn.SetWriteDeadline(effectiveDeadline(ctx)) //nolint:errcheck
 
 	buf := make([]byte, 5+len(rec.Payload))
 	buf[0] = rec.Type
@@ -77,7 +77,7 @@ func ReadRecord(ctx context.Context, conn net.Conn) (Record, error) {
 	if err := ctx.Err(); err != nil {
 		return Record{}, err
 	}
-	conn.SetReadDeadline(effectiveDeadline(ctx))
+	conn.SetReadDeadline(effectiveDeadline(ctx)) //nolint:errcheck
 
 	var hdr [5]byte
 	if err := readFull(conn, hdr[:]); err != nil {
@@ -97,7 +97,7 @@ func ReadRecord(ctx context.Context, conn net.Conn) (Record, error) {
 		if err := ctx.Err(); err != nil {
 			return Record{}, err
 		}
-		conn.SetReadDeadline(effectiveDeadline(ctx))
+		conn.SetReadDeadline(effectiveDeadline(ctx)) //nolint:errcheck
 		if err := readFull(conn, payload); err != nil {
 			return Record{}, fmt.Errorf("rawhello: ReadRecord payload: %w", err)
 		}

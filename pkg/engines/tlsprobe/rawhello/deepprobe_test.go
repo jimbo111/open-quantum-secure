@@ -53,7 +53,7 @@ func newLocalServer(t *testing.T, handler func(net.Conn)) string {
 // drainAndSend discards incoming bytes then calls write.
 func drainAndSend(c net.Conn, write func(net.Conn)) {
 	buf := make([]byte, 4096)
-	c.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	c.SetReadDeadline(time.Now().Add(200 * time.Millisecond)) //nolint:errcheck
 	c.Read(buf) //nolint:errcheck
 	write(c)
 }
