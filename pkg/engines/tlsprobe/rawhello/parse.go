@@ -81,7 +81,7 @@ func parseServerHelloBody(body []byte) (ParseResult, error) {
 	// legacy_session_id_echo: 1-byte length + N bytes
 	sidLen := int(body[off])
 	off++
-	if sidLen < 0 || sidLen > 32 {
+	if sidLen > 32 {
 		return ParseResult{}, fmt.Errorf("rawhello: ServerHello session_id length %d out of range [0,32]", sidLen)
 	}
 	if len(body) < off+sidLen {
@@ -135,7 +135,7 @@ func extractKeyShareGroup(data []byte, isHRR bool) (uint16, error) {
 		extType := binary.BigEndian.Uint16(data[off : off+2])
 		extLen := int(binary.BigEndian.Uint16(data[off+2 : off+4]))
 		off += 4
-		if extLen < 0 || len(data) < off+extLen {
+		if len(data) < off+extLen {
 			return 0, fmt.Errorf("rawhello: extension 0x%04x: declared length %d exceeds remaining data %d",
 				extType, extLen, len(data)-off)
 		}
