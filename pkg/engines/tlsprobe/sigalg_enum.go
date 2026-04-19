@@ -150,11 +150,16 @@ func probeSigAlg(ctx context.Context, addr, sni string, timeout time.Duration, s
 
 	parsed, err := rawhello.ParseServerResponse(dialCtx, conn)
 	if err != nil {
-		// Transport/protocol error — not a clear rejection signal.
-		return false, nil
+		// Transport/protocol error — route as error so enumerateSigAlgs skips classification.
+		return false, err
 	}
 	if parsed.IsAlert {
 		// Explicit rejection before ServerHello.
+		return false, nil
+	}
+	if parsed.IsHRR {
+		// HRR requests a retry with a different key_share group — not a sig-alg
+		// signal. We don't retry inside a single probe; treat as indeterminate/rejected.
 		return false, nil
 	}
 

@@ -266,7 +266,8 @@ func TestEnumerateSigAlgs_TransportError(t *testing.T) {
 
 // TestProbeSigAlg_NoResponse covers the ParseServerResponse-error path: server
 // drains the ClientHello then closes without sending anything, so ParseServerResponse
-// returns an EOF error and probeSigAlg returns (false, nil).
+// returns an EOF error. Fix A5: probeSigAlg now returns (false, err) so that
+// enumerateSigAlgs routes the error into lastErr and skips classification.
 func TestProbeSigAlg_NoResponse(t *testing.T) {
 	addr := newGroupEnumLocalServer(t, func(c net.Conn) {
 		buf := make([]byte, 4096)
@@ -275,8 +276,9 @@ func TestProbeSigAlg_NoResponse(t *testing.T) {
 		// handler returns → defer c.Close() → EOF for the client
 	})
 	accepted, err := probeSigAlg(context.Background(), addr, "", 5*time.Second, 0x0804)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Transport error → non-nil err, not silently classified as rejected.
+	if err == nil {
+		t.Error("expected non-nil error when server sends no response (EOF)")
 	}
 	if accepted {
 		t.Error("expected accepted=false when server sends no response")
