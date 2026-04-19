@@ -453,6 +453,12 @@ Example with data lifetime adjustment for healthcare:
 				tlsStrict = true
 			}
 
+			// --deep-probe requires at least one TLS target; fail early so the
+			// user gets a clear message instead of a no-op scan.
+			if tlsDeepProbe && len(tlsTargets) == 0 {
+				return fmt.Errorf("--deep-probe requires --tls-targets (no TLS targets provided)")
+			}
+
 			// Resolve HNDL shelf-life for Mosca inequality.
 			// --data-lifetime-years is the single source of truth for both QRS penalty
 			// multiplier and HNDL shelf life. --sector provides a preset when
@@ -756,6 +762,7 @@ func diffCmd() *cobra.Command {
 		tlsTargets        []string
 		tlsInsecure       bool
 		tlsStrict         bool
+		tlsDeepProbe      bool
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
 		noNetwork         bool
@@ -875,6 +882,11 @@ Example:
 				tlsStrict = true
 			}
 
+			// --deep-probe requires at least one TLS target; fail early.
+			if tlsDeepProbe && len(tlsTargets) == 0 {
+				return fmt.Errorf("--deep-probe requires --tls-targets (no TLS targets provided)")
+			}
+
 			// Validate --ct-lookup-targets before proceeding.
 			for _, h := range ctLookupTargets {
 				if err := ctlookup.ValidateHostname(h); err != nil {
@@ -905,6 +917,7 @@ Example:
 				TLSDenyPrivate:  tlsStrict,
 				TLSTimeout:      cfg.TLS.Timeout,
 				TLSCACert:       cfg.TLS.CACert,
+				DeepProbe:       tlsDeepProbe,
 				NoNetwork:       noNetwork,
 				CTLookupTargets: ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
@@ -1052,6 +1065,7 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
+	cmd.Flags().BoolVar(&tlsDeepProbe, "deep-probe", false, "After TLS handshake, probe PQC group codepoints via raw ClientHellos (Sprint 7; requires --tls-targets)")
 
 	// CT log lookup flags (Sprint 3)
 	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
