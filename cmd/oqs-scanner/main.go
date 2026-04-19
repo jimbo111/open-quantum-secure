@@ -3112,6 +3112,11 @@ func complianceReportCmd() *cobra.Command {
 		outputFile      string
 		projectOvr      string
 		reportStandards []string
+		engineNames     []string
+		excludePatterns []string
+		timeout         int
+		maxFileMB       int
+		noConfig        bool
 	)
 	cmd := &cobra.Command{
 		Use:   "compliance-report",
@@ -3124,6 +3129,9 @@ approved algorithm reference, and key deadlines. Output can be written to a file
 
 Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Expand "all" sentinel before validation so downstream evaluation sees
+			// concrete framework IDs.
+			reportStandards = expandComplianceAll(reportStandards)
 			if len(reportStandards) == 0 {
 				reportStandards = []string{string(compliance.StandardCNSA20)}
 			}
@@ -3139,6 +3147,19 @@ Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 				return fmt.Errorf("resolve path: %w", err)
 			}
 
+			// Load project config (unless --no-config) and apply fallbacks for flags
+			// that the user did not set explicitly. Mirrors the scan command so
+			// .oqs-scanner.yaml applies to compliance-report too.
+			cfg := config.Config{}
+			if !noConfig {
+				loaded, err := config.Load(absPath)
+				if err == nil {
+					cfg = loaded
+				}
+			}
+			unused := ""
+			applyCommonConfigFallbacks(cmd, cfg, &unused, &timeout, &maxFileMB, &engineNames, &excludePatterns, &unused)
+
 			// Determine project name: flag > git > directory basename.
 			project := projectOvr
 			if project == "" {
@@ -3148,10 +3169,19 @@ Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 			orch := buildOrchestrator()
 
 			ctx := context.Background()
+			if timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+				defer cancel()
+			}
 
 			opts := engines.ScanOptions{
-				TargetPath: absPath,
-				Mode:       engines.ModeFull,
+				TargetPath:      absPath,
+				Mode:            engines.ModeFull,
+				EngineNames:     engineNames,
+				ExcludePatterns: excludePatterns,
+				MaxFileMB:       maxFileMB,
+				Timeout:         timeout,
 			}
 
 			selected := orch.EffectiveEngines(opts)
@@ -3231,7 +3261,12 @@ Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 	cmd.Flags().StringVar(&outputFile, "output", "", "Output file path (default: stdout)")
 	cmd.Flags().StringVar(&projectOvr, "project", "", "Project name for report header (default: inferred from git)")
 	cmd.Flags().StringSliceVar(&reportStandards, "compliance", []string{string(compliance.StandardCNSA20)},
-		"Compliance framework(s) to report on, comma-separated or repeated (supported: "+strings.Join(compliance.SupportedIDs(), ", ")+")")
+		"Compliance framework(s) to report on, comma-separated or repeated (supported: "+strings.Join(compliance.SupportedIDs(), ", ")+", or \"all\")")
+	cmd.Flags().StringSliceVar(&engineNames, "engine", nil, "Engines to use (default: all available). Example: --engine cipherscope,cryptoscan")
+	cmd.Flags().StringSliceVar(&excludePatterns, "exclude", nil, "Glob patterns to exclude from scan (comma-separated)")
+	cmd.Flags().IntVar(&timeout, "timeout", 300, "Scan timeout in seconds (0 = no timeout)")
+	cmd.Flags().IntVar(&maxFileMB, "max-file-mb", 50, "Skip files larger than this (MB)")
+	cmd.Flags().BoolVar(&noConfig, "no-config", false, "Skip loading .oqs-scanner.yaml config (use in CI to prevent policy bypass)")
 	return cmd
 }
 

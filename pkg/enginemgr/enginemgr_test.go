@@ -21,6 +21,11 @@ func TestRegistry(t *testing.T) {
 		"cbomkit-theia":  "cbomkit-theia",
 		"binary-scanner": "", // embedded engine — no external binary
 		"config-scanner": "", // embedded engine — no external binary
+		"tls-probe":      "", // Tier 5 network engine — embedded
+		"ct-lookup":      "", // Tier 5 network engine — embedded
+		"ssh-probe":      "", // Tier 5 network engine — embedded
+		"zeek-log":       "", // Tier 5 network engine — embedded
+		"suricata-log":   "", // Tier 5 network engine — embedded
 	}
 
 	reg := Registry()
@@ -48,6 +53,7 @@ func TestRegistry_Tiers(t *testing.T) {
 	tier2 := map[string]bool{"semgrep": true}
 	tier3 := map[string]bool{"cryptodeps": true, "cdxgen": true, "syft": true, "cbomkit-theia": true}
 	tier4 := map[string]bool{"binary-scanner": true}
+	tier5 := map[string]bool{"tls-probe": true, "ct-lookup": true, "ssh-probe": true, "zeek-log": true, "suricata-log": true}
 
 	for _, e := range Registry() {
 		switch {
@@ -66,6 +72,10 @@ func TestRegistry_Tiers(t *testing.T) {
 		case tier4[e.Name]:
 			if e.Tier != 4 {
 				t.Errorf("engine %q: expected tier 4, got %d", e.Name, e.Tier)
+			}
+		case tier5[e.Name]:
+			if e.Tier != 5 {
+				t.Errorf("engine %q: expected tier 5, got %d", e.Name, e.Tier)
 			}
 		default:
 			t.Errorf("engine %q has unexpected tier %d", e.Name, e.Tier)
@@ -278,9 +288,15 @@ func TestRegistry_AllHaveInstallHints(t *testing.T) {
 	}
 }
 
-// TestRegistry_AllHaveLanguages verifies every engine has at least one language.
+// TestRegistry_AllHaveLanguages verifies every source-scanning engine has at
+// least one language. Tier 5 network/protocol engines (tls-probe, ct-lookup,
+// ssh-probe, zeek-log, suricata-log) probe wire protocols or ingest logs and
+// intentionally have no associated source language — they are exempt.
 func TestRegistry_AllHaveLanguages(t *testing.T) {
 	for _, e := range Registry() {
+		if e.Tier == 5 {
+			continue
+		}
 		if len(e.Languages) == 0 {
 			t.Errorf("engine %q has no languages defined", e.Name)
 		}

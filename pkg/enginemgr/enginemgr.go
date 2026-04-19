@@ -125,6 +125,52 @@ var registry = []EngineInfo{
 		BuildTool:   "embedded",
 		InstallHint: "Built-in (no installation required)",
 	},
+	// Tier 5 network engines — embedded Go probes, always available.
+	{
+		Name:        "tls-probe",
+		Description: "TLS endpoint probe — detects quantum-vulnerable key exchange and PQC-negotiated groups",
+		Tier:        5,
+		Languages:   nil, // protocol engine — no source languages
+		BinaryName:  "",  // embedded
+		BuildTool:   "embedded",
+		InstallHint: "Built-in (no installation required)",
+	},
+	{
+		Name:        "ct-lookup",
+		Description: "Certificate Transparency log lookup — discovers certificate signature algorithms via crt.sh",
+		Tier:        5,
+		Languages:   nil,
+		BinaryName:  "",
+		BuildTool:   "embedded",
+		InstallHint: "Built-in (no installation required)",
+	},
+	{
+		Name:        "ssh-probe",
+		Description: "SSH KEX advertisement probe — detects host-key and KEX algorithm support",
+		Tier:        5,
+		Languages:   nil,
+		BinaryName:  "",
+		BuildTool:   "embedded",
+		InstallHint: "Built-in (no installation required)",
+	},
+	{
+		Name:        "zeek-log",
+		Description: "Zeek ssl.log / x509.log passive ingestion (TSV or JSON, optional .gz)",
+		Tier:        5,
+		Languages:   nil,
+		BinaryName:  "",
+		BuildTool:   "embedded",
+		InstallHint: "Built-in (no installation required)",
+	},
+	{
+		Name:        "suricata-log",
+		Description: "Suricata eve.json passive ingestion (NDJSON, optional .gz)",
+		Tier:        5,
+		Languages:   nil,
+		BinaryName:  "",
+		BuildTool:   "embedded",
+		InstallHint: "Built-in (no installation required)",
+	},
 }
 
 // Registry returns the list of all known engines.
