@@ -359,6 +359,9 @@ func scanCmd() *cobra.Command {
 		tlsInsecure       bool
 		tlsStrict         bool
 		tlsDeepProbe      bool
+		tlsEnumGroups     bool
+		tlsEnumSigAlgs    bool
+		tlsDetectPref     bool
 		sector            string
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
@@ -520,17 +523,20 @@ Example with data lifetime adjustment for healthcare:
 				Incremental:     incremental,
 				CachePath:       cachePath,
 				NoCache:         noCache,
-				TLSTargets:      tlsTargets,
-				TLSInsecure:     tlsInsecure,
-				TLSDenyPrivate:  tlsStrict,
-				TLSTimeout:      tlsTimeout,
-				TLSCACert:       cfg.TLS.CACert,
-				DeepProbe:       tlsDeepProbe,
-				NoNetwork:       noNetwork,
-				CTLookupTargets: ctLookupTargets,
-				CTLookupFromECH: ctLookupFromECH,
-				SSHTargets:      sshTargets,
-				SSHDenyPrivate:  sshStrict,
+				TLSTargets:             tlsTargets,
+				TLSInsecure:            tlsInsecure,
+				TLSDenyPrivate:         tlsStrict,
+				TLSTimeout:             tlsTimeout,
+				TLSCACert:              cfg.TLS.CACert,
+				DeepProbe:              tlsDeepProbe,
+				EnumerateGroups:        tlsEnumGroups,
+				EnumerateSigAlgs:       tlsEnumSigAlgs,
+				DetectServerPreference: tlsDetectPref,
+				NoNetwork:              noNetwork,
+				CTLookupTargets:        ctLookupTargets,
+				CTLookupFromECH:        ctLookupFromECH,
+				SSHTargets:             sshTargets,
+				SSHDenyPrivate:         sshStrict,
 			}
 
 			if incremental && noCache {
@@ -717,6 +723,9 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
 	cmd.Flags().BoolVar(&tlsDeepProbe, "deep-probe", false, "After TLS handshake, probe PQC group codepoints via raw ClientHellos (Sprint 7; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsEnumGroups, "enumerate-groups", false, "Probe all 13 TLS SupportedGroup codepoints individually to build a full acceptance list (Sprint 8; requires --tls-targets; implies --deep-probe level of detail)")
+	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets and --enumerate-groups or --deep-probe)")
 
 	// CT log lookup flags (Sprint 3)
 	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
@@ -763,6 +772,9 @@ func diffCmd() *cobra.Command {
 		tlsInsecure       bool
 		tlsStrict         bool
 		tlsDeepProbe      bool
+		tlsEnumGroups     bool
+		tlsEnumSigAlgs    bool
+		tlsDetectPref     bool
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
 		noNetwork         bool
@@ -912,14 +924,17 @@ Example:
 				Incremental:     incremental,
 				CachePath:       cachePath,
 				NoCache:         noCache,
-				TLSTargets:      tlsTargets,
-				TLSInsecure:     tlsInsecure,
-				TLSDenyPrivate:  tlsStrict,
-				TLSTimeout:      cfg.TLS.Timeout,
-				TLSCACert:       cfg.TLS.CACert,
-				DeepProbe:       tlsDeepProbe,
-				NoNetwork:       noNetwork,
-				CTLookupTargets: ctLookupTargets,
+				TLSTargets:             tlsTargets,
+				TLSInsecure:            tlsInsecure,
+				TLSDenyPrivate:         tlsStrict,
+				TLSTimeout:             cfg.TLS.Timeout,
+				TLSCACert:              cfg.TLS.CACert,
+				DeepProbe:              tlsDeepProbe,
+				EnumerateGroups:        tlsEnumGroups,
+				EnumerateSigAlgs:       tlsEnumSigAlgs,
+				DetectServerPreference: tlsDetectPref,
+				NoNetwork:              noNetwork,
+				CTLookupTargets:        ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
 				SSHTargets:      sshTargets,
 				SSHDenyPrivate:  sshStrict,
@@ -1066,6 +1081,9 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
 	cmd.Flags().BoolVar(&tlsDeepProbe, "deep-probe", false, "After TLS handshake, probe PQC group codepoints via raw ClientHellos (Sprint 7; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsEnumGroups, "enumerate-groups", false, "Probe all 13 TLS SupportedGroup codepoints individually to build a full acceptance list (Sprint 8; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets)")
 
 	// CT log lookup flags (Sprint 3)
 	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
