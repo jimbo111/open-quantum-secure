@@ -3005,7 +3005,8 @@ reference. Output can be written to a file or stdout.`,
 			fmt.Fprintf(os.Stderr, "Scan completed in %s — %d findings\n", scanDuration.Round(time.Millisecond), len(ff))
 
 			violations := compliance.Evaluate(ff)
-			data := compliance.BuildReportData(ff, violations, project, version, time.Now())
+			fw, _ := compliance.Get(string(compliance.StandardCNSA20))
+			data := compliance.BuildReportData(fw, ff, violations, project, version, time.Now())
 
 			var w io.Writer = os.Stdout
 			var outFile *os.File

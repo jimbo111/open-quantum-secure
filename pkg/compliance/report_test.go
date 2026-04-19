@@ -10,6 +10,9 @@ import (
 
 var fixedDate = time.Date(2026, 4, 2, 12, 0, 0, 0, time.UTC)
 
+// testFW is the CNSA 2.0 framework used in report tests.
+var testFW Framework = cnsa20Framework{}
+
 // algFindingWithEffort creates a finding with MigrationEffort set.
 func algFindingWithEffort(name, primitive string, keySize int, qr findings.QuantumRisk, effort string) findings.UnifiedFinding {
 	return findings.UnifiedFinding{
@@ -26,7 +29,7 @@ func TestBuildReportData_Compliant(t *testing.T) {
 		algFinding("SHA-512", "hash", 512, findings.QRResistant, ""),
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "TestProject", "1.2.3", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"TestProject", "1.2.3", fixedDate)
 
 	if !data.Compliant {
 		t.Errorf("expected Compliant=true, got false; violations: %v", violations)
@@ -57,7 +60,7 @@ func TestBuildReportData_NonCompliant(t *testing.T) {
 		algFinding("SHA-256", "hash", 256, findings.QRResistant, ""),
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "MyApp", "0.9.0", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"MyApp", "0.9.0", fixedDate)
 
 	if data.Compliant {
 		t.Error("expected Compliant=false for non-compliant findings")
@@ -86,7 +89,7 @@ func TestBuildReportData_NonCompliant(t *testing.T) {
 }
 
 func TestBuildReportData_Empty(t *testing.T) {
-	data := BuildReportData(nil, nil, "", "1.0.0", fixedDate)
+	data := BuildReportData(testFW, nil, nil,"", "1.0.0", fixedDate)
 
 	if !data.Compliant {
 		t.Error("empty findings should be compliant (no violations possible)")
@@ -104,7 +107,7 @@ func TestBuildReportData_Empty(t *testing.T) {
 
 func TestBuildReportData_ScanDateDefault(t *testing.T) {
 	before := time.Now()
-	data := BuildReportData(nil, nil, "", "1.0.0", time.Time{})
+	data := BuildReportData(testFW, nil, nil,"", "1.0.0", time.Time{})
 	after := time.Now()
 
 	if data.ScanDate.Before(before) || data.ScanDate.After(after) {
@@ -121,7 +124,7 @@ func TestBuildReportData_AlgorithmDedup(t *testing.T) {
 		algFinding("RSA-2048", "asymmetric", 2048, findings.QRVulnerable, ""),
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "", "1.0.0", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"", "1.0.0", fixedDate)
 
 	// Must have exactly 2 unique algorithms: AES-128 and RSA-2048.
 	if len(data.Algorithms) != 2 {
@@ -154,7 +157,7 @@ func TestBuildReportData_MultipleViolations(t *testing.T) {
 		algFinding("AES-128", "symmetric", 128, findings.QRResistant, ""),
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "BigProject", "2.0.0", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"BigProject", "2.0.0", fixedDate)
 
 	if len(data.Violations) < 3 {
 		t.Errorf("expected at least 3 violations (RSA, ECDSA, SHA-256), got %d", len(data.Violations))
@@ -171,7 +174,7 @@ func TestBuildReportData_DependencyFinding(t *testing.T) {
 		},
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "", "1.0.0", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"", "1.0.0", fixedDate)
 
 	if data.Compliant {
 		t.Error("expected non-compliant for quantum-vulnerable dependency")
@@ -192,7 +195,7 @@ func TestGenerateMarkdown_PassStatus(t *testing.T) {
 		algFinding("SHA-512", "hash", 512, findings.QRResistant, ""),
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "GoodProject", "1.0.0", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"GoodProject", "1.0.0", fixedDate)
 
 	var sb strings.Builder
 	if err := GenerateMarkdown(&sb, data); err != nil {
@@ -217,7 +220,7 @@ func TestGenerateMarkdown_FailStatus(t *testing.T) {
 		algFinding("RSA-2048", "asymmetric", 2048, findings.QRVulnerable, "immediate"),
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "LegacyApp", "1.5.0", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"LegacyApp", "1.5.0", fixedDate)
 
 	var sb strings.Builder
 	if err := GenerateMarkdown(&sb, data); err != nil {
@@ -237,7 +240,7 @@ func TestGenerateMarkdown_FailStatus(t *testing.T) {
 }
 
 func TestGenerateMarkdown_EmptyFindings(t *testing.T) {
-	data := BuildReportData(nil, nil, "EmptyProject", "1.0.0", fixedDate)
+	data := BuildReportData(testFW, nil, nil,"EmptyProject", "1.0.0", fixedDate)
 
 	var sb strings.Builder
 	if err := GenerateMarkdown(&sb, data); err != nil {
@@ -257,7 +260,7 @@ func TestGenerateMarkdown_MultipleViolations(t *testing.T) {
 		algFinding("SHA-256", "hash", 256, findings.QRResistant, ""),
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "MultiViolProject", "2.0.0", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"MultiViolProject", "2.0.0", fixedDate)
 
 	var sb strings.Builder
 	if err := GenerateMarkdown(&sb, data); err != nil {
@@ -280,7 +283,7 @@ func TestGenerateMarkdown_AlgorithmTable_Approved(t *testing.T) {
 		algFinding("ML-DSA-87", "signature", 0, findings.QRSafe, ""),
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "", "1.0.0", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"", "1.0.0", fixedDate)
 
 	var sb strings.Builder
 	if err := GenerateMarkdown(&sb, data); err != nil {
@@ -304,7 +307,7 @@ func TestGenerateMarkdown_DeduplicatedAlgorithms(t *testing.T) {
 		algFinding("AES-128", "symmetric", 128, findings.QRResistant, ""),
 	}
 	violations := Evaluate(ff)
-	data := BuildReportData(ff, violations, "", "1.0.0", fixedDate)
+	data := BuildReportData(testFW, ff, violations,"", "1.0.0", fixedDate)
 
 	var sb strings.Builder
 	if err := GenerateMarkdown(&sb, data); err != nil {
@@ -322,7 +325,7 @@ func TestGenerateMarkdown_DeduplicatedAlgorithms(t *testing.T) {
 }
 
 func TestGenerateMarkdown_ProjectDefault(t *testing.T) {
-	data := BuildReportData(nil, nil, "", "1.0.0", fixedDate)
+	data := BuildReportData(testFW, nil, nil,"", "1.0.0", fixedDate)
 
 	var sb strings.Builder
 	if err := GenerateMarkdown(&sb, data); err != nil {
@@ -335,7 +338,7 @@ func TestGenerateMarkdown_ProjectDefault(t *testing.T) {
 
 func TestGenerateMarkdown_VersionPrefix(t *testing.T) {
 	// Version without "v" prefix should get one added.
-	data := BuildReportData(nil, nil, "P", "2.1.0", fixedDate)
+	data := BuildReportData(testFW, nil, nil,"P", "2.1.0", fixedDate)
 	var sb strings.Builder
 	if err := GenerateMarkdown(&sb, data); err != nil {
 		t.Fatalf("GenerateMarkdown returned error: %v", err)
@@ -343,7 +346,7 @@ func TestGenerateMarkdown_VersionPrefix(t *testing.T) {
 	assertContains(t, sb.String(), "v2.1.0")
 
 	// Version that already starts with "v" should not get a duplicate prefix.
-	data2 := BuildReportData(nil, nil, "P", "v3.0.0", fixedDate)
+	data2 := BuildReportData(testFW, nil, nil, "P", "v3.0.0", fixedDate)
 	var sb2 strings.Builder
 	if err := GenerateMarkdown(&sb2, data2); err != nil {
 		t.Fatalf("GenerateMarkdown returned error: %v", err)

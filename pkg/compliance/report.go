@@ -12,7 +12,8 @@ import (
 
 // ReportData holds all information needed to generate a compliance report.
 type ReportData struct {
-	Standard      string    // e.g. "CNSA 2.0"
+	Standard      string // e.g. "CNSA 2.0"
+	FrameworkDesc string // e.g. "NSA CNSA 2.0 (May 2025)"
 	Project       string
 	ScanDate      time.Time
 	ScannerVer    string
@@ -20,6 +21,8 @@ type ReportData struct {
 	Violations    []Violation
 	Algorithms    []AlgorithmSummary // unique algorithms found, deduped by name
 	Compliant     bool
+	ApprovedAlgos []ApprovedAlgoRef // reference table from the framework
+	Deadlines     []DeadlineRef     // transition deadlines from the framework
 }
 
 // AlgorithmSummary is a deduplicated view of a single algorithm across all findings.
@@ -31,13 +34,14 @@ type AlgorithmSummary struct {
 	Occurrences int    `json:"occurrences"` // number of findings that reference this algorithm
 }
 
-// BuildReportData constructs a ReportData from raw scan findings and the
-// violations returned by Evaluate. It deduplicates algorithms by name and
+// BuildReportData constructs a ReportData from a Framework, raw scan findings, and
+// the violations returned by fw.Evaluate. It deduplicates algorithms by name and
 // counts occurrences.
 //
 // project and scannerVer may be empty; ScanDate defaults to time.Now() when
 // the zero value is passed.
 func BuildReportData(
+	fw Framework,
 	ff []findings.UnifiedFinding,
 	violations []Violation,
 	project string,
@@ -119,7 +123,8 @@ func BuildReportData(
 	}
 
 	return ReportData{
-		Standard:      "CNSA 2.0",
+		Standard:      fw.Name(),
+		FrameworkDesc: fw.Description(),
 		Project:       project,
 		ScanDate:      scanDate,
 		ScannerVer:    scannerVer,
@@ -127,18 +132,13 @@ func BuildReportData(
 		Violations:    violations,
 		Algorithms:    algSummaries,
 		Compliant:     len(violations) == 0,
+		ApprovedAlgos: fw.ApprovedAlgos(),
+		Deadlines:     fw.Deadlines(),
 	}
 }
 
-// GenerateMarkdown writes a formal CNSA 2.0 compliance report in markdown to w.
-// mdEscape escapes pipe characters and newlines that would break markdown tables.
-func mdEscape(s string) string {
-	s = strings.ReplaceAll(s, "|", "\\|")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	return s
-}
-
+// GenerateMarkdown writes a formal compliance report in markdown to w.
+// It is framework-agnostic: all framework-specific strings come from data fields.
 func GenerateMarkdown(w io.Writer, data ReportData) error {
 	status := "PASS"
 	statusDetail := "no violations"
@@ -158,18 +158,25 @@ func GenerateMarkdown(w io.Writer, data ReportData) error {
 		versionStr = "v" + versionStr
 	}
 
+	frameworkDesc := data.FrameworkDesc
+	if frameworkDesc == "" {
+		frameworkDesc = data.Standard
+	}
+
 	// --- Header block ---
 	if _, err := fmt.Fprintf(w,
-		"# CNSA 2.0 Compliance Report\n\n"+
+		"# %s Compliance Report\n\n"+
 			"**Organization:** %s\n"+
 			"**Date:** %s\n"+
 			"**Scanner Version:** OQS Scanner %s\n"+
-			"**Standard:** NSA CNSA 2.0 (May 2025)\n"+
+			"**Standard:** %s\n"+
 			"**Status:** %s (%s)\n\n"+
 			"---\n\n",
+		data.Standard,
 		projectOrDefault(data.Project),
 		scanDateStr,
 		versionStr,
+		frameworkDesc,
 		status,
 		statusDetail,
 	); err != nil {
@@ -192,11 +199,11 @@ func GenerateMarkdown(w io.Writer, data ReportData) error {
 			usageWord = "usage"
 		}
 		base := fmt.Sprintf(
-			"%s was scanned for CNSA 2.0 compliance on %s. The scan found\n%d cryptographic algorithm %s across %d unique %s.\n",
-			projectOrDefault(data.Project), scanDateStr, total, usageWord, uniqueCount, algWord,
+			"%s was scanned for %s compliance on %s. The scan found\n%d cryptographic algorithm %s across %d unique %s.\n",
+			projectOrDefault(data.Project), data.Standard, scanDateStr, total, usageWord, uniqueCount, algWord,
 		)
 		if data.Compliant {
-			base += "All algorithms meet CNSA 2.0 requirements."
+			base += "All algorithms meet " + data.Standard + " requirements."
 		} else {
 			n := len(data.Violations)
 			if n == 1 {
@@ -216,9 +223,12 @@ func GenerateMarkdown(w io.Writer, data ReportData) error {
 	if _, err := fmt.Fprint(w, "## Compliance Status\n\n"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprint(w,
-		"| Algorithm | Risk | CNSA 2.0 Status | Migration Effort | Occurrences |\n"+
-			"|-----------|------|-----------------|-----------------|-------------|\n",
+	statusHeader := data.Standard + " Status"
+	if _, err := fmt.Fprintf(w,
+		"| Algorithm | Risk | %s | Migration Effort | Occurrences |\n"+
+			"|-----------|------|%s|-----------------|-------------|\n",
+		statusHeader,
+		strings.Repeat("-", len(statusHeader)+2),
 	); err != nil {
 		return err
 	}
@@ -228,16 +238,16 @@ func GenerateMarkdown(w io.Writer, data ReportData) error {
 		}
 	}
 	for _, a := range data.Algorithms {
-		cnsa20Status := "Approved"
+		fwStatus := "Approved"
 		if !a.Compliant {
-			cnsa20Status = "NOT APPROVED"
+			fwStatus = "NOT APPROVED"
 		}
 		effort := a.Effort
 		if effort == "" {
 			effort = "-"
 		}
 		if _, err := fmt.Fprintf(w, "| %s | %s | %s | %s | %d |\n",
-			mdEscape(a.Name), mdEscape(a.Risk), cnsa20Status, effort, a.Occurrences,
+			mdEscape(a.Name), mdEscape(a.Risk), fwStatus, effort, a.Occurrences,
 		); err != nil {
 			return err
 		}
@@ -260,6 +270,10 @@ func GenerateMarkdown(w io.Writer, data ReportData) error {
 		if algName == "" {
 			algName = "(unknown)"
 		}
+		remediation := v.Remediation
+		if remediation == "" {
+			remediation = v.Message
+		}
 		if _, err := fmt.Fprintf(w,
 			"### [%d] %s\n\n"+
 				"**Algorithm:** %s\n"+
@@ -271,34 +285,51 @@ func GenerateMarkdown(w io.Writer, data ReportData) error {
 			algName,
 			v.Message,
 			v.Deadline,
-			remediationForRule(v.Rule, v.Algorithm),
+			remediation,
 		); err != nil {
 			return err
 		}
 	}
 
 	// --- Approved Algorithms Reference ---
-	if _, err := fmt.Fprint(w,
-		"## CNSA 2.0 Approved Algorithms Reference\n\n"+
-			"| Use Case | Approved Algorithm | NIST Standard |\n"+
-			"|----------|-------------------|---------------|\n"+
-			"| Key Exchange | ML-KEM-1024 | FIPS 203 |\n"+
-			"| Digital Signatures | ML-DSA-87 | FIPS 204 |\n"+
-			"| Firmware/Software Signing | LMS/HSS, XMSS/XMSS^MT | SP 800-208 |\n"+
-			"| Symmetric Encryption | AES-256 | FIPS 197 |\n"+
-			"| Hashing | SHA-384, SHA-512 | FIPS 180-4 |\n\n",
-	); err != nil {
-		return err
+	if len(data.ApprovedAlgos) > 0 {
+		if _, err := fmt.Fprintf(w,
+			"## %s Approved Algorithms Reference\n\n"+
+				"| Use Case | Approved Algorithm | Standard |\n"+
+				"|----------|-------------------|----------|\n",
+			data.Standard,
+		); err != nil {
+			return err
+		}
+		for _, a := range data.ApprovedAlgos {
+			if _, err := fmt.Fprintf(w, "| %s | %s | %s |\n",
+				mdEscape(a.UseCase), mdEscape(a.Algorithm), mdEscape(a.Standard),
+			); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprint(w, "\n"); err != nil {
+			return err
+		}
 	}
 
 	// --- Key Deadlines ---
-	if _, err := fmt.Fprint(w,
-		"## Key Deadlines\n\n"+
-			"- **2030-01-01:** All key exchange must use ML-KEM-1024\n"+
-			"- **2035-12-31:** Full CNSA 2.0 transition complete\n\n"+
-			"---\n\n",
-	); err != nil {
-		return err
+	if len(data.Deadlines) > 0 {
+		if _, err := fmt.Fprint(w, "## Key Deadlines\n\n"); err != nil {
+			return err
+		}
+		for _, d := range data.Deadlines {
+			if _, err := fmt.Fprintf(w, "- **%s:** %s\n", d.Date, d.Description); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprint(w, "\n---\n\n"); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprint(w, "---\n\n"); err != nil {
+			return err
+		}
 	}
 
 	// --- Footer ---
@@ -308,6 +339,14 @@ func GenerateMarkdown(w io.Writer, data ReportData) error {
 		data.ScanDate.Format("2006-01-02 15:04:05 MST"),
 	)
 	return err
+}
+
+// mdEscape escapes pipe characters and newlines that would break markdown tables.
+func mdEscape(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
 }
 
 // quantumRiskLabel converts a QuantumRisk value to a display-friendly string.
@@ -325,44 +364,6 @@ func quantumRiskLabel(qr findings.QuantumRisk) string {
 		return "Deprecated"
 	default:
 		return "Unknown"
-	}
-}
-
-// remediationForRule returns actionable remediation text for a known CNSA 2.0 rule.
-func remediationForRule(rule, algorithm string) string {
-	switch rule {
-	case "cnsa2-quantum-vulnerable":
-		upper := strings.ToUpper(algorithm)
-		switch {
-		case strings.HasPrefix(upper, "RSA"), strings.HasPrefix(upper, "DH"),
-			strings.Contains(upper, "DIFFIE"):
-			return "Migrate to ML-KEM-1024 for key exchange or ML-DSA-87 for digital signatures"
-		case strings.HasPrefix(upper, "EC"), strings.HasPrefix(upper, "ECDH"),
-			strings.HasPrefix(upper, "ECDSA"):
-			return "Migrate to ML-KEM-1024 for key exchange or ML-DSA-87 for digital signatures"
-		case strings.HasPrefix(upper, "DSA"):
-			return "Migrate to ML-DSA-87 for digital signatures"
-		default:
-			return "Replace with an approved CNSA 2.0 algorithm (ML-KEM-1024, ML-DSA-87, AES-256, SHA-384/SHA-512)"
-		}
-	case "cnsa2-ml-kem-key-size":
-		return "Upgrade to ML-KEM-1024; ML-KEM-512 and ML-KEM-768 do not meet CNSA 2.0 minimum"
-	case "cnsa2-ml-dsa-param-set":
-		return "Upgrade to ML-DSA-87; ML-DSA-44 and ML-DSA-65 do not meet CNSA 2.0 minimum"
-	case "cnsa2-slh-dsa-excluded":
-		return "Replace with ML-DSA-87; SLH-DSA (FIPS 205) is excluded from CNSA 2.0 despite NIST approval"
-	case "cnsa2-hashml-dsa-excluded":
-		return "Replace with ML-DSA-87; HashML-DSA is not approved for CNSA 2.0"
-	case "cnsa2-symmetric-key-size":
-		return "Upgrade to AES-256; smaller AES key sizes do not meet CNSA 2.0 requirements"
-	case "cnsa2-symmetric-unapproved":
-		return "Replace with AES-256; only AES is approved for symmetric encryption under CNSA 2.0"
-	case "cnsa2-hash-output-size":
-		return "Upgrade to SHA-384 or SHA-512; shorter hash outputs do not meet CNSA 2.0 requirements"
-	case "cnsa2-hash-unapproved":
-		return "Replace with SHA-384 or SHA-512 (SHA-2 family only); SHA-3 and other hash families are not approved"
-	default:
-		return "Review and remediate per NSA CNSA 2.0 guidance"
 	}
 }
 
