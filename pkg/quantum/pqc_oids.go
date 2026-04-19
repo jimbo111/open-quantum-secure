@@ -24,6 +24,10 @@ var pqcSigAlgOIDs = map[string]string{
 	"2.16.840.1.101.3.4.3.31": "slhdsa-shake-256f",
 }
 
+// TODO: add HashML-DSA (id-hash-ml-dsa-*) and HashSLH-DSA (id-hash-slh-dsa-*)
+// pre-hash variant OIDs once NIST formally registers them. See
+// draft-ietf-lamps-hash-sig-pqc for the expected OID arc.
+
 // LookupPQCSigAlgName returns the human-readable PQC signature algorithm name
 // for a given OID string, or "" when the OID is unknown.
 func LookupPQCSigAlgName(oid string) string {

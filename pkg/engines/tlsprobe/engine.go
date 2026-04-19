@@ -320,6 +320,9 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 			addr := net.JoinHostPort(r.ResolvedIP, port)
 
 			// Acquire per-target semaphore slot (Sprint 2, 5-concurrent cap).
+			// The send is not ctx-cancellable (no select/default) — intentional per
+			// Sprint 2 M1: targets run sequentially here, so the send never blocks
+			// longer than one in-flight probe.
 			sem <- struct{}{}
 			tls12Res, tls12Err := tls12probeFn(ctx, addr, host, timeout, probeOpts.DenyPrivate)
 			<-sem
