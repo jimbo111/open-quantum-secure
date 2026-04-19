@@ -126,6 +126,10 @@ type ScanOptions struct {
 	// default), enum pass progress is suppressed to avoid leaking inventory
 	// counts (accepted groups, preferred codepoints) into CI logs.
 	Verbose bool
+
+	// Zeek log ingestion options (Sprint 5).
+	ZeekSSLPath  string // path to ssl.log (TSV, JSON, or .gz); empty = skip zeek-log engine
+	ZeekX509Path string // path to x509.log (TSV, JSON, or .gz); empty = skip when no ssl path either
 }
 
 // Engine is the interface every scanner engine must implement.

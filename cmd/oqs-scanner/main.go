@@ -38,6 +38,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/configscanner"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/ctlookup"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/sshprobe"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/zeeklog"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cdxgen"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cipherscope"
@@ -140,7 +141,11 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 	// Tier 5: SSH probe engine (pure Go, always available; Sprint 4).
 	sshp := sshprobe.New()
 
-	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct, sshp)
+	// Tier 5: Zeek log ingestion engine (pure Go, always available; Sprint 5).
+	// Reads ssl.log + x509.log produced by Zeek network monitoring.
+	zeek := zeeklog.New()
+
+	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct, sshp, zeek)
 }
 
 // engineVersionsHash computes a stable SHA-256 hex digest over the
@@ -371,6 +376,8 @@ func scanCmd() *cobra.Command {
 		sshTargets        []string
 		sshStrict         bool
 		skipTLS12Fallback bool
+		zeekSSLPath       string
+		zeekX509Path      string
 	)
 
 	cmd := &cobra.Command{
@@ -505,6 +512,14 @@ Example with data lifetime adjustment for healthcare:
 				}
 			}
 
+			// Validate --zeek-*-log paths (A3).
+			if err := validateZeekLogPath(zeekSSLPath); err != nil {
+				return fmt.Errorf("invalid --zeek-ssl-log: %w", err)
+			}
+			if err := validateZeekLogPath(zeekX509Path); err != nil {
+				return fmt.Errorf("invalid --zeek-x509-log: %w", err)
+			}
+
 			orch := buildOrchestrator()
 
 			ctx := context.Background()
@@ -550,6 +565,8 @@ Example with data lifetime adjustment for healthcare:
 				CTLookupFromECH:        ctLookupFromECH,
 				SSHTargets:             sshTargets,
 				SSHDenyPrivate:         sshStrict,
+				ZeekSSLPath:            zeekSSLPath,
+				ZeekX509Path:           zeekX509Path,
 			}
 
 			if incremental && noCache {
@@ -754,6 +771,10 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
 	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
 
+	// Zeek log ingestion flags (Sprint 5)
+	cmd.Flags().StringVar(&zeekSSLPath, "zeek-ssl-log", "", "Path to Zeek ssl.log (TSV, JSON, or .gz) for passive TLS PQC inventory")
+	cmd.Flags().StringVar(&zeekX509Path, "zeek-x509-log", "", "Path to Zeek x509.log (TSV, JSON, or .gz) for passive certificate PQC inventory")
+
 	// HNDL Mosca sector preset flag
 	cmd.Flags().StringVar(&sector, "sector", "",
 		`Industry sector preset for Mosca HNDL shelf-life (case-insensitive).
@@ -800,6 +821,8 @@ func diffCmd() *cobra.Command {
 		sshTargets        []string
 		sshStrict         bool
 		skipTLS12Fallback bool
+		zeekSSLPath       string
+		zeekX509Path      string
 	)
 
 	cmd := &cobra.Command{
@@ -940,6 +963,14 @@ Example:
 				}
 			}
 
+			// Validate --zeek-*-log paths (A3).
+			if err := validateZeekLogPath(zeekSSLPath); err != nil {
+				return fmt.Errorf("invalid --zeek-ssl-log: %w", err)
+			}
+			if err := validateZeekLogPath(zeekX509Path); err != nil {
+				return fmt.Errorf("invalid --zeek-x509-log: %w", err)
+			}
+
 			opts := engines.ScanOptions{
 				TargetPath:      absPath,
 				Timeout:         timeout,
@@ -968,6 +999,8 @@ Example:
 				CTLookupFromECH: ctLookupFromECH,
 				SSHTargets:      sshTargets,
 				SSHDenyPrivate:  sshStrict,
+				ZeekSSLPath:     zeekSSLPath,
+				ZeekX509Path:    zeekX509Path,
 			}
 
 			selected := orch.EffectiveEngines(opts)
@@ -1129,7 +1162,24 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
 	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
 
+	// Zeek log ingestion flags (Sprint 5)
+	cmd.Flags().StringVar(&zeekSSLPath, "zeek-ssl-log", "", "Path to Zeek ssl.log (TSV, JSON, or .gz) for passive TLS PQC inventory")
+	cmd.Flags().StringVar(&zeekX509Path, "zeek-x509-log", "", "Path to Zeek x509.log (TSV, JSON, or .gz) for passive certificate PQC inventory")
+
 	return cmd
+}
+
+// validateZeekLogPath rejects --zeek-ssl-log / --zeek-x509-log values that
+// contain null bytes (which the OS would reject anyway, but caught here for
+// a clear user-facing error before any file open attempt).
+func validateZeekLogPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	if strings.ContainsRune(path, 0) {
+		return fmt.Errorf("path contains null byte")
+	}
+	return nil
 }
 
 // validateSSHTarget validates a single --ssh-targets entry. It must be in

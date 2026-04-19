@@ -1,0 +1,13 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	ssl
+#open	2024-07-01-00:00:00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	version	cipher	curve	server_name	resumed	last_alert	next_protocol	established	ssl_history	cert_chain_fuids	client_cert_chain_fuids	subject	issuer	validation_status	pqc_key_share
+#types	time	string	addr	port	addr	port	string	string	string	string	bool	count	string	bool	string	vector[string]	vector[string]	string	string	string	string
+1719792000.000000	Chybr1	10.1.0.10	60001	203.0.113.1	443	TLSv13	TLS_AES_256_GCM_SHA384	X25519MLKEM768	cloudflare-pqc.example.com	F	-	h2	T	-	-	-	-	-	ok	11EC
+1719792001.000000	Chybr2	10.1.0.11	60002	203.0.113.1	443	TLSv13	TLS_AES_256_GCM_SHA384	X25519MLKEM768	cloudflare-pqc.example.com	F	-	h2	T	-	-	-	-	-	ok	11EC
+1719792002.000000	Chybr3	10.1.0.12	60003	203.0.113.2	443	TLSv13	TLS_AES_256_GCM_SHA384	X25519	classical.example.com	F	-	h3	T	-	-	-	-	-	ok	-
+1719792003.000000	Chybr4	10.1.0.13	60004	203.0.113.3	443	TLSv13	TLS_AES_256_GCM_SHA384	X25519Kyber768Draft00	draft-kyber.example.com	F	-	h2	T	-	-	-	-	-	ok	6399
+#close	2024-07-01-01:00:00
