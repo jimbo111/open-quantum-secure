@@ -98,3 +98,13 @@ func SupportedIDs() []string {
 	sort.Strings(ids)
 	return ids
 }
+
+// All returns all registered frameworks in sorted ID order.
+func All() []Framework {
+	ids := SupportedIDs()
+	fws := make([]Framework, 0, len(ids))
+	for _, id := range ids {
+		fws = append(fws, registry[id])
+	}
+	return fws
+}
