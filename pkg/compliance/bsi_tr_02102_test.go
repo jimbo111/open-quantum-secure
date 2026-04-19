@@ -145,6 +145,22 @@ func TestBSI_HQCApproved(t *testing.T) {
 	}
 }
 
+// TestBSI_HybridSeverityIsWarn verifies the hybrid-kem-required rule has
+// Severity "warn" (strong recommendation, not a hard normative requirement).
+func TestBSI_HybridSeverityIsWarn(t *testing.T) {
+	f := bsiKEMFinding("ML-KEM-768", findings.QRSafe)
+	v := bsi.Evaluate([]findings.UnifiedFinding{f})
+	if len(v) != 1 {
+		t.Fatalf("expected 1 violation, got %d", len(v))
+	}
+	if v[0].Rule != "bsi-hybrid-kem-required" {
+		t.Errorf("rule = %q, want bsi-hybrid-kem-required", v[0].Rule)
+	}
+	if v[0].Severity != "warn" {
+		t.Errorf("severity = %q, want warn", v[0].Severity)
+	}
+}
+
 // TestBSI_EmptyInput returns nil.
 func TestBSI_EmptyInput(t *testing.T) {
 	if v := bsi.Evaluate(nil); v != nil {

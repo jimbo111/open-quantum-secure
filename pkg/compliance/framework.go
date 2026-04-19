@@ -26,6 +26,11 @@ type Violation struct {
 	// Remediation is actionable guidance for fixing the violation.
 	// Populated by the framework's Evaluate implementation.
 	Remediation string
+
+	// Severity indicates the gravity of the violation: "error" (default, empty string)
+	// for hard requirements, or "warn" for strong recommendations that are not
+	// formally required by the framework's normative text.
+	Severity string
 }
 
 // ApprovedAlgoRef describes one row in a framework's approved-algorithm reference table.

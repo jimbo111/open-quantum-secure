@@ -274,18 +274,24 @@ func GenerateMarkdown(w io.Writer, data ReportData) error {
 		if remediation == "" {
 			remediation = v.Message
 		}
+		severity := v.Severity
+		if severity == "" {
+			severity = "error"
+		}
 		if _, err := fmt.Fprintf(w,
 			"### [%d] %s\n\n"+
+				"**Severity:** %s\n"+
 				"**Algorithm:** %s\n"+
 				"**Rule:** %s\n"+
 				"**Deadline:** %s\n"+
 				"**Remediation:** %s\n\n",
 			i+1,
-			v.Rule,
-			algName,
-			v.Message,
-			v.Deadline,
-			remediation,
+			mdEscape(v.Rule),
+			mdEscape(severity),
+			mdEscape(algName),
+			mdEscape(v.Message),
+			mdEscape(v.Deadline),
+			mdEscape(remediation),
 		); err != nil {
 			return err
 		}

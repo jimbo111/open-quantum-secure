@@ -17,8 +17,6 @@ package compliance
 //   - SHA-256 is permitted for most uses; SHA-384/512 recommended for long-term.
 
 import (
-	"strings"
-
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 )
 
@@ -71,7 +69,6 @@ func (bsiTR02102Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		}
 
 		name := f.Algorithm.Name
-		upper := strings.ToUpper(name)
 
 		// --- Rule: quantum-vulnerable or deprecated ---
 		if quantumVulnerableOrDeprecated(f) {
@@ -85,17 +82,18 @@ func (bsiTR02102Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
-		// --- Rule: hybrid KEM required for key exchange during transition ---
-		// BSI TR-02102-1 requires hybrid PQC+classical for new key exchange deployments.
-		// Pure standalone ML-KEM (without a classical component) does not meet this
-		// requirement during the transition period ending 2030.
+		// --- Advisory: hybrid KEM strongly recommended for key exchange ---
+		// BSI TR-02102-1 §5.2 recommends (but does not formally mandate with normative
+		// "shall" language for all contexts) hybrid PQC+classical during the transition.
+		// Severity is "warn" to reflect the recommendation rather than hard requirement.
 		if isPureMLKEM(f) && isKEMPrimitive(f) {
 			violations = append(violations, Violation{
 				Algorithm:   name,
 				Rule:        "bsi-hybrid-kem-required",
-				Message:     name + " is a pure PQC KEM; BSI TR-02102 requires a hybrid PQC+classical combination for key exchange during the transition period",
+				Severity:    "warn",
+				Message:     name + " is a pure PQC KEM; BSI TR-02102 strongly recommends a hybrid PQC+classical combination for key exchange during the transition period",
 				Deadline:    bsiDeadlineKEX,
-				Remediation: "Use a hybrid KEM such as X25519MLKEM768 or SecP256r1MLKEM768 to satisfy BSI TR-02102 transition requirements",
+				Remediation: "Use a hybrid KEM such as X25519MLKEM768 or SecP256r1MLKEM768 per BSI TR-02102 transition guidance (strongly recommended)",
 			})
 			continue
 		}
@@ -103,7 +101,6 @@ func (bsiTR02102Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		// SLH-DSA, ML-DSA (all levels), HQC, FrodoKEM, Classic McEliece, hybrid KEMs are approved.
 		// AES-128+ is permitted. SHA-256+ is permitted.
 		// No additional checks needed beyond quantum-vulnerability above.
-		_ = upper
 	}
 
 	if len(violations) == 0 {

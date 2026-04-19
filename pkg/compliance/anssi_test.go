@@ -92,6 +92,25 @@ func TestANSSI_MLDSAAllLevelsPasses(t *testing.T) {
 	}
 }
 
+// TestANSSI_HybridSeverityIsWarn verifies the hybrid-kem-required rule has
+// Severity "warn" (recommendation, not normative requirement per ANSSI §1.1-§1.2).
+func TestANSSI_HybridSeverityIsWarn(t *testing.T) {
+	f := findings.UnifiedFinding{
+		Algorithm:   &findings.Algorithm{Name: "ML-KEM-768", Primitive: "kem"},
+		QuantumRisk: findings.QRSafe,
+	}
+	v := anssi.Evaluate([]findings.UnifiedFinding{f})
+	if len(v) != 1 {
+		t.Fatalf("expected 1 violation, got %d", len(v))
+	}
+	if v[0].Rule != "anssi-hybrid-kem-required" {
+		t.Errorf("rule = %q, want anssi-hybrid-kem-required", v[0].Rule)
+	}
+	if v[0].Severity != "warn" {
+		t.Errorf("severity = %q, want warn", v[0].Severity)
+	}
+}
+
 func TestANSSI_EmptyInput(t *testing.T) {
 	if v := anssi.Evaluate(nil); v != nil {
 		t.Errorf("expected nil for nil input, got %v", v)

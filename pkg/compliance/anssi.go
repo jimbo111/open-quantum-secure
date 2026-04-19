@@ -16,8 +16,6 @@ package compliance
 //   - SHA-256 is permitted; SHA-384/512 recommended.
 
 import (
-	"strings"
-
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 )
 
@@ -70,8 +68,6 @@ func (anssiFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		}
 
 		name := f.Algorithm.Name
-		upper := strings.ToUpper(name)
-		_ = upper
 
 		// --- Rule: quantum-vulnerable or deprecated ---
 		if quantumVulnerableOrDeprecated(f) {
@@ -85,16 +81,18 @@ func (anssiFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
-		// --- Rule: hybrid KEM required for key exchange during transition ---
-		// ANSSI requires hybrid PQC+classical for new key exchange deployments
-		// through 2030. Pure standalone ML-KEM is not sufficient.
+		// --- Advisory: hybrid KEM strongly recommended for key exchange ---
+		// ANSSI "Views on PQC transition (2023 follow-up)" §1.1-§1.2 strongly
+		// emphasises hybrid PQC+classical as recommended practice, but does not
+		// use normative "shall/must" language. Severity is "warn", not "error".
 		if isPureMLKEM(f) && isKEMPrimitive(f) {
 			violations = append(violations, Violation{
 				Algorithm:   name,
 				Rule:        "anssi-hybrid-kem-required",
-				Message:     name + " is a standalone PQC KEM; ANSSI requires hybrid PQC+classical combination for key exchange during the transition period",
+				Severity:    "warn",
+				Message:     name + " is a standalone PQC KEM; ANSSI strongly recommends hybrid PQC+classical combination for key exchange during the transition period",
 				Deadline:    anssiDeadlineKEX,
-				Remediation: "Use a hybrid KEM such as X25519MLKEM768 or SecP256r1MLKEM768 to meet ANSSI transition requirements",
+				Remediation: "Use a hybrid KEM such as X25519MLKEM768 or SecP256r1MLKEM768 per ANSSI transition guidance (strongly recommended, not mandatory)",
 			})
 			continue
 		}
