@@ -389,6 +389,9 @@ Example with data lifetime adjustment for healthcare:
 			if cmd.Flags().Changed("data-lifetime-years") && dataLifetimeYears == 0 {
 				return fmt.Errorf("--data-lifetime-years 0 is not valid: no data has zero sensitivity in practice; set a positive value (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default")
 			}
+			if tlsDetectPref && !tlsEnumGroups && !tlsDeepProbe {
+				return fmt.Errorf("--detect-server-preference requires --enumerate-groups or --deep-probe to build the accepted-group list first")
+			}
 
 			absPath, err := filepath.Abs(targetPath)
 			if err != nil {
@@ -812,6 +815,9 @@ Example:
 			}
 			if diffBase == "" {
 				return fmt.Errorf("--base is required (e.g. main, origin/main, a commit SHA)")
+			}
+			if tlsDetectPref && !tlsEnumGroups && !tlsDeepProbe {
+				return fmt.Errorf("--detect-server-preference requires --enumerate-groups or --deep-probe to build the accepted-group list first")
 			}
 
 			absPath, err := filepath.Abs(targetPath)
