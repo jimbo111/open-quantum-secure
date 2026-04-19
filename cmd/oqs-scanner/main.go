@@ -370,6 +370,7 @@ func scanCmd() *cobra.Command {
 		noNetwork         bool
 		sshTargets        []string
 		sshStrict         bool
+		skipTLS12Fallback bool
 	)
 
 	cmd := &cobra.Command{
@@ -538,6 +539,7 @@ Example with data lifetime adjustment for healthcare:
 				EnumerateSigAlgs:       tlsEnumSigAlgs,
 				DetectServerPreference: tlsDetectPref,
 				MaxProbesPerTarget:     tlsMaxProbes,
+				SkipTLS12Fallback:      skipTLS12Fallback,
 				Verbose:                verbose,
 				NoNetwork:              noNetwork,
 				CTLookupTargets:        ctLookupTargets,
@@ -694,7 +696,7 @@ Example with data lifetime adjustment for healthcare:
 	}
 
 	cmd.Flags().StringVar(&targetPath, "path", "", "Directory to scan")
-	cmd.Flags().StringVar(&format, "format", "table", "Output format: json, table, sarif, cbom, html")
+	cmd.Flags().StringVar(&format, "format", "table", "Output format: json, table, sarif, cbom, html, csv")
 	cmd.Flags().IntVar(&timeout, "timeout", 300, "Scan timeout in seconds (0 = no timeout)")
 	cmd.Flags().IntVar(&maxFileMB, "max-file-mb", 50, "Skip files larger than this (MB)")
 	cmd.Flags().StringSliceVar(&engineNames, "engine", nil, "Engines to use (default: all available). Example: --engine cipherscope,cryptoscan")
@@ -734,6 +736,7 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
 	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets and --enumerate-groups or --deep-probe)")
 	cmd.Flags().IntVar(&tlsMaxProbes, "max-probes-per-target", 0, "Max TCP connections per TLS target across all probe passes (0 = default 30; set higher to allow exhaustive enumeration)")
+	cmd.Flags().BoolVar(&skipTLS12Fallback, "skip-tls12-fallback", false, "Skip the TLS 1.2 fallback probe for PQC-capable targets (Sprint 9; by default the probe runs to detect downgrade vulnerability)")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable detailed progress logging to stderr (enum pass results, etc.)")
 
 	// CT log lookup flags (Sprint 3)
@@ -791,6 +794,7 @@ func diffCmd() *cobra.Command {
 		noNetwork         bool
 		sshTargets        []string
 		sshStrict         bool
+		skipTLS12Fallback bool
 	)
 
 	cmd := &cobra.Command{
@@ -948,6 +952,7 @@ Example:
 				EnumerateSigAlgs:       tlsEnumSigAlgs,
 				DetectServerPreference: tlsDetectPref,
 				MaxProbesPerTarget:     tlsMaxProbes,
+				SkipTLS12Fallback:      skipTLS12Fallback,
 				Verbose:                verbose,
 				NoNetwork:              noNetwork,
 				CTLookupTargets:        ctLookupTargets,
@@ -1069,7 +1074,7 @@ Example:
 
 	cmd.Flags().StringVar(&targetPath, "path", "", "Directory to scan (must be a git repository)")
 	cmd.Flags().StringVar(&diffBase, "base", "", "Git ref to diff against (e.g. main, origin/main, a commit SHA)")
-	cmd.Flags().StringVar(&format, "format", "table", "Output format: json, table, sarif, cbom, html")
+	cmd.Flags().StringVar(&format, "format", "table", "Output format: json, table, sarif, cbom, html, csv")
 	cmd.Flags().IntVar(&timeout, "timeout", 120, "Scan timeout in seconds")
 	cmd.Flags().IntVar(&maxFileMB, "max-file-mb", 50, "Skip files larger than this (MB)")
 	cmd.Flags().StringSliceVar(&engineNames, "engine", nil, "Engines to use (default: all available Tier 1)")
@@ -1101,6 +1106,7 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
 	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets)")
 	cmd.Flags().IntVar(&tlsMaxProbes, "max-probes-per-target", 0, "Max TCP connections per TLS target across all probe passes (0 = default 30; set higher to allow exhaustive enumeration)")
+	cmd.Flags().BoolVar(&skipTLS12Fallback, "skip-tls12-fallback", false, "Skip the TLS 1.2 fallback probe for PQC-capable targets (Sprint 9; by default the probe runs to detect downgrade vulnerability)")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable detailed progress logging to stderr (enum pass results, etc.)")
 
 	// CT log lookup flags (Sprint 3)
@@ -1144,10 +1150,10 @@ func validateSSHTarget(target string) error {
 func writeOutput(_ *cobra.Command, format, outputFile string, scanResult output.ScanResult, signCBOM bool) error {
 	// Validate format before creating the file to avoid truncating existing output.
 	switch format {
-	case "json", "table", "sarif", "cbom", "cyclonedx", "html":
+	case "json", "table", "sarif", "cbom", "cyclonedx", "html", "csv":
 		// valid
 	default:
-		return fmt.Errorf("unknown format: %s (use 'json', 'table', 'sarif', 'cbom', or 'html')", format)
+		return fmt.Errorf("unknown format: %s (use 'json', 'table', 'sarif', 'cbom', 'html', or 'csv')", format)
 	}
 
 	var w io.Writer = os.Stdout
@@ -1177,6 +1183,8 @@ func writeOutput(_ *cobra.Command, format, outputFile string, scanResult output.
 		}
 	case "html":
 		writeErr = output.WriteHTML(w, scanResult)
+	case "csv":
+		writeErr = output.WriteCSV(w, scanResult)
 	}
 
 	if writeErr != nil {
