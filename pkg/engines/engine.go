@@ -109,6 +109,12 @@ type ScanOptions struct {
 	EnumerateGroups        bool // probe all 13 groups in fullEnumGroups individually (--enumerate-groups)
 	EnumerateSigAlgs       bool // probe each sig alg in fullSigAlgList individually (--enumerate-sigalgs)
 	DetectServerPreference bool // send all accepted groups at once; record server's chosen group (--detect-server-preference)
+
+	// MaxProbesPerTarget caps the total number of TCP probe connections opened
+	// per target across all passes (initial probe + deep-probe + enumeration).
+	// 0 = unlimited. Default 30 guards against runaway probe counts when all
+	// Sprint 8 flags are enabled simultaneously (worst case ~39 connections).
+	MaxProbesPerTarget int
 }
 
 // Engine is the interface every scanner engine must implement.

@@ -145,6 +145,14 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	// Passes run sequentially per target (same rate-limit rationale as deep-probe).
 	// Total per-target budget: 60 s enforced by a child context.
 	if opts.EnumerateGroups || opts.EnumerateSigAlgs || opts.DetectServerPreference {
+		// maxProbes: total TCP connection cap across all passes per target.
+		// 0 = unlimited. Default 30 guards against the ~39-probe worst case
+		// (1 initial + 6 deep + 13 group-enum + 17 sigalg + 2 preference).
+		maxProbes := opts.MaxProbesPerTarget
+		if maxProbes == 0 {
+			maxProbes = 30
+		}
+
 		for i := range results {
 			r := &results[i]
 			if r.Error != nil || r.ResolvedIP == "" {
@@ -160,39 +168,64 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 			}
 			addr := net.JoinHostPort(r.ResolvedIP, port)
 
+			// Track probe connections used for this target.
+			// Initial probe + deep-probe (if enabled) already ran before this block.
+			probesUsed := 1 // initial TLS probe
+			if opts.DeepProbe {
+				probesUsed += len(rawhello.DefaultProbeGroups())
+			}
+
+			budgetExhausted := func() bool {
+				return probesUsed >= maxProbes
+			}
+			markBudgetExhausted := func() {
+				r.EnumTruncated = true
+				r.EnumTruncationReason = "PROBE_BUDGET_EXHAUSTED"
+			}
+
 			// 60-second budget for all enumeration passes on this target.
 			enumCtx, enumCancel := context.WithTimeout(ctx, 60*time.Second)
 
 			var modes []string
 
 			if opts.EnumerateGroups {
-				gr, gErr := enumerateGroups(enumCtx, addr, host, timeout)
-				hasGroups := len(gr.AcceptedGroups) > 0 || len(gr.HRRGroups) > 0
-				if gErr != nil && !hasGroups {
-					fmt.Fprintf(os.Stderr, "enumerate-groups: %s: %v\n", r.Target, gErr)
+				if budgetExhausted() {
+					markBudgetExhausted()
 				} else {
-					r.EnumAcceptedGroups = gr.AcceptedGroups
-					r.EnumHRRGroups = gr.HRRGroups
-					modes = append(modes, "groups")
-					if gErr != nil {
-						// Partial results — some probes succeeded before context/transport error.
-						r.EnumTruncated = true
-						r.EnumTruncationReason = "enumerate-groups: " + gErr.Error()
+					gr, gErr := enumerateGroups(enumCtx, addr, host, timeout)
+					hasGroups := len(gr.AcceptedGroups) > 0 || len(gr.HRRGroups) > 0
+					probesUsed += len(gr.AcceptedGroups) + len(gr.HRRGroups) + len(gr.RejectedGroups)
+					if gErr != nil && !hasGroups {
+						fmt.Fprintf(os.Stderr, "enumerate-groups: %s: %v\n", r.Target, gErr)
+					} else {
+						r.EnumAcceptedGroups = gr.AcceptedGroups
+						r.EnumHRRGroups = gr.HRRGroups
+						modes = append(modes, "groups")
+						if gErr != nil {
+							// Partial results — some probes succeeded before context/transport error.
+							r.EnumTruncated = true
+							r.EnumTruncationReason = "enumerate-groups: " + gErr.Error()
+						}
 					}
 				}
 			}
 
 			if opts.EnumerateSigAlgs {
-				sr, sErr := enumerateSigAlgs(enumCtx, addr, host, timeout)
-				if sErr != nil && len(sr.AcceptedSigAlgs) == 0 {
-					fmt.Fprintf(os.Stderr, "enumerate-sigalgs: %s: %v\n", r.Target, sErr)
+				if budgetExhausted() {
+					markBudgetExhausted()
 				} else {
-					r.EnumSupportedSigAlgs = sr.AcceptedSigAlgs
-					modes = append(modes, "sigalgs")
-					if sErr != nil {
-						// Partial results — some probes succeeded before context/transport error.
-						r.EnumTruncated = true
-						r.EnumTruncationReason = "enumerate-sigalgs: " + sErr.Error()
+					sr, sErr := enumerateSigAlgs(enumCtx, addr, host, timeout)
+					probesUsed += len(sr.AcceptedSigAlgs) + len(sr.RejectedSigAlgs)
+					if sErr != nil && len(sr.AcceptedSigAlgs) == 0 {
+						fmt.Fprintf(os.Stderr, "enumerate-sigalgs: %s: %v\n", r.Target, sErr)
+					} else {
+						r.EnumSupportedSigAlgs = sr.AcceptedSigAlgs
+						modes = append(modes, "sigalgs")
+						if sErr != nil {
+							// Partial results — some probes succeeded before context/transport error.
+							r.EnumTruncated = true
+							r.EnumTruncationReason = "enumerate-sigalgs: " + sErr.Error()
+						}
 					}
 				}
 			}
@@ -203,17 +236,20 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 				if len(prefCandidates) == 0 {
 					prefCandidates = r.DeepProbeAcceptedGroups
 				}
-				if len(prefCandidates) >= 2 {
+				// Preference probe costs 2 connections (forward + reverse ordering).
+				if len(prefCandidates) >= 2 && !budgetExhausted() && probesUsed+2 <= maxProbes {
 					prefResult, pErr := detectServerGroupPreference(enumCtx, addr, host, timeout, prefCandidates)
+					probesUsed += 2
 					if pErr != nil {
 						fmt.Fprintf(os.Stderr, "detect-server-preference: %s: %v\n", r.Target, pErr)
 					} else {
 						r.EnumServerPrefGroup = prefResult.PreferredGroup
 						r.EnumServerPrefMode = prefResult.Mode
 						modes = append(modes, "preference")
-						fmt.Fprintf(os.Stderr, "detect-server-preference: %s — group 0x%04x (%s)\n",
-							r.Target, prefResult.PreferredGroup, prefResult.Mode)
 					}
+				} else if len(prefCandidates) >= 2 {
+					// Not enough budget for preference probe.
+					markBudgetExhausted()
 				}
 			}
 

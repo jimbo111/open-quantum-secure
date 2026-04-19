@@ -414,9 +414,13 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 	// is incomplete. Mark all findings for this target so callers can signal
 	// that further probing may reveal additional supported groups or sig algs.
 	if result.EnumTruncated {
+		reason := result.EnumTruncationReason
+		if reason == "" {
+			reason = "ENUMERATION_TRUNCATED"
+		}
 		for i := range ff {
 			ff[i].PartialInventory = true
-			ff[i].PartialInventoryReason = "ENUMERATION_TRUNCATED"
+			ff[i].PartialInventoryReason = reason
 		}
 	}
 
