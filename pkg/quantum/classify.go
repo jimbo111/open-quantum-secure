@@ -85,6 +85,24 @@ var pqcSafeFamilies = map[string]bool{
 	"MLKEM512":  true, // 0x0200
 	"MLKEM768":  true, // 0x0201
 	"MLKEM1024": true, // 0x0202
+	// ML-DSA OID-derived short names (cert signature algorithms, Sprint 9).
+	// Go's x509 package returns "UnknownSignatureAlgorithm" for these; the
+	// tlsprobe engine resolves them via OID lookup to these lowercase names.
+	// extractBaseName cannot match them via the "ML-DSA" prefix (no hyphens in
+	// the name), so they are listed explicitly here.
+	"mldsa44": true, // FIPS 204, id-ml-dsa-44
+	"mldsa65": true, // FIPS 204, id-ml-dsa-65
+	"mldsa87": true, // FIPS 204, id-ml-dsa-87
+	// SLH-DSA OID-derived names (cert signature algorithms, Sprint 9).
+	// These have hyphens ("slhdsa-sha2-128s"), so the strippedHyphens path in
+	// extractBaseName already maps them to "SLH-DSA" → classified as safe.
+	// Listed explicitly as a belt-and-suspenders guard against future refactors.
+	"slhdsa-sha2-128s": true, "slhdsa-sha2-128f": true,
+	"slhdsa-sha2-192s": true, "slhdsa-sha2-192f": true,
+	"slhdsa-sha2-256s": true, "slhdsa-sha2-256f": true,
+	"slhdsa-shake-128s": true, "slhdsa-shake-128f": true,
+	"slhdsa-shake-192s": true, "slhdsa-shake-192f": true,
+	"slhdsa-shake-256s": true, "slhdsa-shake-256f": true,
 }
 
 // kpqcEliminatedCandidates are K-PQC candidates eliminated in earlier rounds.

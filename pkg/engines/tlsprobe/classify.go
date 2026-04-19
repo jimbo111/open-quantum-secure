@@ -300,7 +300,7 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 		ff = append(ff, f)
 	}
 
-	// Finding for the leaf certificate signing key.
+	// Finding for the leaf certificate signing key (public key algorithm).
 	if result.LeafCertKeyAlgo != "" {
 		f := findings.UnifiedFinding{
 			Location: findings.Location{
@@ -317,6 +317,29 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 			SourceEngine:  "tls-probe",
 			Reachable:     findings.ReachableYes,
 			RawIdentifier: "cert:" + result.LeafCertKeyAlgo + "|" + result.Target,
+		}
+		applyGroupFields(&f, result.NegotiatedGroupID, groupInfo, groupKnown)
+		ff = append(ff, f)
+	}
+
+	// Finding for the certificate signature algorithm (the algorithm used to sign
+	// this certificate — distinct from the public key type). Suffix #cert-sig
+	// prevents DedupeKey collisions with the #cert (key type) finding above.
+	if result.LeafCertSigAlgo != "" {
+		f := findings.UnifiedFinding{
+			Location: findings.Location{
+				File:         basePath + "#cert-sig",
+				Line:         0,
+				ArtifactType: "tls-endpoint",
+			},
+			Algorithm: &findings.Algorithm{
+				Name:      result.LeafCertSigAlgo,
+				Primitive: "digital-signature",
+			},
+			Confidence:    findings.ConfidenceHigh,
+			SourceEngine:  "tls-probe",
+			Reachable:     findings.ReachableYes,
+			RawIdentifier: "cert-sig:" + result.LeafCertSigAlgo + "|" + result.Target,
 		}
 		applyGroupFields(&f, result.NegotiatedGroupID, groupInfo, groupKnown)
 		ff = append(ff, f)
@@ -348,6 +371,36 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 			SourceEngine:  "tls-probe",
 			Reachable:     findings.ReachableYes,
 			RawIdentifier: rawID,
+		}
+		applyGroupFields(&f, result.NegotiatedGroupID, groupInfo, groupKnown)
+		ff = append(ff, f)
+	}
+
+	// TLS 1.2 fallback finding (Sprint 9, Feature 3): when the server negotiated
+	// PQC via TLS 1.3 but also accepted a classical-only TLS 1.2 handshake, emit
+	// a downgrade-vulnerability finding. An HNDL attacker can force the client to
+	// use TLS 1.2, bypassing the ML-KEM protection negotiated in TLS 1.3.
+	if result.AcceptedTLS12 && groupKnown && groupInfo.PQCPresent {
+		f := findings.UnifiedFinding{
+			Location: findings.Location{
+				File:         basePath + "#tls12-fallback",
+				Line:         0,
+				ArtifactType: "tls-endpoint",
+			},
+			Algorithm: &findings.Algorithm{
+				Name:      "TLS_1.2_Fallback",
+				Primitive: "key-exchange",
+			},
+			Confidence:    findings.ConfidenceHigh,
+			SourceEngine:  "tls-probe",
+			Reachable:     findings.ReachableYes,
+			QuantumRisk:   findings.QRVulnerable,
+			Severity:      findings.SevHigh,
+			HNDLRisk:      "immediate",
+			Recommendation: "Server supports ML-KEM via TLS 1.3 but also accepts classical-only TLS 1.2 — " +
+				"an HNDL attacker can force downgrade. Disable TLS 1.2 to eliminate the vulnerability. " +
+				"TLS 1.2 cipher: " + result.TLS12CipherSuiteName + ". CNSA 2.0 deadline: 2030.",
+			RawIdentifier: "tls12-fallback:" + result.TLS12CipherSuiteName + "|" + result.Target,
 		}
 		applyGroupFields(&f, result.NegotiatedGroupID, groupInfo, groupKnown)
 		ff = append(ff, f)
