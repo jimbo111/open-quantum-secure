@@ -1,3 +1,8 @@
+// Codepoints in this file are TLS SignatureScheme values (RFC 8446 §4.2.3),
+// NOT TLS SupportedGroup codepoints (see tls_groups.go). Both are uint16;
+// the namespaces are entirely distinct — a codepoint value means different
+// things in each registry. Do not mix TLSSignatureSchemeName with GroupName.
+
 package tlsprobe
 
 import (
@@ -174,9 +179,9 @@ func probeSigAlg(ctx context.Context, addr, sni string, timeout time.Duration, s
 	return true, nil
 }
 
-// SigAlgName returns the IANA name for a TLS SignatureScheme codepoint.
+// TLSSignatureSchemeName returns the IANA name for a TLS SignatureScheme codepoint.
 // Returns a hex string for unknown codepoints.
-func SigAlgName(scheme uint16) string {
+func TLSSignatureSchemeName(scheme uint16) string {
 	names := map[uint16]string{
 		0x0904: "mldsa44",
 		0x0905: "mldsa65",

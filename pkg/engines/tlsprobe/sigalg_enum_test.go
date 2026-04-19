@@ -48,7 +48,7 @@ func TestFullSigAlgList_Sanity(t *testing.T) {
 	}
 }
 
-func TestSigAlgName_KnownSchemes(t *testing.T) {
+func TestTLSSignatureSchemeName_KnownSchemes(t *testing.T) {
 	cases := []struct {
 		scheme uint16
 		want   string
@@ -63,9 +63,9 @@ func TestSigAlgName_KnownSchemes(t *testing.T) {
 		{0xffff, "0xffff"}, // unknown → hex string
 	}
 	for _, tc := range cases {
-		got := SigAlgName(tc.scheme)
+		got := TLSSignatureSchemeName(tc.scheme)
 		if got != tc.want {
-			t.Errorf("SigAlgName(0x%04x) = %q, want %q", tc.scheme, got, tc.want)
+			t.Errorf("TLSSignatureSchemeName(0x%04x) = %q, want %q", tc.scheme, got, tc.want)
 		}
 	}
 }
