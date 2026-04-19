@@ -30,29 +30,32 @@ func TestNIST8547_QuantumVulnerable(t *testing.T) {
 	}
 }
 
-// TestNIST8547_DeprecationDeadlines verifies the correct deadlines per IR 8547 §3.1.
-// RSA (key exchange) gets the 2030 deprecation deadline; others get 2035 disallow date.
+// TestNIST8547_DeprecationDeadlines verifies the correct deadlines per IR 8547 §3.1 Table 1.
+// All quantum-vulnerable algorithms (RSA, ECDSA, DH, MD5, etc.) use the 2030-12-31 deprecation
+// deadline. The 2035 disallow date is referenced in remediation text only.
 func TestNIST8547_DeprecationDeadlines(t *testing.T) {
-	t.Run("RSA gets 2030 deprecation deadline", func(t *testing.T) {
-		f := nist8547Finding("RSA-2048", "kem", findings.QRVulnerable)
-		v := nist8547.Evaluate([]findings.UnifiedFinding{f})
-		if len(v) != 1 {
-			t.Fatalf("expected 1 violation")
-		}
-		if v[0].Deadline != nist8547DeprecateDate {
-			t.Errorf("deadline = %q, want %q", v[0].Deadline, nist8547DeprecateDate)
-		}
-	})
-	t.Run("MD5 gets 2035 disallow deadline", func(t *testing.T) {
-		f := nist8547Finding("MD5", "hash", findings.QRDeprecated)
-		v := nist8547.Evaluate([]findings.UnifiedFinding{f})
-		if len(v) != 1 {
-			t.Fatalf("expected 1 violation")
-		}
-		if v[0].Deadline != nist8547DisallowDate {
-			t.Errorf("deadline = %q, want %q", v[0].Deadline, nist8547DisallowDate)
-		}
-	})
+	tests := []struct {
+		name string
+		prim string
+		qr   findings.QuantumRisk
+	}{
+		{"RSA-2048", "kem", findings.QRVulnerable},
+		{"ECDSA", "signature", findings.QRVulnerable},
+		{"DH-2048", "kem", findings.QRVulnerable},
+		{"MD5", "hash", findings.QRDeprecated},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+" gets 2030 deadline", func(t *testing.T) {
+			f := nist8547Finding(tt.name, tt.prim, tt.qr)
+			v := nist8547.Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 1 {
+				t.Fatalf("expected 1 violation, got %d", len(v))
+			}
+			if v[0].Deadline != nist8547DeprecateDate {
+				t.Errorf("deadline = %q, want %q (nist8547DeprecateDate)", v[0].Deadline, nist8547DeprecateDate)
+			}
+		})
+	}
 }
 
 // TestNIST8547_SLHDSAPasses verifies SLH-DSA is approved (unlike CNSA 2.0).

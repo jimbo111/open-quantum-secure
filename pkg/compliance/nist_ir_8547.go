@@ -22,8 +22,7 @@ import (
 )
 
 const (
-	nist8547DeprecateDate = "2030-12-31" // RSA/ECDSA/DH deprecated for new systems
-	nist8547DisallowDate  = "2035-12-31" // RSA/ECDSA/DH disallowed for all systems
+	nist8547DeprecateDate = "2030-12-31" // deprecated for new federal civilian systems; disallowed by 2035-12-31
 )
 
 type nistIR8547Framework struct{}
@@ -63,8 +62,8 @@ func (nistIR8547Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 					Algorithm:   f.RawIdentifier,
 					Rule:        "nist8547-quantum-vulnerable",
 					Message:     "quantum-vulnerable dependency must be replaced per NIST IR 8547 federal civilian PQC transition schedule",
-					Deadline:    nist8547DisallowDate,
-					Remediation: "Migrate to NIST FIPS 203 (ML-KEM) or FIPS 204 (ML-DSA) per NIST IR 8547",
+					Deadline:    nist8547DeprecateDate,
+					Remediation: "Migrate to NIST FIPS 203 (ML-KEM) or FIPS 204 (ML-DSA) per NIST IR 8547; disallowed by 2035-12-31",
 				})
 			}
 			continue
@@ -74,19 +73,17 @@ func (nistIR8547Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		upper := strings.ToUpper(name)
 
 		// --- Rule: quantum-vulnerable or deprecated ---
-		// NIST IR 8547 §3.1: RSA, ECDSA, ECDH, DSA, DH are deprecated by 2030 and
-		// disallowed by 2035 for all federal civilian information systems.
+		// NIST IR 8547 §3.1 Table 1: RSA, ECDSA, ECDH, DSA, DH all appear in a
+		// single row with deprecation date 2030-12-31 (disallowed 2035-12-31).
+		// The 2030 deadline applies to ALL quantum-vulnerable algorithms, not only
+		// key exchange. The 2035 disallow date is reflected in the remediation text.
 		if quantumVulnerableOrDeprecated(f) {
-			deadline := nist8547DisallowDate
-			if isKeyExchangeAlgorithm(upper) {
-				deadline = nist8547DeprecateDate // deprecated 2030 (key exchange is the more urgent use case)
-			}
 			violations = append(violations, Violation{
 				Algorithm: name,
 				Rule:      "nist8547-quantum-vulnerable",
-				Message: name + " is deprecated per NIST IR 8547 — federal civilian systems must migrate to " +
-					"NIST PQC standards (FIPS 203/204/205) by 2030 (deprecated) and 2035 (disallowed)",
-				Deadline:    deadline,
+				Message: name + " is deprecated per NIST IR 8547 §3.1 — federal civilian systems must " +
+					"deprecate by 2030-12-31 and disallow by 2035-12-31; migrate to NIST PQC standards (FIPS 203/204/205)",
+				Deadline:    nist8547DeprecateDate,
 				Remediation: nist8547Remediation(upper),
 			})
 			continue
@@ -107,19 +104,10 @@ func init() {
 	Register(nistIR8547Framework{})
 }
 
-// isKeyExchangeAlgorithm returns true for algorithms primarily used in key exchange.
-func isKeyExchangeAlgorithm(upper string) bool {
-	return strings.HasPrefix(upper, "RSA") ||
-		strings.Contains(upper, "ECDH") ||
-		strings.HasPrefix(upper, "DH-") ||
-		upper == "DH" ||
-		strings.Contains(upper, "DIFFIE")
-}
-
 func nist8547Remediation(upper string) string {
 	switch {
 	case strings.HasPrefix(upper, "RSA"), strings.Contains(upper, "ECDH"),
-		strings.Contains(upper, "DH"), strings.Contains(upper, "DIFFIE"):
+		strings.HasPrefix(upper, "DH-"), upper == "DH", strings.Contains(upper, "DIFFIE"):
 		return "Migrate to ML-KEM (FIPS 203) for key exchange per NIST IR 8547 §3.1"
 	case strings.Contains(upper, "ECDSA"), strings.HasPrefix(upper, "DSA"):
 		return "Migrate to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205) for digital signatures per NIST IR 8547 §3.1"
