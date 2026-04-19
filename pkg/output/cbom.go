@@ -358,6 +358,25 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 	if f.HandshakeBytes > 0 {
 		props = append(props, cdxProperty{Name: "oqs:handshakeBytes", Value: fmt.Sprintf("%d", f.HandshakeBytes)})
 	}
+	// Sprint 8 group + sig-alg enumeration properties.
+	if len(f.SupportedGroups) > 0 {
+		gJSON, err := json.Marshal(f.SupportedGroups)
+		if err == nil {
+			props = append(props, cdxProperty{Name: "oqs:supportedGroups", Value: string(gJSON)})
+		}
+	}
+	if len(f.SupportedSigAlgs) > 0 {
+		sJSON, err := json.Marshal(f.SupportedSigAlgs)
+		if err == nil {
+			props = append(props, cdxProperty{Name: "oqs:supportedSigAlgs", Value: string(sJSON)})
+		}
+	}
+	if f.ServerPreferredGroup != 0 {
+		props = append(props, cdxProperty{Name: "oqs:serverPreferredGroup", Value: fmt.Sprintf("0x%04x", f.ServerPreferredGroup)})
+	}
+	if f.EnumerationMode != "" {
+		props = append(props, cdxProperty{Name: "oqs:enumerationMode", Value: f.EnumerationMode})
+	}
 
 	if len(f.DataFlowPath) > 0 {
 		dfpJSON, err := json.Marshal(f.DataFlowPath)
