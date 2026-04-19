@@ -567,3 +567,68 @@ func TestCNSA2_HybridSubGrade(t *testing.T) {
 		})
 	}
 }
+
+// TestCNSA2_UnknownKEMDefaultDeny is the regression test for GAP-A surfaced by
+// the sophisticated test run: CNSA 2.0 silently PASSED FrodoKEM-976-AES and
+// other non-ML-KEM quantum-safe KEMs because no explicit rule matched. NSA
+// CNSA 2.0 approves only ML-KEM-1024 for key establishment. Every other
+// quantum-safe KEM — FrodoKEM (NIST Round 4 alternate), Classic McEliece, BIKE,
+// HQC variants, future alternates — must fail via the default-deny rule.
+//
+// HQC is still caught by the earlier explicit cnsa2-hqc-not-approved rule
+// (that name was already known); we assert that rule continues to fire
+// instead of the more generic kem-not-approved.
+func TestCNSA2_UnknownKEMDefaultDeny(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantRule    string
+		description string
+	}{
+		{"FrodoKEM-976-AES", "cnsa2-kem-not-approved", "BSI-approved lattice KEM, not on CNSA 2.0 list"},
+		{"FrodoKEM-1344-SHAKE", "cnsa2-kem-not-approved", "BSI-approved Frodo variant"},
+		{"Classic-McEliece-6960", "cnsa2-kem-not-approved", "BSI-approved code-based KEM"},
+		{"Classic-McEliece-8192", "cnsa2-kem-not-approved", "Classic McEliece large variant"},
+		{"BIKE-L1", "cnsa2-kem-not-approved", "NIST Round 4 alternate code-based KEM"},
+		{"BIKE-L3", "cnsa2-kem-not-approved", "BIKE security level 3"},
+		{"NTRU-Prime-761", "cnsa2-kem-not-approved", "sntrup761 variant"},
+		// HQC is caught by the EARLIER explicit rule, not the default-deny.
+		{"HQC-256", "cnsa2-hqc-not-approved", "explicit rule fires before default-deny"},
+		{"HQC-128", "cnsa2-hqc-not-approved", "explicit HQC rule"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := algFinding(tt.algName, "kem", 0, findings.QRSafe, "immediate")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 1 {
+				t.Fatalf("%s (%s): expected 1 violation, got %d: %+v",
+					tt.algName, tt.description, len(v), v)
+			}
+			if v[0].Rule != tt.wantRule {
+				t.Errorf("%s: rule = %q, want %q", tt.algName, v[0].Rule, tt.wantRule)
+			}
+		})
+	}
+}
+
+// TestCNSA2_ApprovedKEMsNotFlagged verifies that the default-deny rule does NOT
+// fire for the two algorithms CNSA 2.0 actually approves: pure ML-KEM-1024
+// and the approved hybrid X25519MLKEM1024 / SecP*MLKEM1024. This is the dual
+// of TestCNSA2_UnknownKEMDefaultDeny — regression protection that the rule
+// doesn't over-reject known-good algorithms.
+func TestCNSA2_ApprovedKEMsNotFlagged(t *testing.T) {
+	approved := []string{
+		"ML-KEM-1024",
+		"MLKEM1024", // hyphen-less form
+		"X25519MLKEM1024",
+		"SecP384r1MLKEM1024",
+	}
+	for _, name := range approved {
+		t.Run(name, func(t *testing.T) {
+			f := algFinding(name, "kem", 0, findings.QRSafe, "immediate")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 0 {
+				t.Errorf("%s: approved CNSA 2.0 KEM produced violation(s): %+v", name, v)
+			}
+		})
+	}
+}

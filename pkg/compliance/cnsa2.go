@@ -178,6 +178,24 @@ func (cnsa20Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
+		// --- Rule: KEM default-deny (non-ML-KEM quantum-safe KEMs) ---
+		// CNSA 2.0 approves only ML-KEM-1024 (pure) and ML-KEM-1024 hybrids.
+		// Any other quantum-safe KEM — FrodoKEM, Classic McEliece, HQC variants,
+		// BIKE, future NIST Round 4 alternates — is NOT on the CNSA 2.0 approved
+		// list. The earlier explicit HQC rule fires for HQC; this default-deny
+		// catches every remaining quantum-safe KEM not previously matched.
+		// Matched by primitive (isKEMPrimitive) rather than name prefix so new
+		// algorithms are rejected without code updates.
+		if isKEMPrimitive(f) && f.QuantumRisk != findings.QRVulnerable && f.QuantumRisk != findings.QRDeprecated {
+			violations = append(violations, newCNSA2Violation(
+				name,
+				"cnsa2-kem-not-approved",
+				name+" is not a CNSA 2.0 approved KEM; CNSA 2.0 approves only ML-KEM-1024 (pure or in hybrid combinations using ML-KEM-1024)",
+				deadlineKeyExchange,
+			))
+			continue
+		}
+
 		// Note: LMS/HSS and XMSS/XMSS^MT are ALL approved per NIST SP 800-208.
 		// HSS is the multi-tree generalization of LMS; XMSS^MT is the multi-tree
 		// generalization of XMSS. Both are approved for firmware/software signing.
