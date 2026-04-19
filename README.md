@@ -1,10 +1,10 @@
 # Open Quantum Secure (OQS Scanner)
 
-Scans your codebase for cryptographic algorithms that quantum computers will break, and tells you exactly what to replace them with — down to copy-pasteable code snippets in your language.
+Scans your codebase AND live TLS/SSH endpoints for cryptographic algorithms that quantum computers will break, and tells you exactly what to replace them with — down to copy-pasteable code snippets in your language.
 
-Produces a Quantum Readiness Score (0-100), generates CycloneDX 1.7 CBOM, checks CNSA 2.0 compliance, and now suggests concrete PQC migration paths per finding.
+Produces a Quantum Readiness Score (0-100), generates CycloneDX 1.7 CBOM, checks 7 compliance frameworks (CNSA 2.0, PCI DSS 4.0, NIST IR 8547, BSI, NCSC UK, ASD ISM, ANSSI), actively probes TLS endpoints for PQC support including hybrid KEM group + signature algorithm enumeration, ingests Zeek/Suricata network logs, and detects TLS 1.2 downgrade vulnerabilities.
 
-No backend. Fully offline.
+No backend. Fully offline (except optional Certificate Transparency lookups).
 
 ---
 
@@ -22,7 +22,15 @@ cd open-quantum-secure && go build -o oqs-scanner ./cmd/oqs-scanner/
 oqs-scanner scan --path .
 ```
 
-You get 3 engines out of the box — **config-scanner** (YAML, JSON, .env, TOML, XML, INI, HCL), **binary-scanner** (JAR, Go binaries, Python wheels, ELF/PE/Mach-O, .NET), and **tls-probe** (live TLS endpoint scanning). These are compiled into the binary, no setup needed.
+You get 7 engines out of the box, all pure-Go and compiled in:
+
+- **config-scanner** — YAML, JSON, .env, TOML, XML, INI, HCL
+- **binary-scanner** — JAR, Go binaries, Python wheels, ELF/PE/Mach-O, .NET
+- **tls-probe** — Live TLS endpoint scanning (CurveID + handshake volume + ECH detection + raw ClientHello deep-probe + group/sigalg enumeration + TLS 1.2 fallback detection)
+- **ssh-probe** — OpenSSH KEXINIT inspection for mlkem768x25519-sha256, sntrup761x25519 + 7 PQ variants
+- **ct-lookup** — Certificate Transparency log queries via crt.sh (auto-chains from ECH-enabled hosts)
+- **zeek-log** — Ingests Zeek ssl.log + x509.log for passive network PQC inventory
+- **suricata-log** — Ingests Suricata eve.json for passive TLS PQC inventory
 
 For source code scanning, install the engines that match your stack:
 
@@ -123,8 +131,10 @@ The scanner is an orchestrator. It calls external tools, collects their output, 
    │config-scanner│   │ cipherscope   │    │ semgrep (taint/flow)    │
    │binary-scanner│   │ cryptoscan    │    │ cdxgen (SBOM)           │
    │tls-probe     │   │ ast-grep      │    │ cbomkit-theia(artifacts)│
-   │             │    │ syft          │    │                         │
-   │             │    │ cryptodeps    │    │                         │
+   │ssh-probe     │   │ syft          │    │                         │
+   │ct-lookup     │   │ cryptodeps    │    │                         │
+   │zeek-log     │    │               │    │                         │
+   │suricata-log │    │               │    │                         │
    └─────────────┘    └───────────────┘    └─────────────────────────┘
 ```
 
@@ -158,6 +168,85 @@ The `tls-probe` engine connects to each target, inspects the TLS handshake, and 
 | `--tls-insecure` | false | Skip certificate verification |
 | `--tls-strict` | false (CLI) / true (Action) | Block private IP connections |
 
+### Raw ClientHello deep-probe
+
+TLS stdlib won't let you offer arbitrary PQC group codepoints. To probe support for groups the scanner's own Go runtime doesn't know about — or to enumerate everything a server will accept — use:
+
+```bash
+# Probe 6 PQC codepoints via hand-crafted ClientHellos
+oqs-scanner scan --path . --tls-targets api.example.com:443 --deep-probe
+
+# Full group + sig-alg enumeration + server preference detection
+oqs-scanner scan --path . --tls-targets api.example.com:443 \
+    --enumerate-groups \
+    --enumerate-sigalgs \
+    --detect-server-preference \
+    --max-probes-per-target 50
+```
+
+- `--deep-probe` — 6-codepoint fast pass (X25519, X25519MLKEM768, SecP256r1MLKEM768, MLKEM768, MLKEM1024, MLKEM512)
+- `--enumerate-groups` — probes 13 codepoints (classical + hybrid + pure ML-KEM + deprecated Kyber)
+- `--enumerate-sigalgs` — probes 17 signature schemes including ML-DSA (0x0904/05/06)
+- `--detect-server-preference` — two-ordering probe reveals whether server has fixed preference or respects client order
+- `--max-probes-per-target` — caps total TCP connections per target (default 30; enumeration can reach ~39 without cap)
+- `--skip-tls12-fallback` — disable the TLS 1.2 downgrade detection (on by default for PQC-capable targets)
+
+Findings report `supportedGroups`, `supportedSigAlgs`, `serverPreferredGroup`, `serverPreferenceMode`, and for downgrade-vulnerable targets a `#tls12-fallback` finding.
+
+### X.509 certificate signature algorithm
+
+The tls-probe engine inspects the leaf cert's signature algorithm OID and emits a `#cert-sig` finding separate from the cert-key finding. ML-DSA (`id-ml-dsa-44/65/87`) and SLH-DSA (all 12 variants) are recognised. A Cloudflare-signed ECDSA cert produces a `SHA256-RSA` or `ECDSA` cert-sig finding with `RiskVulnerable`; an ML-DSA-65 cert produces `RiskSafe`.
+
+---
+
+## SSH Probe
+
+```bash
+oqs-scanner scan --path . --ssh-targets github.com:22,bastion.internal:22
+```
+
+Reads the SSH banner and KEXINIT packet, reports advertised KEX algorithms. PQC-capable KEX detected: `mlkem768x25519-sha256` (OpenSSH 10.0+ final), `sntrup761x25519-sha512@openssh.com` (OpenSSH 8.5-9.9 draft), plus 7 vendor/draft variants. Heuristic substring match catches `mlkem`, `kyber`, `sntrup`, `frodo`, `ntruprime`, `bike`, `hqc`, `mceliece`.
+
+RFC 4253 §4.2 preamble-compliant (handles Google Cloud IAP / Bastillion / fail2ban wrappers). SSH-1.x rejected; only SSH-2.0 / SSH-1.99 accepted. `--ssh-strict` blocks private/loopback IPs.
+
+---
+
+## Certificate Transparency lookup
+
+```bash
+# Explicit hostnames
+oqs-scanner scan --path . --ct-lookup-targets api.example.com,admin.example.com
+
+# Auto-chain from TLS-probe ECH findings
+oqs-scanner scan --path . --tls-targets api.example.com:443 --ct-lookup-from-ech
+```
+
+Queries crt.sh for the hostname and extracts certificate signing algorithms from the returned CT log entries. When an active TLS probe can't see the real cert (ECH enabled), this engine fills in the gap. Hostnames extracted from ECH findings propagate automatically when `--ct-lookup-from-ech` is set. S2→S3 auto-chain survives combined ECH + enumeration truncation (PartialInventoryReason is composed, not overwritten).
+
+---
+
+## Passive network log ingestion
+
+For networks where active probing is restricted, ingest pre-captured Zeek or Suricata logs:
+
+```bash
+# Zeek (TSV, JSON, or .gz)
+oqs-scanner scan --path . \
+    --zeek-ssl-log /var/log/zeek/ssl.log \
+    --zeek-x509-log /var/log/zeek/x509.log
+
+# Suricata (NDJSON eve.json, plain or .gz)
+oqs-scanner scan --path . --suricata-eve /var/log/suricata/eve.json
+```
+
+Both engines:
+- Parse streaming logs with 4 MB bufio buffer (handles long lines)
+- Cap at 500k dedup entries per scan (truncation flagged as `DEDUP_CAP_REACHED` in PartialInventoryReason)
+- Cap gzip at 100 MB decompressed (prevents gzip bombs)
+- Sanitize all user-origin fields (strip control chars < 0x20 and DEL) to prevent ANSI/bidi injection into output
+
+A companion Zeek script `contrib/zeek/oqs-pqc-key-share.zeek` logs the `key_share` extension group IDs (not in vanilla ssl.log). A companion Suricata config drop-in `contrib/suricata/oqs-tls.yaml` enables TLS metadata logging.
+
 ---
 
 ## Quantum Readiness Score
@@ -183,29 +272,48 @@ oqs-scanner scan --path . --format json      # Full JSON with migration snippets
 oqs-scanner scan --path . --format sarif     # GitHub Code Scanning / IDE
 oqs-scanner scan --path . --format cbom      # CycloneDX 1.7 CBOM
 oqs-scanner scan --path . --format html      # Standalone HTML report
+oqs-scanner scan --path . --format csv       # RFC 4180 CSV for Excel/BI pipelines
 ```
 
-The HTML report and JSON output include migration snippets. SARIF carries them in the `properties` block. The table format shows the summary — use `--format html` when you want the full migration guidance.
+The HTML report and JSON output include migration snippets. SARIF carries them in the `properties` block. The table format shows the summary — use `--format html` when you want the full migration guidance. CSV output is RFC 4180 compliant with CRLF line endings and is hardened against Excel formula injection (values starting with `=`, `+`, `-`, `@`, tab, or CR are prefixed with `'`).
 
 ---
 
-## CNSA 2.0 compliance
+## Compliance frameworks
+
+Seven frameworks supported, each with its own algorithm-approval rules and deadline calendar:
+
+| ID | Authority | Jurisdiction | Notable policy |
+|---|---|---|---|
+| `cnsa-2.0` | NSA | US National Security Systems | SLH-DSA excluded; ML-KEM-1024 only; default-deny for unknown KEMs |
+| `pci-dss-4.0` | PCI SSC | Global payment processors | Req 12.3.3 inventory evidence (mandatory since 2025-03) |
+| `nist-ir-8547` | NIST | US federal civilian | All NIST PQC approved; RSA/ECDSA/DH deprecated 2030 |
+| `bsi-tr-02102` | BSI | Germany / EU | Approves FrodoKEM, Classic McEliece, HQC; hybrid KEM warn |
+| `ncsc-uk` | NCSC | United Kingdom | All 3 NIST standards approved; 2028/2031/2035 phased |
+| `asd-ism` | ASD | Australia government | Strictest grade only: ML-KEM-1024 + ML-DSA-87; classical cease 2030 |
+| `anssi-guide-pqc` | ANSSI | France | Hybrid PQC+classical warn; all NIST PQC approved |
+
+Run a single framework:
 
 ```bash
 oqs-scanner scan --path . --compliance cnsa-2.0
 ```
 
-Flags algorithms that don't meet NSA's CNSA 2.0 requirements:
-- SLH-DSA (excluded despite being a NIST standard)
-- ML-KEM below 1024, ML-DSA below 87
-- SHA-256 (requires SHA-384 minimum)
-- AES below 256
-- HQC (not yet approved)
-
-Generate a formal report:
+Run multiple at once, or all at once:
 
 ```bash
-oqs-scanner compliance-report --path . --output report.md
+oqs-scanner scan --path . --compliance cnsa-2.0,bsi-tr-02102,ncsc-uk
+oqs-scanner scan --path . --compliance all
+```
+
+**Cross-framework divergence is common by design.** A `SLH-DSA-128f` finding FAILS CNSA 2.0 (`cnsa2-slh-dsa-excluded`) but PASSES all six others. `X25519MLKEM768` PASSES ANSSI + BSI (it's the required hybrid) but FAILS CNSA 2.0 (`cnsa2-hybrid-sub-1024` — CNSA requires ML-KEM-**1024**) and ASD ISM (`asd-hybrid-sub-1024`). Running multiple frameworks reveals what's compliant *where*.
+
+**Severity tiers.** Violations now carry `Severity: "error"` or `"warn"`. ANSSI and BSI's hybrid-KEM recommendation is a `warn` (per authoritative source language), not a blocker. `--ci-mode blocking` fails only on `error` severity.
+
+Generate a formal report (one per framework, concatenated with `---` separators if multiple):
+
+```bash
+oqs-scanner compliance-report --path . --compliance pci-dss-4.0,ncsc-uk --output report.md
 ```
 
 ---
@@ -295,7 +403,7 @@ oqs-scanner scan --path . --format cbom --sign-cbom --output signed-cbom.json
 
 | Flag | What it does |
 |------|-------------|
-| `--compliance cnsa-2.0` | CNSA 2.0 compliance check |
+| `--compliance cnsa-2.0,bsi-tr-02102` | Multi-framework compliance check (`all` shortcut supported) |
 | `--ci-mode advisory` | Non-blocking CI |
 | `--sign-cbom` | Ed25519 CBOM signing |
 | `--data-lifetime-years 30` | Amplify HNDL urgency for long-lived data |
@@ -304,6 +412,20 @@ oqs-scanner scan --path . --format cbom --sign-cbom --output signed-cbom.json
 | `--scan-type binary` | Scan binary artifacts only |
 | `--incremental` | Skip unchanged files using local cache |
 | `--exclude "vendor/**"` | Skip directories by glob |
+| `--tls-targets host:443` | Probe TLS endpoints for PQC support |
+| `--deep-probe` | Raw ClientHello probe of PQC group codepoints |
+| `--enumerate-groups` | Probe all 13 IANA TLS groups individually |
+| `--enumerate-sigalgs` | Probe 17 TLS signature schemes (ML-DSA, RSA, ECDSA, EdDSA) |
+| `--detect-server-preference` | Two-ordering probe for server preference mode |
+| `--max-probes-per-target 30` | Cap TCP connections per target across all probe passes |
+| `--skip-tls12-fallback` | Disable TLS 1.2 downgrade detection (enabled by default) |
+| `--ssh-targets host:22` | Probe SSH endpoints for PQC KEX advertisement |
+| `--ct-lookup-targets host` | Query Certificate Transparency logs |
+| `--ct-lookup-from-ech` | Auto-query CT for ECH-enabled hosts found by tls-probe |
+| `--zeek-ssl-log path` | Ingest Zeek ssl.log (TSV, JSON, or .gz) |
+| `--zeek-x509-log path` | Ingest Zeek x509.log |
+| `--suricata-eve path` | Ingest Suricata eve.json |
+| `--verbose` | Enable detailed enum progress logging |
 
 ## Other commands
 
@@ -321,12 +443,22 @@ oqs-scanner version                               # Version info
 ## Standards
 
 - **NIST PQC**: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA)
-- **CNSA 2.0**: Key exchange by 2030, signatures by 2035
+- **CNSA 2.0**: Key exchange by 2030, signatures by 2035 (NSS only)
+- **NIST IR 8547**: US federal civilian transition (2030 deprecate, 2035 disallow)
+- **PCI DSS 4.0** Req 12.3.3: cryptographic inventory mandatory since 2025-03
+- **BSI TR-02102-1**: Germany; approves FrodoKEM, Classic McEliece, HQC
+- **NCSC UK PQC Migration Timelines**: 2028/2031/2035 phased
+- **ASD ISM**: Australia; classical asymmetric cease 2030
+- **ANSSI Guide PQC**: France; hybrid PQC recommended
+- **IETF drafts** used for codepoint tables: draft-ietf-tls-hybrid-design, draft-tls-mldsa
+- **OpenSSH 10.0+** KEX: mlkem768x25519-sha256, sntrup761x25519-sha512@openssh.com
+- **TLS 1.3** RFC 8446 (active probe + raw ClientHello builder + HRR + key_share parser)
 - **HQC**: NIST 5th PQC standard (selected March 2025)
 - **KCMVP**: Korean standards — ARIA, SEED, LEA, KCDSA, HAS-160, LSH
 - **K-PQC Round 4**: SMAUG-T, HAETAE, AIMer, NTRU+
 - **CycloneDX 1.7** CBOM
 - **SARIF 2.1.0**
+- **RFC 4180** CSV (strict CRLF, formula-injection hardened)
 
 ## Contributing
 
