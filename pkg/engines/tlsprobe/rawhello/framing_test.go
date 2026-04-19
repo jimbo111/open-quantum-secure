@@ -349,6 +349,34 @@ func TestReadHandshakeMsg_OversizeHandshakeMsgLen(t *testing.T) {
 	}
 }
 
+func TestReadHandshakeMsg_RecordCap(t *testing.T) {
+	// Send maxRecordsPerMsg handshake records each carrying only 2 bytes of a
+	// message that requires 4 bytes for a complete header. The loop must abort
+	// with an error rather than reading forever.
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	ctx := context.Background()
+	go func() {
+		for i := 0; i < maxRecordsPerMsg+1; i++ {
+			if err := WriteRecord(ctx, client, Record{
+				Type:    RecordTypeHandshake,
+				Version: LegacyRecordVersion,
+				Payload: []byte{0x02, 0x00}, // 2 bytes — never completes a 4-byte header
+			}); err != nil {
+				return
+			}
+		}
+	}()
+	_, _, err := ReadHandshakeMsg(ctx, server)
+	if err == nil {
+		t.Fatal("expected error after exceeding record cap, got nil")
+	}
+	if !strings.Contains(err.Error(), "record cap") && !strings.Contains(err.Error(), "exceeded") {
+		t.Errorf("expected record-cap error, got: %v", err)
+	}
+}
+
 func TestReadHandshakeMsg_MalformedAlertRecord(t *testing.T) {
 	// Alert record with only 1 byte — needs ≥2 for level+description.
 	client, server := net.Pipe()

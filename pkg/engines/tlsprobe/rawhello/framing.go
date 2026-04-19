@@ -31,6 +31,12 @@ const MaxRecordLen = 16640
 // malformed server responses.
 const MaxHandshakeMsgLen = 65535
 
+// maxRecordsPerMsg caps the number of TLS records reassembled into a single
+// handshake message. A legitimate ServerHello fits in 1–3 records; 256 is a
+// generous upper bound that prevents an adversarial server from keeping the
+// read loop alive indefinitely.
+const maxRecordsPerMsg = 256
+
 // ioTimeout is the fallback per-operation deadline used when ctx carries no deadline.
 const ioTimeout = 15 * time.Second
 
@@ -111,7 +117,10 @@ func ReadRecord(ctx context.Context, conn net.Conn) (Record, error) {
 // handshake header (type + uint24 length).
 func ReadHandshakeMsg(ctx context.Context, conn net.Conn) (msgType uint8, body []byte, err error) {
 	var buf []byte
-	for {
+	for recordCount := 0; ; recordCount++ {
+		if recordCount >= maxRecordsPerMsg {
+			return 0, nil, fmt.Errorf("rawhello: ReadHandshakeMsg: exceeded %d-record cap without completing a message", maxRecordsPerMsg)
+		}
 		rec, err := ReadRecord(ctx, conn)
 		if err != nil {
 			return 0, nil, err
