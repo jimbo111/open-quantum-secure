@@ -52,6 +52,24 @@ type ProbeResult struct {
 	// via HelloRetryRequest. HRR means "supported but not the server's first choice" —
 	// positive PQC evidence worth recording separately from full ServerHello acceptance.
 	DeepProbeHRRGroups []uint16
+
+	// Sprint 8 enumeration fields (--enumerate-groups / --enumerate-sigalgs / --detect-server-preference).
+	// Set on the ProbeResult for a target when the corresponding flag is enabled.
+
+	// EnumAcceptedGroups lists groups where the server sent ServerHello (full acceptance).
+	// From --enumerate-groups (GroupEnumResult.AcceptedGroups).
+	EnumAcceptedGroups []uint16
+	// EnumHRRGroups lists groups the server named via HRR (supported, not first choice).
+	// From --enumerate-groups (GroupEnumResult.HRRGroups).
+	EnumHRRGroups []uint16
+	// EnumSupportedSigAlgs lists TLS SignatureScheme codepoints provisionally accepted.
+	// From --enumerate-sigalgs (SigAlgEnumResult.AcceptedSigAlgs).
+	EnumSupportedSigAlgs []uint16
+	// EnumServerPrefGroup is the IANA codepoint the server chose when offered all
+	// accepted groups simultaneously. From --detect-server-preference.
+	EnumServerPrefGroup uint16
+	// EnumerationMode records which S8 passes ran; joined by "+" (e.g. "groups+preference").
+	EnumerationMode string
 }
 
 // ProbeOpts configures a single TLS probe.

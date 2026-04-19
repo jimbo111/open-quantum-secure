@@ -287,6 +287,11 @@ func probeKeyShareClientSize(groupID uint16) (int, bool) {
 		0x11ec: 32 + 1184, // X25519MLKEM768
 		0x11ed: 97 + 1568, // SecP384r1MLKEM1024
 		0x11ee: 65 + 1184, // curveSM2MLKEM768
+		// Deprecated draft Kyber codepoints (pre-FIPS 203 X25519+Kyber768).
+		// Client key = X25519 pubkey (32) + Kyber768 encapsulation key (1184) = 1216.
+		// Same wire size as X25519MLKEM768; server distinguishes by codepoint.
+		0x6399: 32 + 1184, // X25519Kyber768Draft00
+		0x636D: 32 + 1184, // X25519Kyber768Draft00 (alternate codepoint)
 	}
 	s, ok := sizes[groupID]
 	return s, ok

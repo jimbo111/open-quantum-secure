@@ -101,6 +101,14 @@ type ScanOptions struct {
 	// hand-crafted ClientHellos. This reveals PQC group support that Go's
 	// stdlib crypto/tls does not expose via CurveID (e.g. pure ML-KEM groups).
 	DeepProbe bool // enable raw ClientHello deep-probe for PQC group detection
+
+	// Group + sig-alg enumeration options (Sprint 8).
+	// These flags are additive — any combination can be enabled.
+	// --deep-probe (Sprint 7) is the fast 6-group path; the Sprint 8 flags add
+	// richer enumeration over a larger group/sigalg universe.
+	EnumerateGroups        bool // probe all 13 groups in fullEnumGroups individually (--enumerate-groups)
+	EnumerateSigAlgs       bool // probe each sig alg in fullSigAlgList individually (--enumerate-sigalgs)
+	DetectServerPreference bool // send all accepted groups at once; record server's chosen group (--detect-server-preference)
 }
 
 // Engine is the interface every scanner engine must implement.

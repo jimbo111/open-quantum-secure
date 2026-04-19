@@ -381,6 +381,32 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 		}
 	}
 
+	// Sprint 8 enumeration results: annotate the kex finding with the richer
+	// group/sigalg/preference data collected by the enumeration passes.
+	if result.EnumerationMode != "" {
+		// Merge accepted + HRR groups into SupportedGroups for the kex finding.
+		// HRR groups are "supported but not preferred" — positive PQC evidence
+		// that belongs in the supported list alongside full-acceptance groups.
+		var allSupported []uint16
+		allSupported = append(allSupported, result.EnumAcceptedGroups...)
+		allSupported = append(allSupported, result.EnumHRRGroups...)
+
+		for i := range ff {
+			if ff[i].Algorithm != nil && ff[i].Algorithm.Primitive == "key-exchange" {
+				if len(allSupported) > 0 {
+					ff[i].SupportedGroups = allSupported
+				}
+				if len(result.EnumSupportedSigAlgs) > 0 {
+					ff[i].SupportedSigAlgs = result.EnumSupportedSigAlgs
+				}
+				if result.EnumServerPrefGroup != 0 {
+					ff[i].ServerPreferredGroup = result.EnumServerPrefGroup
+				}
+				ff[i].EnumerationMode = result.EnumerationMode
+			}
+		}
+	}
+
 	return ff
 }
 

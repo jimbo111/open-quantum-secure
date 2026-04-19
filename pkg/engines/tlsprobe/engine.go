@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -140,6 +141,82 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		}
 	}
 
+	// Sprint 8 enumeration passes: run after deep-probe so addr is already resolved.
+	// Passes run sequentially per target (same rate-limit rationale as deep-probe).
+	// Total per-target budget: 60 s enforced by a child context.
+	if opts.EnumerateGroups || opts.EnumerateSigAlgs || opts.DetectServerPreference {
+		for i := range results {
+			r := &results[i]
+			if r.Error != nil || r.ResolvedIP == "" {
+				continue
+			}
+			if ctx.Err() != nil {
+				break
+			}
+
+			host, port, err := parseHostPort(r.Target)
+			if err != nil {
+				continue
+			}
+			addr := net.JoinHostPort(r.ResolvedIP, port)
+
+			// 60-second budget for all enumeration passes on this target.
+			enumCtx, enumCancel := context.WithTimeout(ctx, 60*time.Second)
+
+			var modes []string
+
+			if opts.EnumerateGroups {
+				gr, gErr := enumerateGroups(enumCtx, addr, host, timeout)
+				if gErr != nil && len(gr.AcceptedGroups) == 0 && len(gr.HRRGroups) == 0 {
+					fmt.Fprintf(os.Stderr, "enumerate-groups: %s: %v\n", r.Target, gErr)
+				} else {
+					r.EnumAcceptedGroups = gr.AcceptedGroups
+					r.EnumHRRGroups = gr.HRRGroups
+					modes = append(modes, "groups")
+					fmt.Fprintf(os.Stderr, "enumerate-groups: %s — %d accepted, %d HRR, %d rejected\n",
+						r.Target, len(gr.AcceptedGroups), len(gr.HRRGroups), len(gr.RejectedGroups))
+				}
+			}
+
+			if opts.EnumerateSigAlgs {
+				sr, sErr := enumerateSigAlgs(enumCtx, addr, host, timeout)
+				if sErr != nil && len(sr.AcceptedSigAlgs) == 0 {
+					fmt.Fprintf(os.Stderr, "enumerate-sigalgs: %s: %v\n", r.Target, sErr)
+				} else {
+					r.EnumSupportedSigAlgs = sr.AcceptedSigAlgs
+					modes = append(modes, "sigalgs")
+					fmt.Fprintf(os.Stderr, "enumerate-sigalgs: %s — %d accepted\n",
+						r.Target, len(sr.AcceptedSigAlgs))
+				}
+			}
+
+			if opts.DetectServerPreference {
+				// Use enum-accepted groups when available; fall back to deep-probe accepted.
+				prefCandidates := r.EnumAcceptedGroups
+				if len(prefCandidates) == 0 {
+					prefCandidates = r.DeepProbeAcceptedGroups
+				}
+				if len(prefCandidates) >= 2 {
+					pref, pErr := detectServerGroupPreference(enumCtx, addr, host, timeout, prefCandidates)
+					if pErr != nil {
+						fmt.Fprintf(os.Stderr, "detect-server-preference: %s: %v\n", r.Target, pErr)
+					} else {
+						r.EnumServerPrefGroup = pref
+						modes = append(modes, "preference")
+						fmt.Fprintf(os.Stderr, "detect-server-preference: %s — preferred group 0x%04x\n",
+							r.Target, pref)
+					}
+				}
+			}
+
+			if len(modes) > 0 {
+				r.EnumerationMode = joinModes(modes)
+			}
+
+			enumCancel()
+		}
+	}
+
 	// Collect findings and track errors.
 	var allFindings []findings.UnifiedFinding
 	var reachable, unreachable int
@@ -170,4 +247,10 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	}
 
 	return allFindings, nil
+}
+
+// joinModes concatenates Sprint 8 enumeration mode names with "+".
+// Example: joinModes([]string{"groups", "preference"}) → "groups+preference".
+func joinModes(modes []string) string {
+	return strings.Join(modes, "+")
 }

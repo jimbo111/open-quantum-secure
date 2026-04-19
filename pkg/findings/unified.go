@@ -134,6 +134,23 @@ type UnifiedFinding struct {
 	// named via HelloRetryRequest (supported-but-not-preferred). Positive PQC evidence
 	// distinct from full ServerHello acceptance. Populated by --deep-probe.
 	DeepProbeHRRGroups []uint16 `json:"deepProbeHRRGroups,omitempty"`
+
+	// Group + sig-alg enumeration fields (Sprint 8, --enumerate-groups / --enumerate-sigalgs).
+	// Populated only on the kex finding for a target; empty when enumeration is disabled.
+
+	// SupportedGroups lists IANA TLS SupportedGroup codepoints accepted by the server
+	// (ServerHello) or signalled via HRR during full group enumeration.
+	SupportedGroups []uint16 `json:"supportedGroups,omitempty"`
+	// SupportedSigAlgs lists TLS SignatureScheme codepoints provisionally accepted by the
+	// server (ServerHello received without an immediate post-SH alert) during sig-alg
+	// enumeration. "Provisional" because TLS 1.3 encrypts CertificateVerify.
+	SupportedSigAlgs []uint16 `json:"supportedSigAlgs,omitempty"`
+	// ServerPreferredGroup is the IANA TLS SupportedGroup codepoint the server chose
+	// when offered all accepted groups simultaneously. 0 when not probed or on error.
+	ServerPreferredGroup uint16 `json:"serverPreferredGroup,omitempty"`
+	// EnumerationMode records which Sprint 8 enumeration passes ran: "groups",
+	// "sigalgs", "preference", or a combination joined by "+". Empty when none ran.
+	EnumerationMode string `json:"enumerationMode,omitempty"`
 }
 
 // MigrationSnippet holds a language-specific PQC migration code example.
@@ -175,6 +192,12 @@ func (f *UnifiedFinding) Clone() UnifiedFinding {
 	}
 	if f.DeepProbeHRRGroups != nil {
 		c.DeepProbeHRRGroups = append([]uint16(nil), f.DeepProbeHRRGroups...)
+	}
+	if f.SupportedGroups != nil {
+		c.SupportedGroups = append([]uint16(nil), f.SupportedGroups...)
+	}
+	if f.SupportedSigAlgs != nil {
+		c.SupportedSigAlgs = append([]uint16(nil), f.SupportedSigAlgs...)
 	}
 	return c
 }
