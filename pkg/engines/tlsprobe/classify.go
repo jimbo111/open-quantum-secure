@@ -402,6 +402,9 @@ func observationToFindings(result ProbeResult) []findings.UnifiedFinding {
 				if result.EnumServerPrefGroup != 0 {
 					ff[i].ServerPreferredGroup = result.EnumServerPrefGroup
 				}
+				if result.EnumServerPrefMode != "" {
+					ff[i].ServerPreferenceMode = result.EnumServerPrefMode
+				}
 				ff[i].EnumerationMode = result.EnumerationMode
 			}
 		}

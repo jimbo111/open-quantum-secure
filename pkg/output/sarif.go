@@ -261,6 +261,9 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 	if f.ServerPreferredGroup != 0 {
 		props["serverPreferredGroup"] = f.ServerPreferredGroup
 	}
+	if f.ServerPreferenceMode != "" {
+		props["serverPreferenceMode"] = f.ServerPreferenceMode
+	}
 	if f.EnumerationMode != "" {
 		props["enumerationMode"] = f.EnumerationMode
 	}

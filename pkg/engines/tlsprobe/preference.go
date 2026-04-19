@@ -9,54 +9,114 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe/rawhello"
 )
 
-// detectServerGroupPreference sends a single ClientHello offering key shares for
-// all groups in acceptedGroups and returns the IANA codepoint the server selected.
+// ServerPreferenceMode values returned by detectServerGroupPreference.
+const (
+	// PrefServerFixed means the server always selected the same group regardless
+	// of the client's offered ordering — it has a fixed ranked preference list.
+	PrefServerFixed = "server-fixed"
+	// PrefClientOrder means the server selected whichever group appeared first
+	// in the client's list — it honours client ordering.
+	PrefClientOrder = "client-order"
+	// PrefIndeterminate means the result could not be determined (fewer than 2
+	// valid key-share groups, transport errors, or inconsistent data).
+	PrefIndeterminate = "indeterminate"
+)
+
+// ServerPreferenceResult holds the outcome of a two-ordering preference probe.
+type ServerPreferenceResult struct {
+	// PreferredGroup is the group the server selected in the forward-order probe.
+	// 0 when Mode is PrefIndeterminate.
+	PreferredGroup uint16
+	// Mode classifies the server's preference behaviour.
+	Mode string
+}
+
+// detectServerGroupPreference determines whether the server has a fixed group
+// preference or respects the client's offered ordering.
 //
-// The server's response — either ServerHello (SelectedGroup = chosen group) or HRR
-// (SelectedGroup = demanded group) — identifies its top preference. When the server
-// sends HRR it is demanding a retry with a specific group, which is the strongest
-// possible preference signal.
+// Algorithm: send two ClientHellos with the same groups in opposite orderings.
+//   - Forward:  [A, B, C, ...]
+//   - Reversed: [..., C, B, A]
 //
-// addr must be a pre-resolved "ip:port" string (SSRF guard applied by caller).
-// Returns 0 when acceptedGroups has fewer than 2 entries, on Alert, or on error.
-func detectServerGroupPreference(ctx context.Context, addr, sni string, timeout time.Duration, acceptedGroups []uint16) (uint16, error) {
+// If both probes return the same selected group → PrefServerFixed.
+// If they differ → PrefClientOrder.
+// <2 valid groups or transport error → PrefIndeterminate.
+//
+// addr must be a pre-resolved "ip:port" string (SSRF guard applied here).
+// ctx bounds overall time; timeout bounds each individual TCP connection.
+func detectServerGroupPreference(ctx context.Context, addr, sni string, timeout time.Duration, acceptedGroups []uint16) (ServerPreferenceResult, error) {
+	indeterminate := ServerPreferenceResult{Mode: PrefIndeterminate}
+
 	if len(acceptedGroups) < 2 {
-		// With 0 or 1 accepted group there is no preference to detect.
-		return 0, nil
+		return indeterminate, nil
 	}
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
 	// Defence-in-depth SSRF check.
 	if h, _, err := net.SplitHostPort(addr); err != nil || net.ParseIP(h) == nil {
-		return 0, fmt.Errorf("detectServerGroupPreference: addr %q must be a pre-resolved IP:port, not a hostname", addr)
+		return indeterminate, fmt.Errorf("detectServerGroupPreference: addr %q must be a pre-resolved IP:port, not a hostname", addr)
 	}
 
-	// Build key shares for all accepted groups before dialing. Groups for which
-	// ProbeKeyShare fails (unknown codepoint) are silently skipped — this guards
-	// against future group additions that haven't been mapped yet. We filter
-	// first to avoid a dial attempt when fewer than 2 valid groups remain.
-	var keyShares []rawhello.KeyShareEntry
-	var validGroups []uint16
+	// Pre-compute key shares for all accepted groups before dialing.
+	// Unknown codepoints (no key share size) are silently skipped.
+	var keySharesFwd []rawhello.KeyShareEntry
+	var validGroupsFwd []uint16
 	for _, g := range acceptedGroups {
-		ks, ksErr := rawhello.ProbeKeyShare(g)
-		if ksErr != nil {
+		ks, err := rawhello.ProbeKeyShare(g)
+		if err != nil {
 			continue
 		}
-		keyShares = append(keyShares, ks)
-		validGroups = append(validGroups, g)
+		keySharesFwd = append(keySharesFwd, ks)
+		validGroupsFwd = append(validGroupsFwd, g)
 	}
-	if len(keyShares) < 2 {
-		// Not enough valid groups after filtering — no preference to detect.
-		return 0, nil
+	if len(validGroupsFwd) < 2 {
+		// Fewer than 2 valid groups after filtering — indeterminate.
+		return indeterminate, nil
 	}
 
+	// Build reversed ordering.
+	validGroupsRev := reverseGroups(validGroupsFwd)
+	keySharesRev := reverseKeyShares(keySharesFwd)
+
+	// Probe forward order [A, B, ...].
+	fwdGroup, fwdErr := probeOrder(ctx, addr, sni, timeout, validGroupsFwd, keySharesFwd)
+	if fwdErr != nil {
+		return indeterminate, fmt.Errorf("detectServerGroupPreference: forward probe: %w", fwdErr)
+	}
+	if fwdGroup == 0 {
+		// Server rejected or failed to respond.
+		return indeterminate, nil
+	}
+
+	// Probe reversed order [..., B, A].
+	revGroup, revErr := probeOrder(ctx, addr, sni, timeout, validGroupsRev, keySharesRev)
+	if revErr != nil {
+		return indeterminate, fmt.Errorf("detectServerGroupPreference: reverse probe: %w", revErr)
+	}
+	if revGroup == 0 {
+		return indeterminate, nil
+	}
+
+	if fwdGroup == revGroup {
+		// Same group selected regardless of client ordering → server-fixed preference.
+		return ServerPreferenceResult{PreferredGroup: fwdGroup, Mode: PrefServerFixed}, nil
+	}
+	// Different selections → server respects client ordering.
+	// Report the group selected in the forward (canonical) probe.
+	return ServerPreferenceResult{PreferredGroup: fwdGroup, Mode: PrefClientOrder}, nil
+}
+
+// probeOrder sends a single ClientHello offering groups in the given order and
+// returns the IANA codepoint selected by the server (from ServerHello or HRR).
+// Returns 0 on Alert or error.
+func probeOrder(ctx context.Context, addr, sni string, timeout time.Duration, groups []uint16, keyShares []rawhello.KeyShareEntry) (uint16, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", addr)
 	if err != nil {
-		return 0, fmt.Errorf("detectServerGroupPreference: dial %s: %w", addr, err)
+		return 0, fmt.Errorf("dial %s: %w", addr, err)
 	}
 	defer conn.Close()
 
@@ -66,27 +126,42 @@ func detectServerGroupPreference(ctx context.Context, addr, sni string, timeout 
 
 	ch, err := rawhello.BuildClientHello(rawhello.ClientHelloOpts{
 		SNI:             sni,
-		SupportedGroups: validGroups,
+		SupportedGroups: groups,
 		KeyShares:       keyShares,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("detectServerGroupPreference: BuildClientHello: %w", err)
+		return 0, fmt.Errorf("BuildClientHello: %w", err)
 	}
 
 	if _, err := conn.Write(ch); err != nil {
-		return 0, fmt.Errorf("detectServerGroupPreference: write: %w", err)
+		return 0, fmt.Errorf("write: %w", err)
 	}
 
 	parsed, err := rawhello.ParseServerResponse(dialCtx, conn)
 	if err != nil {
-		return 0, fmt.Errorf("detectServerGroupPreference: parse: %w", err)
+		return 0, fmt.Errorf("parse: %w", err)
 	}
 	if parsed.IsAlert {
-		// Server rejected all offered groups — no preference to report.
 		return 0, nil
 	}
-
 	// Both ServerHello and HRR carry SelectedGroup = the server's chosen group.
-	// HRR is an even stronger signal: the server is demanding this group.
 	return parsed.SelectedGroup, nil
+}
+
+// reverseGroups returns a new slice with the elements of s in reverse order.
+func reverseGroups(s []uint16) []uint16 {
+	out := make([]uint16, len(s))
+	for i, v := range s {
+		out[len(s)-1-i] = v
+	}
+	return out
+}
+
+// reverseKeyShares returns a new slice with the elements of s in reverse order.
+func reverseKeyShares(s []rawhello.KeyShareEntry) []rawhello.KeyShareEntry {
+	out := make([]rawhello.KeyShareEntry, len(s))
+	for i, v := range s {
+		out[len(s)-1-i] = v
+	}
+	return out
 }

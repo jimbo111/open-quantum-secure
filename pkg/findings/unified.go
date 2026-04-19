@@ -146,8 +146,13 @@ type UnifiedFinding struct {
 	// enumeration. "Provisional" because TLS 1.3 encrypts CertificateVerify.
 	SupportedSigAlgs []uint16 `json:"supportedSigAlgs,omitempty"`
 	// ServerPreferredGroup is the IANA TLS SupportedGroup codepoint the server chose
-	// when offered all accepted groups simultaneously. 0 when not probed or on error.
+	// in the forward-order probe during --detect-server-preference. 0 when not probed or on error.
 	ServerPreferredGroup uint16 `json:"serverPreferredGroup,omitempty"`
+	// ServerPreferenceMode classifies the server's group preference behaviour:
+	// "server-fixed" (same group regardless of client ordering),
+	// "client-order" (server mirrors client's offered ordering), or
+	// "indeterminate" (probe inconclusive or not run).
+	ServerPreferenceMode string `json:"serverPreferenceMode,omitempty"`
 	// EnumerationMode records which Sprint 8 enumeration passes ran: "groups",
 	// "sigalgs", "preference", or a combination joined by "+". Empty when none ran.
 	EnumerationMode string `json:"enumerationMode,omitempty"`

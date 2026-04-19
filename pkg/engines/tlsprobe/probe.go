@@ -65,9 +65,12 @@ type ProbeResult struct {
 	// EnumSupportedSigAlgs lists TLS SignatureScheme codepoints provisionally accepted.
 	// From --enumerate-sigalgs (SigAlgEnumResult.AcceptedSigAlgs).
 	EnumSupportedSigAlgs []uint16
-	// EnumServerPrefGroup is the IANA codepoint the server chose when offered all
-	// accepted groups simultaneously. From --detect-server-preference.
+	// EnumServerPrefGroup is the IANA codepoint the server chose in the forward-order
+	// probe during --detect-server-preference.
 	EnumServerPrefGroup uint16
+	// EnumServerPrefMode classifies the server's preference behaviour:
+	// "server-fixed", "client-order", or "indeterminate".
+	EnumServerPrefMode string
 	// EnumerationMode records which S8 passes ran; joined by "+" (e.g. "groups+preference").
 	EnumerationMode string
 }

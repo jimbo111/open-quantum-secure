@@ -374,6 +374,9 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 	if f.ServerPreferredGroup != 0 {
 		props = append(props, cdxProperty{Name: "oqs:serverPreferredGroup", Value: fmt.Sprintf("0x%04x", f.ServerPreferredGroup)})
 	}
+	if f.ServerPreferenceMode != "" {
+		props = append(props, cdxProperty{Name: "oqs:serverPreferenceMode", Value: f.ServerPreferenceMode})
+	}
 	if f.EnumerationMode != "" {
 		props = append(props, cdxProperty{Name: "oqs:enumerationMode", Value: f.EnumerationMode})
 	}

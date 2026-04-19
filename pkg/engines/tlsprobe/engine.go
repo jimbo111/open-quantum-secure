@@ -197,14 +197,15 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 					prefCandidates = r.DeepProbeAcceptedGroups
 				}
 				if len(prefCandidates) >= 2 {
-					pref, pErr := detectServerGroupPreference(enumCtx, addr, host, timeout, prefCandidates)
+					prefResult, pErr := detectServerGroupPreference(enumCtx, addr, host, timeout, prefCandidates)
 					if pErr != nil {
 						fmt.Fprintf(os.Stderr, "detect-server-preference: %s: %v\n", r.Target, pErr)
 					} else {
-						r.EnumServerPrefGroup = pref
+						r.EnumServerPrefGroup = prefResult.PreferredGroup
+						r.EnumServerPrefMode = prefResult.Mode
 						modes = append(modes, "preference")
-						fmt.Fprintf(os.Stderr, "detect-server-preference: %s — preferred group 0x%04x\n",
-							r.Target, pref)
+						fmt.Fprintf(os.Stderr, "detect-server-preference: %s — group 0x%04x (%s)\n",
+							r.Target, prefResult.PreferredGroup, prefResult.Mode)
 					}
 				}
 			}
