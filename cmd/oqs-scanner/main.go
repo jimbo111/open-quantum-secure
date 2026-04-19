@@ -350,7 +350,7 @@ func scanCmd() *cobra.Command {
 		noCache           bool
 		remoteCache       bool
 		remoteCacheBranch string
-		complianceFlag    string
+		complianceFlags   []string
 		ciMode            string
 		webhookURL        string
 		dataLifetimeYears int
@@ -642,9 +642,10 @@ Example with data lifetime adjustment for healthcare:
 
 			// Compute compliance violations count for webhook (before ci-mode switch).
 			complianceViolationCount := 0
-			if complianceFlag != "" {
-				violations := compliance.Evaluate(results)
-				complianceViolationCount = len(violations)
+			for _, fwID := range complianceFlags {
+				if fw, ok := compliance.Get(fwID); ok {
+					complianceViolationCount += len(fw.Evaluate(results))
+				}
 			}
 
 			// Webhook: POST scan results with compliance data (non-fatal).
@@ -655,7 +656,7 @@ Example with data lifetime adjustment for healthcare:
 					resolveRemoteBranchFromInfo("", cfg.Cache.RemoteBranch, projInfo),
 					"full",
 					complianceViolationCount,
-					complianceFlag,
+					strings.Join(complianceFlags, ","),
 				)
 				sendWebhook(webhookURL, wPayload)
 			}
@@ -682,10 +683,10 @@ Example with data lifetime adjustment for healthcare:
 				// Skip policy and compliance output; findings saved to history only.
 			case "advisory":
 				evaluatePolicyAdvisory(cfg, failOn, results, scanResult)
-				evaluateComplianceAdvisory(complianceFlag, results)
+				evaluateComplianceAdvisory(complianceFlags, results)
 			default: // "blocking"
 				policyErr := evaluatePolicy(cfg, failOn, results, scanResult)
-				complianceErr := evaluateCompliance(complianceFlag, results)
+				complianceErr := evaluateCompliance(complianceFlags, results)
 				if policyErr != nil {
 					return policyErr
 				}
@@ -715,7 +716,7 @@ Example with data lifetime adjustment for healthcare:
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Force full scan, ignore and do not update the incremental cache")
 	cmd.Flags().BoolVar(&remoteCache, "remote-cache", false, "Enable remote cache: download before scan and upload after (requires authentication)")
 	cmd.Flags().StringVar(&remoteCacheBranch, "remote-cache-branch", "", "Branch for remote cache key (default: auto-detect from git)")
-	cmd.Flags().StringVar(&complianceFlag, "compliance", "", "Compliance standard to enforce (supported: cnsa-2.0). Prints violations and exits 1 if any are found.")
+	cmd.Flags().StringSliceVar(&complianceFlags, "compliance", nil, "Compliance framework(s) to enforce (comma-separated or repeated flag; e.g. cnsa-2.0,bsi-tr-02102). Supported: "+strings.Join(compliance.SupportedIDs(), ", ")+".")
 	cmd.Flags().StringVar(&ciMode, "ci-mode", "blocking", "CI behavior: blocking (exit 1 on violations), advisory (warn only, exit 0), silent (no policy/compliance output, exit 0)")
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "POST scan results to this HTTPS URL on completion (JSON payload)")
 	cmd.Flags().BoolVar(&signCBOM, "sign-cbom", false, "Sign the CBOM output with an ephemeral Ed25519 key pair (only applies when --format cbom)")
@@ -772,7 +773,7 @@ func diffCmd() *cobra.Command {
 		noConfig          bool
 		incremental       bool
 		cachePath         string
-		complianceFlag    string
+		complianceFlags   []string
 		noCache           bool
 		remoteCache       bool
 		remoteCacheBranch string
@@ -1034,9 +1035,10 @@ Example:
 
 			// Compute compliance violations count for webhook.
 			diffComplianceViolations := 0
-			if complianceFlag != "" {
-				violations := compliance.Evaluate(results)
-				diffComplianceViolations = len(violations)
+			for _, fwID := range complianceFlags {
+				if fw, ok := compliance.Get(fwID); ok {
+					diffComplianceViolations += len(fw.Evaluate(results))
+				}
 			}
 
 			// Webhook: POST scan results with compliance data (non-fatal).
@@ -1047,7 +1049,7 @@ Example:
 					resolveRemoteBranchFromInfo("", cfg.Cache.RemoteBranch, projInfo),
 					"diff",
 					diffComplianceViolations,
-					complianceFlag,
+					strings.Join(complianceFlags, ","),
 				)
 				sendWebhook(webhookURL, wPayload)
 			}
@@ -1059,10 +1061,10 @@ Example:
 				// Skip policy and compliance output; findings saved to history only.
 			case "advisory":
 				evaluatePolicyAdvisory(cfg, failOn, results, scanResult)
-				evaluateComplianceAdvisory(complianceFlag, results)
+				evaluateComplianceAdvisory(complianceFlags, results)
 			default: // "blocking"
 				policyErr := evaluatePolicy(cfg, failOn, results, scanResult)
-				complianceErr := evaluateCompliance(complianceFlag, results)
+				complianceErr := evaluateCompliance(complianceFlags, results)
 				if policyErr != nil {
 					return policyErr
 				}
@@ -1088,7 +1090,7 @@ Example:
 	cmd.Flags().BoolVar(&remoteCache, "remote-cache", false, "Enable remote cache: download before scan and upload after (requires authentication)")
 	cmd.Flags().StringVar(&remoteCacheBranch, "remote-cache-branch", "", "Branch for remote cache key (default: auto-detect from git)")
 	cmd.Flags().StringVar(&apiKeyFlag, "api-key", "", "API key for authentication (overrides stored credentials)")
-	cmd.Flags().StringVar(&complianceFlag, "compliance", "", "Compliance standard to enforce (supported: cnsa-2.0). Prints violations and exits 1 if any are found.")
+	cmd.Flags().StringSliceVar(&complianceFlags, "compliance", nil, "Compliance framework(s) to enforce (comma-separated or repeated flag; e.g. cnsa-2.0,bsi-tr-02102). Supported: "+strings.Join(compliance.SupportedIDs(), ", ")+".")
 	cmd.Flags().StringVar(&ciMode, "ci-mode", "blocking", "CI behavior: blocking (exit 1 on violations), advisory (warn only, exit 0), silent (no policy/compliance output, exit 0)")
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "POST scan results to this HTTPS URL on completion (JSON payload)")
 	cmd.Flags().IntVar(&dataLifetimeYears, "data-lifetime-years", 0,
@@ -2038,28 +2040,35 @@ func evaluatePolicy(cfg config.Config, failOn string, results []findings.Unified
 	return nil
 }
 
-// evaluateCompliance runs CNSA 2.0 (or other supported) compliance evaluation
-// against scan findings. It prints a summary to stderr and returns errFailOn if
-// any violations are found. It is a no-op when standard is empty.
-func evaluateCompliance(standard string, results []findings.UnifiedFinding) error {
-	if standard == "" {
+// evaluateCompliance runs compliance evaluation for each requested framework
+// against scan findings. It prints a per-framework summary to stderr and returns
+// errFailOn if any framework has violations. It is a no-op when standards is empty.
+func evaluateCompliance(standards []string, results []findings.UnifiedFinding) error {
+	if len(standards) == 0 {
 		return nil
 	}
-	if standard != string(compliance.StandardCNSA20) {
-		return fmt.Errorf("--compliance: unsupported standard %q (supported: cnsa-2.0)", standard)
+	hasViolations := false
+	for _, id := range standards {
+		fw, ok := compliance.Get(id)
+		if !ok {
+			return fmt.Errorf("--compliance: unsupported standard %q (supported: %s)",
+				id, strings.Join(compliance.SupportedIDs(), ", "))
+		}
+		violations := fw.Evaluate(results)
+		if len(violations) == 0 {
+			fmt.Fprintf(os.Stderr, "%s Compliance: PASS\n", fw.Name())
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "%s Compliance: FAIL (%d violation(s))\n", fw.Name(), len(violations))
+		for _, v := range violations {
+			fmt.Fprintf(os.Stderr, "  [%s] %s\n", v.Rule, v.Message)
+		}
+		hasViolations = true
 	}
-
-	violations := compliance.Evaluate(results)
-	if len(violations) == 0 {
-		fmt.Fprintf(os.Stderr, "CNSA 2.0 Compliance: PASS\n")
-		return nil
+	if hasViolations {
+		return errFailOn
 	}
-
-	fmt.Fprintf(os.Stderr, "CNSA 2.0 Compliance: FAIL (%d violation(s))\n", len(violations))
-	for _, v := range violations {
-		fmt.Fprintf(os.Stderr, "  [%s] %s\n", v.Rule, v.Message)
-	}
-	return errFailOn
+	return nil
 }
 
 // validateCIMode validates the --ci-mode flag value.
@@ -2097,25 +2106,24 @@ func evaluatePolicyAdvisory(cfg config.Config, failOn string, results []findings
 }
 
 // evaluateComplianceAdvisory runs compliance evaluation in advisory mode: violations
-// are printed to stderr with an [ADVISORY] prefix but always return nil (exit 0).
-func evaluateComplianceAdvisory(standard string, results []findings.UnifiedFinding) {
-	if standard == "" {
-		return
-	}
-	if standard != string(compliance.StandardCNSA20) {
-		fmt.Fprintf(os.Stderr, "[ADVISORY] --compliance: unsupported standard %q (supported: cnsa-2.0)\n", standard)
-		return
-	}
-
-	violations := compliance.Evaluate(results)
-	if len(violations) == 0 {
-		fmt.Fprintf(os.Stderr, "[ADVISORY] CNSA 2.0 Compliance: PASS\n")
-		return
-	}
-
-	fmt.Fprintf(os.Stderr, "[ADVISORY] CNSA 2.0 Compliance: FAIL (%d violation(s))\n", len(violations))
-	for _, v := range violations {
-		fmt.Fprintf(os.Stderr, "[ADVISORY]   [%s] %s\n", v.Rule, v.Message)
+// are printed to stderr with an [ADVISORY] prefix but always exit 0.
+func evaluateComplianceAdvisory(standards []string, results []findings.UnifiedFinding) {
+	for _, id := range standards {
+		fw, ok := compliance.Get(id)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "[ADVISORY] --compliance: unsupported standard %q (supported: %s)\n",
+				id, strings.Join(compliance.SupportedIDs(), ", "))
+			continue
+		}
+		violations := fw.Evaluate(results)
+		if len(violations) == 0 {
+			fmt.Fprintf(os.Stderr, "[ADVISORY] %s Compliance: PASS\n", fw.Name())
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "[ADVISORY] %s Compliance: FAIL (%d violation(s))\n", fw.Name(), len(violations))
+		for _, v := range violations {
+			fmt.Fprintf(os.Stderr, "[ADVISORY]   [%s] %s\n", v.Rule, v.Message)
+		}
 	}
 }
 
@@ -2958,18 +2966,30 @@ upload:
 
 func complianceReportCmd() *cobra.Command {
 	var (
-		targetPath string
-		outputFile string
-		projectOvr string
+		targetPath    string
+		outputFile    string
+		projectOvr    string
+		reportStandard string
 	)
 	cmd := &cobra.Command{
 		Use:   "compliance-report",
-		Short: "Generate a CNSA 2.0 compliance report (markdown)",
-		Long: `Scan a directory for cryptographic usage and generate a formal CNSA 2.0
-compliance report in markdown format. The report includes an executive summary,
-per-algorithm compliance status, violation details, and approved algorithm
-reference. Output can be written to a file or stdout.`,
+		Short: "Generate a compliance report in markdown for a selected framework",
+		Long: `Scan a directory for cryptographic usage and generate a formal compliance
+report in markdown format for the selected framework (default: cnsa-2.0). The report
+includes an executive summary, per-algorithm compliance status, violation details,
+approved algorithm reference, and key deadlines. Output can be written to a file or stdout.
+
+Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if reportStandard == "" {
+				reportStandard = string(compliance.StandardCNSA20)
+			}
+			fw, ok := compliance.Get(reportStandard)
+			if !ok {
+				return fmt.Errorf("--compliance: unsupported standard %q (supported: %s)",
+					reportStandard, strings.Join(compliance.SupportedIDs(), ", "))
+			}
+
 			absPath, err := filepath.Abs(targetPath)
 			if err != nil {
 				return fmt.Errorf("resolve path: %w", err)
@@ -2994,7 +3014,7 @@ reference. Output can be written to a file or stdout.`,
 			if len(selected) == 0 {
 				return fmt.Errorf("no scanner engines found — run 'oqs-scanner engines install --all' or ensure binaries are in PATH")
 			}
-			fmt.Fprintf(os.Stderr, "Scanning %s with %d engine(s) for compliance report...\n", absPath, len(selected))
+			fmt.Fprintf(os.Stderr, "Scanning %s with %d engine(s) for %s compliance report...\n", absPath, len(selected), fw.Name())
 
 			scanStart := time.Now()
 			ff, _, err := orch.ScanWithImpact(ctx, opts)
@@ -3004,8 +3024,7 @@ reference. Output can be written to a file or stdout.`,
 			}
 			fmt.Fprintf(os.Stderr, "Scan completed in %s — %d findings\n", scanDuration.Round(time.Millisecond), len(ff))
 
-			violations := compliance.Evaluate(ff)
-			fw, _ := compliance.Get(string(compliance.StandardCNSA20))
+			violations := fw.Evaluate(ff)
 			data := compliance.BuildReportData(fw, ff, violations, project, version, time.Now())
 
 			var w io.Writer = os.Stdout
@@ -3048,6 +3067,7 @@ reference. Output can be written to a file or stdout.`,
 	cmd.Flags().StringVar(&targetPath, "path", ".", "Directory to scan")
 	cmd.Flags().StringVar(&outputFile, "output", "", "Output file path (default: stdout)")
 	cmd.Flags().StringVar(&projectOvr, "project", "", "Project name for report header (default: inferred from git)")
+	cmd.Flags().StringVar(&reportStandard, "compliance", string(compliance.StandardCNSA20), "Compliance framework to report on (supported: "+strings.Join(compliance.SupportedIDs(), ", ")+")")
 	return cmd
 }
 
