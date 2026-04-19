@@ -123,7 +123,9 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 			addr := net.JoinHostPort(r.ResolvedIP, port)
 			groupResults, deepErr := rawhello.DeepProbe(ctx, addr, host, timeout, rawhello.DefaultProbeGroups())
 			if deepErr != nil && len(groupResults) == 0 {
-				fmt.Fprintf(os.Stderr, "deep-probe: %s: %v\n", r.Target, deepErr)
+				if opts.Verbose {
+					fmt.Fprintf(os.Stderr, "deep-probe: %s: %v\n", r.Target, deepErr)
+				}
 				continue
 			}
 			for _, gr := range groupResults {
@@ -136,8 +138,10 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 					}
 				}
 			}
-			fmt.Fprintf(os.Stderr, "deep-probe: %s — %d/%d groups accepted, %d HRR\n",
-				r.Target, len(r.DeepProbeAcceptedGroups), len(groupResults), len(r.DeepProbeHRRGroups))
+			if opts.Verbose {
+				fmt.Fprintf(os.Stderr, "deep-probe: %s — %d/%d groups accepted, %d HRR\n",
+					r.Target, len(r.DeepProbeAcceptedGroups), len(groupResults), len(r.DeepProbeHRRGroups))
+			}
 		}
 	}
 
@@ -196,7 +200,9 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 					hasGroups := len(gr.AcceptedGroups) > 0 || len(gr.HRRGroups) > 0
 					probesUsed += len(gr.AcceptedGroups) + len(gr.HRRGroups) + len(gr.RejectedGroups)
 					if gErr != nil && !hasGroups {
-						fmt.Fprintf(os.Stderr, "enumerate-groups: %s: %v\n", r.Target, gErr)
+						if opts.Verbose {
+							fmt.Fprintf(os.Stderr, "enumerate-groups: %s: %v\n", r.Target, gErr)
+						}
 					} else {
 						r.EnumAcceptedGroups = gr.AcceptedGroups
 						r.EnumHRRGroups = gr.HRRGroups
@@ -217,7 +223,9 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 					sr, sErr := enumerateSigAlgs(enumCtx, addr, host, timeout)
 					probesUsed += len(sr.AcceptedSigAlgs) + len(sr.RejectedSigAlgs)
 					if sErr != nil && len(sr.AcceptedSigAlgs) == 0 {
-						fmt.Fprintf(os.Stderr, "enumerate-sigalgs: %s: %v\n", r.Target, sErr)
+						if opts.Verbose {
+							fmt.Fprintf(os.Stderr, "enumerate-sigalgs: %s: %v\n", r.Target, sErr)
+						}
 					} else {
 						r.EnumSupportedSigAlgs = sr.AcceptedSigAlgs
 						modes = append(modes, "sigalgs")
@@ -241,7 +249,9 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 					prefResult, pErr := detectServerGroupPreference(enumCtx, addr, host, timeout, prefCandidates)
 					probesUsed += 2
 					if pErr != nil {
-						fmt.Fprintf(os.Stderr, "detect-server-preference: %s: %v\n", r.Target, pErr)
+						if opts.Verbose {
+							fmt.Fprintf(os.Stderr, "detect-server-preference: %s: %v\n", r.Target, pErr)
+						}
 					} else {
 						r.EnumServerPrefGroup = prefResult.PreferredGroup
 						r.EnumServerPrefMode = prefResult.Mode

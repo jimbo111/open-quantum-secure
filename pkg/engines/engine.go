@@ -115,6 +115,11 @@ type ScanOptions struct {
 	// 0 = unlimited. Default 30 guards against runaway probe counts when all
 	// Sprint 8 flags are enabled simultaneously (worst case ~39 connections).
 	MaxProbesPerTarget int
+
+	// Verbose enables detailed progress logging to stderr. When false (the
+	// default), enum pass progress is suppressed to avoid leaking inventory
+	// counts (accepted groups, preferred codepoints) into CI logs.
+	Verbose bool
 }
 
 // Engine is the interface every scanner engine must implement.

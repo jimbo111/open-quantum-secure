@@ -363,6 +363,7 @@ func scanCmd() *cobra.Command {
 		tlsEnumSigAlgs    bool
 		tlsDetectPref     bool
 		tlsMaxProbes      int
+		verbose           bool
 		sector            string
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
@@ -534,6 +535,7 @@ Example with data lifetime adjustment for healthcare:
 				EnumerateSigAlgs:       tlsEnumSigAlgs,
 				DetectServerPreference: tlsDetectPref,
 				MaxProbesPerTarget:     tlsMaxProbes,
+				Verbose:                verbose,
 				NoNetwork:              noNetwork,
 				CTLookupTargets:        ctLookupTargets,
 				CTLookupFromECH:        ctLookupFromECH,
@@ -729,6 +731,7 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
 	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets and --enumerate-groups or --deep-probe)")
 	cmd.Flags().IntVar(&tlsMaxProbes, "max-probes-per-target", 0, "Max TCP connections per TLS target across all probe passes (0 = default 30; set higher to allow exhaustive enumeration)")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable detailed progress logging to stderr (enum pass results, etc.)")
 
 	// CT log lookup flags (Sprint 3)
 	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
@@ -779,6 +782,7 @@ func diffCmd() *cobra.Command {
 		tlsEnumSigAlgs    bool
 		tlsDetectPref     bool
 		tlsMaxProbes      int
+		verbose           bool
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
 		noNetwork         bool
@@ -938,6 +942,7 @@ Example:
 				EnumerateSigAlgs:       tlsEnumSigAlgs,
 				DetectServerPreference: tlsDetectPref,
 				MaxProbesPerTarget:     tlsMaxProbes,
+				Verbose:                verbose,
 				NoNetwork:              noNetwork,
 				CTLookupTargets:        ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
@@ -1090,6 +1095,7 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
 	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets)")
 	cmd.Flags().IntVar(&tlsMaxProbes, "max-probes-per-target", 0, "Max TCP connections per TLS target across all probe passes (0 = default 30; set higher to allow exhaustive enumeration)")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable detailed progress logging to stderr (enum pass results, etc.)")
 
 	// CT log lookup flags (Sprint 3)
 	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
