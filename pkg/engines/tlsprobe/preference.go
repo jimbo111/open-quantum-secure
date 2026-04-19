@@ -149,7 +149,9 @@ func probeOrder(ctx context.Context, addr, sni string, timeout time.Duration, gr
 	defer conn.Close()
 
 	if dl, ok := dialCtx.Deadline(); ok {
-		conn.SetDeadline(dl) //nolint:errcheck
+		if err := conn.SetDeadline(dl); err != nil {
+			return 0, fmt.Errorf("set deadline: %w", err)
+		}
 	}
 
 	ch, err := rawhello.BuildClientHello(rawhello.ClientHelloOpts{

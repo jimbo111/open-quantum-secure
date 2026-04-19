@@ -132,7 +132,9 @@ func probeSigAlg(ctx context.Context, addr, sni string, timeout time.Duration, s
 
 	// Set a single deadline on the conn for all I/O in this probe.
 	if dl, ok := dialCtx.Deadline(); ok {
-		conn.SetDeadline(dl) //nolint:errcheck
+		if err := conn.SetDeadline(dl); err != nil {
+			return false, fmt.Errorf("probeSigAlg 0x%04x: set deadline: %w", sigAlg, err)
+		}
 	}
 
 	ks, err := rawhello.ProbeKeyShare(0x001d) // X25519 — always succeeds
