@@ -26,15 +26,27 @@ func TestDeepProbe_Cloudflare(t *testing.T) {
 		t.Fatal("DeepProbe returned no results")
 	}
 
-	// X25519 must be accepted by any modern TLS 1.3 server.
+	byGroup := make(map[uint16]DeepProbeGroupResult, len(results))
 	for _, r := range results {
+		byGroup[r.GroupID] = r
 		if r.Err != nil {
 			t.Logf("group 0x%04x: error: %v", r.GroupID, r.Err)
 			continue
 		}
-		t.Logf("group 0x%04x: outcome=%s alertDesc=%d", r.GroupID, r.Outcome, r.AlertDesc)
-		if r.GroupID == 0x001d && r.Outcome != OutcomeAccepted {
-			t.Errorf("X25519 (0x001d): expected Accepted, got %s", r.Outcome)
+		t.Logf("group 0x%04x: outcome=%s selectedGroup=0x%04x alertDesc=%d", r.GroupID, r.Outcome, r.SelectedGroup, r.AlertDesc)
+	}
+
+	// X25519 must be accepted by any modern TLS 1.3 server.
+	if r, ok := byGroup[0x001d]; ok && r.Err == nil && r.Outcome != OutcomeAccepted {
+		t.Errorf("X25519 (0x001d): expected Accepted, got %s", r.Outcome)
+	}
+
+	// X25519MLKEM768 must be accepted or HRR-proposed by Cloudflare (PQC assertion).
+	// Cloudflare has supported X25519MLKEM768 since 2024; OutcomeAlert or OutcomeError here
+	// indicates a server-side regression or network issue worth investigating.
+	if r, ok := byGroup[0x11ec]; ok && r.Err == nil {
+		if r.Outcome != OutcomeAccepted && r.Outcome != OutcomeHRR {
+			t.Errorf("X25519MLKEM768 (0x11ec): expected Accepted or HRR from Cloudflare, got %s", r.Outcome)
 		}
 	}
 }
