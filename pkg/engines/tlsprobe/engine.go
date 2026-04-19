@@ -187,6 +187,11 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 				r.EnumTruncationReason = "PROBE_BUDGET_EXHAUSTED"
 			}
 
+			// S8 enumeration holds the per-target semaphore slot to honour Sprint 2's
+			// 5-concurrency cap across probe + deep-probe + enum. Safe now (sequential
+			// target loop), required if the outer loop is ever parallelised.
+			sem <- struct{}{}
+
 			// 60-second budget for all enumeration passes on this target.
 			enumCtx, enumCancel := context.WithTimeout(ctx, 60*time.Second)
 
@@ -268,6 +273,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 			}
 
 			enumCancel()
+			<-sem // release semaphore slot after all enum passes for this target
 		}
 	}
 
