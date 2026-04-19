@@ -1175,7 +1175,10 @@ func echHostnamesFromFindings(ff []findings.UnifiedFinding) []string {
 	seen := make(map[string]bool)
 	var hosts []string
 	for _, f := range ff {
-		if !f.PartialInventory || f.PartialInventoryReason != "ECH_ENABLED" {
+		// Match HasPrefix so composed reasons like "ECH_ENABLED+ENUMERATION_TRUNCATED"
+		// (set by tlsprobe/classify.go when both S2 ECH and S8 enum-truncation fire)
+		// still trigger CT lookup. A plain equality here would break the cascade.
+		if !f.PartialInventory || !strings.HasPrefix(f.PartialInventoryReason, "ECH_ENABLED") {
 			continue
 		}
 		file := f.Location.File

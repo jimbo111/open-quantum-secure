@@ -434,6 +434,7 @@ func TestMlVariantLevel(t *testing.T) {
 		name string
 		want int
 	}{
+		// hyphenated forms
 		{"ML-KEM-512", 512},
 		{"ML-KEM-768", 768},
 		{"ML-KEM-1024", 1024},
@@ -443,12 +444,190 @@ func TestMlVariantLevel(t *testing.T) {
 		{"ML-DSA-87", 87},
 		{"ML-DSA", 0},
 		{"SLH-DSA-128f", 0}, // suffix is "128f" — not purely numeric
+		// hyphen-less forms (TLS probe emits these)
+		{"MLKEM512", 512},
+		{"MLKEM768", 768},
+		{"MLKEM1024", 1024},
+		{"MLKEM", 0},
+		{"MLDSA44", 44},
+		{"MLDSA65", 65},
+		{"MLDSA87", 87},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := mlVariantLevel(tt.name)
 			if got != tt.want {
 				t.Errorf("mlVariantLevel(%q) = %d, want %d", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCNSA2_HyphenlessMLKEM verifies that hyphen-less ML-KEM names (emitted by
+// the TLS probe) are correctly caught by the grade check (C1 reproducer).
+func TestCNSA2_HyphenlessMLKEM(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantViolate bool
+		wantRule    string
+	}{
+		{"MLKEM512", true, "cnsa2-ml-kem-key-size"},
+		{"MLKEM768", true, "cnsa2-ml-kem-key-size"},
+		{"MLKEM1024", false, ""},
+		{"MLKEM", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := algFinding(tt.algName, "kem", 0, findings.QRSafe, "immediate")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantViolate {
+				if len(v) != 1 {
+					t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+				}
+				if v[0].Rule != tt.wantRule {
+					t.Errorf("rule = %q, want %q", v[0].Rule, tt.wantRule)
+				}
+				if v[0].Deadline != deadlineKeyExchange {
+					t.Errorf("deadline = %q, want %q", v[0].Deadline, deadlineKeyExchange)
+				}
+			} else {
+				if len(v) != 0 {
+					t.Errorf("expected no violations, got: %+v", v)
+				}
+			}
+		})
+	}
+}
+
+// TestCNSA2_HyphenlessMLDSA verifies that hyphen-less ML-DSA names are correctly
+// caught by the param-set check (C1 reproducer).
+func TestCNSA2_HyphenlessMLDSA(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantViolate bool
+	}{
+		{"MLDSA44", true},
+		{"MLDSA65", true},
+		{"MLDSA87", false},
+		{"MLDSA", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := algFinding(tt.algName, "signature", 0, findings.QRSafe, "deferred")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantViolate {
+				if len(v) != 1 {
+					t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+				}
+				if v[0].Rule != "cnsa2-ml-dsa-param-set" {
+					t.Errorf("rule = %q, want cnsa2-ml-dsa-param-set", v[0].Rule)
+				}
+			} else {
+				if len(v) != 0 {
+					t.Errorf("expected no violations, got: %+v", v)
+				}
+			}
+		})
+	}
+}
+
+// TestCNSA2_HybridSubGrade verifies that hybrid KEMs using a sub-1024 ML-KEM
+// variant produce a cnsa2-hybrid-sub-1024 violation (C3 reproducer).
+func TestCNSA2_HybridSubGrade(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantViolate bool
+		wantRule    string
+	}{
+		{"X25519MLKEM768", true, "cnsa2-hybrid-sub-1024"},
+		{"X25519MLKEM512", true, "cnsa2-hybrid-sub-1024"},
+		{"X25519MLKEM1024", false, ""},
+		{"SecP256r1MLKEM768", true, "cnsa2-hybrid-sub-1024"},
+		{"SecP384r1MLKEM1024", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := algFinding(tt.algName, "kem", 0, findings.QRSafe, "immediate")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if tt.wantViolate {
+				if len(v) != 1 {
+					t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+				}
+				if v[0].Rule != tt.wantRule {
+					t.Errorf("rule = %q, want %q", v[0].Rule, tt.wantRule)
+				}
+				if v[0].Deadline != deadlineKeyExchange {
+					t.Errorf("deadline = %q, want %q", v[0].Deadline, deadlineKeyExchange)
+				}
+			} else {
+				if len(v) != 0 {
+					t.Errorf("expected no violations, got: %+v", v)
+				}
+			}
+		})
+	}
+}
+
+// TestCNSA2_UnknownKEMDefaultDeny is the regression test for GAP-A surfaced by
+// the sophisticated test run: CNSA 2.0 silently PASSED FrodoKEM-976-AES and
+// other non-ML-KEM quantum-safe KEMs because no explicit rule matched. NSA
+// CNSA 2.0 approves only ML-KEM-1024 for key establishment. Every other
+// quantum-safe KEM — FrodoKEM (NIST Round 4 alternate), Classic McEliece, BIKE,
+// HQC variants, future alternates — must fail via the default-deny rule.
+//
+// HQC is still caught by the earlier explicit cnsa2-hqc-not-approved rule
+// (that name was already known); we assert that rule continues to fire
+// instead of the more generic kem-not-approved.
+func TestCNSA2_UnknownKEMDefaultDeny(t *testing.T) {
+	tests := []struct {
+		algName     string
+		wantRule    string
+		description string
+	}{
+		{"FrodoKEM-976-AES", "cnsa2-kem-not-approved", "BSI-approved lattice KEM, not on CNSA 2.0 list"},
+		{"FrodoKEM-1344-SHAKE", "cnsa2-kem-not-approved", "BSI-approved Frodo variant"},
+		{"Classic-McEliece-6960", "cnsa2-kem-not-approved", "BSI-approved code-based KEM"},
+		{"Classic-McEliece-8192", "cnsa2-kem-not-approved", "Classic McEliece large variant"},
+		{"BIKE-L1", "cnsa2-kem-not-approved", "NIST Round 4 alternate code-based KEM"},
+		{"BIKE-L3", "cnsa2-kem-not-approved", "BIKE security level 3"},
+		{"NTRU-Prime-761", "cnsa2-kem-not-approved", "sntrup761 variant"},
+		// HQC is caught by the EARLIER explicit rule, not the default-deny.
+		{"HQC-256", "cnsa2-hqc-not-approved", "explicit rule fires before default-deny"},
+		{"HQC-128", "cnsa2-hqc-not-approved", "explicit HQC rule"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := algFinding(tt.algName, "kem", 0, findings.QRSafe, "immediate")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 1 {
+				t.Fatalf("%s (%s): expected 1 violation, got %d: %+v",
+					tt.algName, tt.description, len(v), v)
+			}
+			if v[0].Rule != tt.wantRule {
+				t.Errorf("%s: rule = %q, want %q", tt.algName, v[0].Rule, tt.wantRule)
+			}
+		})
+	}
+}
+
+// TestCNSA2_ApprovedKEMsNotFlagged verifies that the default-deny rule does NOT
+// fire for the two algorithms CNSA 2.0 actually approves: pure ML-KEM-1024
+// and the approved hybrid X25519MLKEM1024 / SecP*MLKEM1024. This is the dual
+// of TestCNSA2_UnknownKEMDefaultDeny — regression protection that the rule
+// doesn't over-reject known-good algorithms.
+func TestCNSA2_ApprovedKEMsNotFlagged(t *testing.T) {
+	approved := []string{
+		"ML-KEM-1024",
+		"MLKEM1024", // hyphen-less form
+		"X25519MLKEM1024",
+		"SecP384r1MLKEM1024",
+	}
+	for _, name := range approved {
+		t.Run(name, func(t *testing.T) {
+			f := algFinding(name, "kem", 0, findings.QRSafe, "immediate")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 0 {
+				t.Errorf("%s: approved CNSA 2.0 KEM produced violation(s): %+v", name, v)
 			}
 		})
 	}

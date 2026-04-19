@@ -350,7 +350,7 @@ func scanCmd() *cobra.Command {
 		noCache           bool
 		remoteCache       bool
 		remoteCacheBranch string
-		complianceFlag    string
+		complianceFlags   []string
 		ciMode            string
 		webhookURL        string
 		dataLifetimeYears int
@@ -358,12 +358,19 @@ func scanCmd() *cobra.Command {
 		tlsTargets        []string
 		tlsInsecure       bool
 		tlsStrict         bool
+		tlsDeepProbe      bool
+		tlsEnumGroups     bool
+		tlsEnumSigAlgs    bool
+		tlsDetectPref     bool
+		tlsMaxProbes      int
+		verbose           bool
 		sector            string
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
 		noNetwork         bool
 		sshTargets        []string
 		sshStrict         bool
+		skipTLS12Fallback bool
 	)
 
 	cmd := &cobra.Command{
@@ -382,6 +389,9 @@ Example with data lifetime adjustment for healthcare:
 			}
 			if cmd.Flags().Changed("data-lifetime-years") && dataLifetimeYears == 0 {
 				return fmt.Errorf("--data-lifetime-years 0 is not valid: no data has zero sensitivity in practice; set a positive value (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default")
+			}
+			if tlsDetectPref && !tlsEnumGroups && !tlsDeepProbe {
+				return fmt.Errorf("--detect-server-preference requires --enumerate-groups or --deep-probe to build the accepted-group list first")
 			}
 
 			absPath, err := filepath.Abs(targetPath)
@@ -404,6 +414,10 @@ Example with data lifetime adjustment for healthcare:
 			// Apply config file as defaults; CLI flags override when explicitly set.
 			applyCommonConfigFallbacks(cmd, cfg, &format, &timeout, &maxFileMB, &engineNames, &excludePatterns, &failOn)
 			if err := validateFailOn(failOn); err != nil {
+				return err
+			}
+			complianceFlags = expandComplianceAll(complianceFlags)
+			if err := validateComplianceFlags(complianceFlags); err != nil {
 				return err
 			}
 			if err := validateCIMode(ciMode); err != nil {
@@ -450,6 +464,12 @@ Example with data lifetime adjustment for healthcare:
 			}
 			if !cmd.Flags().Changed("tls-strict") && cfg.TLS.Strict {
 				tlsStrict = true
+			}
+
+			// --deep-probe requires at least one TLS target; fail early so the
+			// user gets a clear message instead of a no-op scan.
+			if tlsDeepProbe && len(tlsTargets) == 0 {
+				return fmt.Errorf("--deep-probe requires --tls-targets (no TLS targets provided)")
 			}
 
 			// Resolve HNDL shelf-life for Mosca inequality.
@@ -513,16 +533,23 @@ Example with data lifetime adjustment for healthcare:
 				Incremental:     incremental,
 				CachePath:       cachePath,
 				NoCache:         noCache,
-				TLSTargets:      tlsTargets,
-				TLSInsecure:     tlsInsecure,
-				TLSDenyPrivate:  tlsStrict,
-				TLSTimeout:      tlsTimeout,
-				TLSCACert:       cfg.TLS.CACert,
-				NoNetwork:       noNetwork,
-				CTLookupTargets: ctLookupTargets,
-				CTLookupFromECH: ctLookupFromECH,
-				SSHTargets:      sshTargets,
-				SSHDenyPrivate:  sshStrict,
+				TLSTargets:             tlsTargets,
+				TLSInsecure:            tlsInsecure,
+				TLSDenyPrivate:         tlsStrict,
+				TLSTimeout:             tlsTimeout,
+				TLSCACert:              cfg.TLS.CACert,
+				DeepProbe:              tlsDeepProbe,
+				EnumerateGroups:        tlsEnumGroups,
+				EnumerateSigAlgs:       tlsEnumSigAlgs,
+				DetectServerPreference: tlsDetectPref,
+				MaxProbesPerTarget:     tlsMaxProbes,
+				SkipTLS12Fallback:      skipTLS12Fallback,
+				Verbose:                verbose,
+				NoNetwork:              noNetwork,
+				CTLookupTargets:        ctLookupTargets,
+				CTLookupFromECH:        ctLookupFromECH,
+				SSHTargets:             sshTargets,
+				SSHDenyPrivate:         sshStrict,
 			}
 
 			if incremental && noCache {
@@ -619,9 +646,10 @@ Example with data lifetime adjustment for healthcare:
 
 			// Compute compliance violations count for webhook (before ci-mode switch).
 			complianceViolationCount := 0
-			if complianceFlag != "" {
-				violations := compliance.Evaluate(results)
-				complianceViolationCount = len(violations)
+			for _, fwID := range complianceFlags {
+				if fw, ok := compliance.Get(fwID); ok {
+					complianceViolationCount += len(fw.Evaluate(results))
+				}
 			}
 
 			// Webhook: POST scan results with compliance data (non-fatal).
@@ -632,7 +660,7 @@ Example with data lifetime adjustment for healthcare:
 					resolveRemoteBranchFromInfo("", cfg.Cache.RemoteBranch, projInfo),
 					"full",
 					complianceViolationCount,
-					complianceFlag,
+					strings.Join(complianceFlags, ","),
 				)
 				sendWebhook(webhookURL, wPayload)
 			}
@@ -659,10 +687,10 @@ Example with data lifetime adjustment for healthcare:
 				// Skip policy and compliance output; findings saved to history only.
 			case "advisory":
 				evaluatePolicyAdvisory(cfg, failOn, results, scanResult)
-				evaluateComplianceAdvisory(complianceFlag, results)
+				evaluateComplianceAdvisory(complianceFlags, results)
 			default: // "blocking"
 				policyErr := evaluatePolicy(cfg, failOn, results, scanResult)
-				complianceErr := evaluateCompliance(complianceFlag, results)
+				complianceErr := evaluateCompliance(complianceFlags, results)
 				if policyErr != nil {
 					return policyErr
 				}
@@ -673,7 +701,7 @@ Example with data lifetime adjustment for healthcare:
 	}
 
 	cmd.Flags().StringVar(&targetPath, "path", "", "Directory to scan")
-	cmd.Flags().StringVar(&format, "format", "table", "Output format: json, table, sarif, cbom, html")
+	cmd.Flags().StringVar(&format, "format", "table", "Output format: json, table, sarif, cbom, html, csv")
 	cmd.Flags().IntVar(&timeout, "timeout", 300, "Scan timeout in seconds (0 = no timeout)")
 	cmd.Flags().IntVar(&maxFileMB, "max-file-mb", 50, "Skip files larger than this (MB)")
 	cmd.Flags().StringSliceVar(&engineNames, "engine", nil, "Engines to use (default: all available). Example: --engine cipherscope,cryptoscan")
@@ -692,7 +720,7 @@ Example with data lifetime adjustment for healthcare:
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Force full scan, ignore and do not update the incremental cache")
 	cmd.Flags().BoolVar(&remoteCache, "remote-cache", false, "Enable remote cache: download before scan and upload after (requires authentication)")
 	cmd.Flags().StringVar(&remoteCacheBranch, "remote-cache-branch", "", "Branch for remote cache key (default: auto-detect from git)")
-	cmd.Flags().StringVar(&complianceFlag, "compliance", "", "Compliance standard to enforce (supported: cnsa-2.0). Prints violations and exits 1 if any are found.")
+	cmd.Flags().StringSliceVar(&complianceFlags, "compliance", nil, "Compliance framework(s) to enforce (comma-separated or repeated flag; e.g. cnsa-2.0,bsi-tr-02102). Supported: "+strings.Join(compliance.SupportedIDs(), ", ")+".")
 	cmd.Flags().StringVar(&ciMode, "ci-mode", "blocking", "CI behavior: blocking (exit 1 on violations), advisory (warn only, exit 0), silent (no policy/compliance output, exit 0)")
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "POST scan results to this HTTPS URL on completion (JSON payload)")
 	cmd.Flags().BoolVar(&signCBOM, "sign-cbom", false, "Sign the CBOM output with an ephemeral Ed25519 key pair (only applies when --format cbom)")
@@ -708,6 +736,13 @@ Overrides --sector when both are provided.`)
 	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
+	cmd.Flags().BoolVar(&tlsDeepProbe, "deep-probe", false, "After TLS handshake, probe PQC group codepoints via raw ClientHellos (Sprint 7; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsEnumGroups, "enumerate-groups", false, "Probe all 13 TLS SupportedGroup codepoints individually to build a full acceptance list (Sprint 8; requires --tls-targets; implies --deep-probe level of detail)")
+	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets and --enumerate-groups or --deep-probe)")
+	cmd.Flags().IntVar(&tlsMaxProbes, "max-probes-per-target", 0, "Max TCP connections per TLS target across all probe passes (0 = default 30; set higher to allow exhaustive enumeration)")
+	cmd.Flags().BoolVar(&skipTLS12Fallback, "skip-tls12-fallback", false, "Skip the TLS 1.2 fallback probe for PQC-capable targets (Sprint 9; by default the probe runs to detect downgrade vulnerability)")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable detailed progress logging to stderr (enum pass results, etc.)")
 
 	// CT log lookup flags (Sprint 3)
 	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
@@ -742,7 +777,7 @@ func diffCmd() *cobra.Command {
 		noConfig          bool
 		incremental       bool
 		cachePath         string
-		complianceFlag    string
+		complianceFlags   []string
 		noCache           bool
 		remoteCache       bool
 		remoteCacheBranch string
@@ -753,11 +788,18 @@ func diffCmd() *cobra.Command {
 		tlsTargets        []string
 		tlsInsecure       bool
 		tlsStrict         bool
+		tlsDeepProbe      bool
+		tlsEnumGroups     bool
+		tlsEnumSigAlgs    bool
+		tlsDetectPref     bool
+		tlsMaxProbes      int
+		verbose           bool
 		ctLookupTargets   []string
 		ctLookupFromECH   bool
 		noNetwork         bool
 		sshTargets        []string
 		sshStrict         bool
+		skipTLS12Fallback bool
 	)
 
 	cmd := &cobra.Command{
@@ -783,6 +825,9 @@ Example:
 			if diffBase == "" {
 				return fmt.Errorf("--base is required (e.g. main, origin/main, a commit SHA)")
 			}
+			if tlsDetectPref && !tlsEnumGroups && !tlsDeepProbe {
+				return fmt.Errorf("--detect-server-preference requires --enumerate-groups or --deep-probe to build the accepted-group list first")
+			}
 
 			absPath, err := filepath.Abs(targetPath)
 			if err != nil {
@@ -801,6 +846,10 @@ Example:
 			}
 			applyCommonConfigFallbacks(cmd, cfg, &format, &timeout, &maxFileMB, &engineNames, &excludePatterns, &failOn)
 			if err := validateFailOn(failOn); err != nil {
+				return err
+			}
+			complianceFlags = expandComplianceAll(complianceFlags)
+			if err := validateComplianceFlags(complianceFlags); err != nil {
 				return err
 			}
 			if err := validateCIMode(ciMode); err != nil {
@@ -872,6 +921,11 @@ Example:
 				tlsStrict = true
 			}
 
+			// --deep-probe requires at least one TLS target; fail early.
+			if tlsDeepProbe && len(tlsTargets) == 0 {
+				return fmt.Errorf("--deep-probe requires --tls-targets (no TLS targets provided)")
+			}
+
 			// Validate --ct-lookup-targets before proceeding.
 			for _, h := range ctLookupTargets {
 				if err := ctlookup.ValidateHostname(h); err != nil {
@@ -897,13 +951,20 @@ Example:
 				Incremental:     incremental,
 				CachePath:       cachePath,
 				NoCache:         noCache,
-				TLSTargets:      tlsTargets,
-				TLSInsecure:     tlsInsecure,
-				TLSDenyPrivate:  tlsStrict,
-				TLSTimeout:      cfg.TLS.Timeout,
-				TLSCACert:       cfg.TLS.CACert,
-				NoNetwork:       noNetwork,
-				CTLookupTargets: ctLookupTargets,
+				TLSTargets:             tlsTargets,
+				TLSInsecure:            tlsInsecure,
+				TLSDenyPrivate:         tlsStrict,
+				TLSTimeout:             cfg.TLS.Timeout,
+				TLSCACert:              cfg.TLS.CACert,
+				DeepProbe:              tlsDeepProbe,
+				EnumerateGroups:        tlsEnumGroups,
+				EnumerateSigAlgs:       tlsEnumSigAlgs,
+				DetectServerPreference: tlsDetectPref,
+				MaxProbesPerTarget:     tlsMaxProbes,
+				SkipTLS12Fallback:      skipTLS12Fallback,
+				Verbose:                verbose,
+				NoNetwork:              noNetwork,
+				CTLookupTargets:        ctLookupTargets,
 				CTLookupFromECH: ctLookupFromECH,
 				SSHTargets:      sshTargets,
 				SSHDenyPrivate:  sshStrict,
@@ -982,9 +1043,10 @@ Example:
 
 			// Compute compliance violations count for webhook.
 			diffComplianceViolations := 0
-			if complianceFlag != "" {
-				violations := compliance.Evaluate(results)
-				diffComplianceViolations = len(violations)
+			for _, fwID := range complianceFlags {
+				if fw, ok := compliance.Get(fwID); ok {
+					diffComplianceViolations += len(fw.Evaluate(results))
+				}
 			}
 
 			// Webhook: POST scan results with compliance data (non-fatal).
@@ -995,7 +1057,7 @@ Example:
 					resolveRemoteBranchFromInfo("", cfg.Cache.RemoteBranch, projInfo),
 					"diff",
 					diffComplianceViolations,
-					complianceFlag,
+					strings.Join(complianceFlags, ","),
 				)
 				sendWebhook(webhookURL, wPayload)
 			}
@@ -1007,10 +1069,10 @@ Example:
 				// Skip policy and compliance output; findings saved to history only.
 			case "advisory":
 				evaluatePolicyAdvisory(cfg, failOn, results, scanResult)
-				evaluateComplianceAdvisory(complianceFlag, results)
+				evaluateComplianceAdvisory(complianceFlags, results)
 			default: // "blocking"
 				policyErr := evaluatePolicy(cfg, failOn, results, scanResult)
-				complianceErr := evaluateCompliance(complianceFlag, results)
+				complianceErr := evaluateCompliance(complianceFlags, results)
 				if policyErr != nil {
 					return policyErr
 				}
@@ -1022,7 +1084,7 @@ Example:
 
 	cmd.Flags().StringVar(&targetPath, "path", "", "Directory to scan (must be a git repository)")
 	cmd.Flags().StringVar(&diffBase, "base", "", "Git ref to diff against (e.g. main, origin/main, a commit SHA)")
-	cmd.Flags().StringVar(&format, "format", "table", "Output format: json, table, sarif, cbom, html")
+	cmd.Flags().StringVar(&format, "format", "table", "Output format: json, table, sarif, cbom, html, csv")
 	cmd.Flags().IntVar(&timeout, "timeout", 120, "Scan timeout in seconds")
 	cmd.Flags().IntVar(&maxFileMB, "max-file-mb", 50, "Skip files larger than this (MB)")
 	cmd.Flags().StringSliceVar(&engineNames, "engine", nil, "Engines to use (default: all available Tier 1)")
@@ -1036,7 +1098,7 @@ Example:
 	cmd.Flags().BoolVar(&remoteCache, "remote-cache", false, "Enable remote cache: download before scan and upload after (requires authentication)")
 	cmd.Flags().StringVar(&remoteCacheBranch, "remote-cache-branch", "", "Branch for remote cache key (default: auto-detect from git)")
 	cmd.Flags().StringVar(&apiKeyFlag, "api-key", "", "API key for authentication (overrides stored credentials)")
-	cmd.Flags().StringVar(&complianceFlag, "compliance", "", "Compliance standard to enforce (supported: cnsa-2.0). Prints violations and exits 1 if any are found.")
+	cmd.Flags().StringSliceVar(&complianceFlags, "compliance", nil, "Compliance framework(s) to enforce (comma-separated or repeated flag; e.g. cnsa-2.0,bsi-tr-02102). Supported: "+strings.Join(compliance.SupportedIDs(), ", ")+".")
 	cmd.Flags().StringVar(&ciMode, "ci-mode", "blocking", "CI behavior: blocking (exit 1 on violations), advisory (warn only, exit 0), silent (no policy/compliance output, exit 0)")
 	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "POST scan results to this HTTPS URL on completion (JSON payload)")
 	cmd.Flags().IntVar(&dataLifetimeYears, "data-lifetime-years", 0,
@@ -1049,6 +1111,13 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
+	cmd.Flags().BoolVar(&tlsDeepProbe, "deep-probe", false, "After TLS handshake, probe PQC group codepoints via raw ClientHellos (Sprint 7; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsEnumGroups, "enumerate-groups", false, "Probe all 13 TLS SupportedGroup codepoints individually to build a full acceptance list (Sprint 8; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
+	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets)")
+	cmd.Flags().IntVar(&tlsMaxProbes, "max-probes-per-target", 0, "Max TCP connections per TLS target across all probe passes (0 = default 30; set higher to allow exhaustive enumeration)")
+	cmd.Flags().BoolVar(&skipTLS12Fallback, "skip-tls12-fallback", false, "Skip the TLS 1.2 fallback probe for PQC-capable targets (Sprint 9; by default the probe runs to detect downgrade vulnerability)")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable detailed progress logging to stderr (enum pass results, etc.)")
 
 	// CT log lookup flags (Sprint 3)
 	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
@@ -1091,10 +1160,10 @@ func validateSSHTarget(target string) error {
 func writeOutput(_ *cobra.Command, format, outputFile string, scanResult output.ScanResult, signCBOM bool) error {
 	// Validate format before creating the file to avoid truncating existing output.
 	switch format {
-	case "json", "table", "sarif", "cbom", "cyclonedx", "html":
+	case "json", "table", "sarif", "cbom", "cyclonedx", "html", "csv":
 		// valid
 	default:
-		return fmt.Errorf("unknown format: %s (use 'json', 'table', 'sarif', 'cbom', or 'html')", format)
+		return fmt.Errorf("unknown format: %s (use 'json', 'table', 'sarif', 'cbom', 'html', or 'csv')", format)
 	}
 
 	var w io.Writer = os.Stdout
@@ -1124,6 +1193,8 @@ func writeOutput(_ *cobra.Command, format, outputFile string, scanResult output.
 		}
 	case "html":
 		writeErr = output.WriteHTML(w, scanResult)
+	case "csv":
+		writeErr = output.WriteCSV(w, scanResult)
 	}
 
 	if writeErr != nil {
@@ -1977,28 +2048,84 @@ func evaluatePolicy(cfg config.Config, failOn string, results []findings.Unified
 	return nil
 }
 
-// evaluateCompliance runs CNSA 2.0 (or other supported) compliance evaluation
-// against scan findings. It prints a summary to stderr and returns errFailOn if
-// any violations are found. It is a no-op when standard is empty.
-func evaluateCompliance(standard string, results []findings.UnifiedFinding) error {
-	if standard == "" {
+// evaluateCompliance runs compliance evaluation for each requested framework
+// against scan findings. It prints a per-framework summary to stderr and returns
+// errFailOn if any framework has violations. It is a no-op when standards is empty.
+func evaluateCompliance(standards []string, results []findings.UnifiedFinding) error {
+	if len(standards) == 0 {
 		return nil
 	}
-	if standard != string(compliance.StandardCNSA20) {
-		return fmt.Errorf("--compliance: unsupported standard %q (supported: cnsa-2.0)", standard)
+	hasViolations := false
+	for _, id := range standards {
+		fw, ok := compliance.Get(id)
+		if !ok {
+			return fmt.Errorf("--compliance: unsupported standard %q (supported: %s)",
+				id, strings.Join(compliance.SupportedIDs(), ", "))
+		}
+		violations := fw.Evaluate(results)
+		if len(violations) == 0 {
+			fmt.Fprintf(os.Stderr, "%s Compliance: PASS\n", fw.Name())
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "%s Compliance: FAIL (%d violation(s))\n", fw.Name(), len(violations))
+		for _, v := range violations {
+			fmt.Fprintf(os.Stderr, "  [%s] %s\n", v.Rule, v.Message)
+		}
+		hasViolations = true
 	}
+	if hasViolations {
+		return errFailOn
+	}
+	return nil
+}
 
-	violations := compliance.Evaluate(results)
-	if len(violations) == 0 {
-		fmt.Fprintf(os.Stderr, "CNSA 2.0 Compliance: PASS\n")
+// expandComplianceAll expands the "all" sentinel value to the full list of
+// registered framework IDs. If ids contains "all" anywhere, it is replaced in
+// place by compliance.SupportedIDs() (deduplicated with any other IDs the user
+// may have listed alongside). Called BEFORE validateComplianceFlags so downstream
+// evaluation sees concrete IDs. Fix for ultrareview bug_007 — without expansion,
+// "all" passed validation but failed inside evaluateCompliance after a multi-
+// minute scan.
+func expandComplianceAll(ids []string) []string {
+	expanded := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id == "all" {
+			for _, fid := range compliance.SupportedIDs() {
+				if !seen[fid] {
+					seen[fid] = true
+					expanded = append(expanded, fid)
+				}
+			}
+			continue
+		}
+		if !seen[id] {
+			seen[id] = true
+			expanded = append(expanded, id)
+		}
+	}
+	return expanded
+}
+
+// validateComplianceFlags validates all --compliance framework IDs before the scan
+// runs. All unknown IDs are reported together in a single error message so the user
+// can fix them all at once rather than discovering them one by one. Call
+// expandComplianceAll FIRST to resolve the "all" sentinel.
+func validateComplianceFlags(ids []string) error {
+	if len(ids) == 0 {
 		return nil
 	}
-
-	fmt.Fprintf(os.Stderr, "CNSA 2.0 Compliance: FAIL (%d violation(s))\n", len(violations))
-	for _, v := range violations {
-		fmt.Fprintf(os.Stderr, "  [%s] %s\n", v.Rule, v.Message)
+	var unknown []string
+	for _, id := range ids {
+		if _, ok := compliance.Get(id); !ok {
+			unknown = append(unknown, id)
+		}
 	}
-	return errFailOn
+	if len(unknown) > 0 {
+		return fmt.Errorf("--compliance: unknown framework ID(s): %s (supported: %s, or \"all\")",
+			strings.Join(unknown, ", "), strings.Join(compliance.SupportedIDs(), ", "))
+	}
+	return nil
 }
 
 // validateCIMode validates the --ci-mode flag value.
@@ -2036,25 +2163,24 @@ func evaluatePolicyAdvisory(cfg config.Config, failOn string, results []findings
 }
 
 // evaluateComplianceAdvisory runs compliance evaluation in advisory mode: violations
-// are printed to stderr with an [ADVISORY] prefix but always return nil (exit 0).
-func evaluateComplianceAdvisory(standard string, results []findings.UnifiedFinding) {
-	if standard == "" {
-		return
-	}
-	if standard != string(compliance.StandardCNSA20) {
-		fmt.Fprintf(os.Stderr, "[ADVISORY] --compliance: unsupported standard %q (supported: cnsa-2.0)\n", standard)
-		return
-	}
-
-	violations := compliance.Evaluate(results)
-	if len(violations) == 0 {
-		fmt.Fprintf(os.Stderr, "[ADVISORY] CNSA 2.0 Compliance: PASS\n")
-		return
-	}
-
-	fmt.Fprintf(os.Stderr, "[ADVISORY] CNSA 2.0 Compliance: FAIL (%d violation(s))\n", len(violations))
-	for _, v := range violations {
-		fmt.Fprintf(os.Stderr, "[ADVISORY]   [%s] %s\n", v.Rule, v.Message)
+// are printed to stderr with an [ADVISORY] prefix but always exit 0.
+func evaluateComplianceAdvisory(standards []string, results []findings.UnifiedFinding) {
+	for _, id := range standards {
+		fw, ok := compliance.Get(id)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "[ADVISORY] --compliance: unsupported standard %q (supported: %s)\n",
+				id, strings.Join(compliance.SupportedIDs(), ", "))
+			continue
+		}
+		violations := fw.Evaluate(results)
+		if len(violations) == 0 {
+			fmt.Fprintf(os.Stderr, "[ADVISORY] %s Compliance: PASS\n", fw.Name())
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "[ADVISORY] %s Compliance: FAIL (%d violation(s))\n", fw.Name(), len(violations))
+		for _, v := range violations {
+			fmt.Fprintf(os.Stderr, "[ADVISORY]   [%s] %s\n", v.Rule, v.Message)
+		}
 	}
 }
 
@@ -2897,18 +3023,32 @@ upload:
 
 func complianceReportCmd() *cobra.Command {
 	var (
-		targetPath string
-		outputFile string
-		projectOvr string
+		targetPath      string
+		outputFile      string
+		projectOvr      string
+		reportStandards []string
 	)
 	cmd := &cobra.Command{
 		Use:   "compliance-report",
-		Short: "Generate a CNSA 2.0 compliance report (markdown)",
-		Long: `Scan a directory for cryptographic usage and generate a formal CNSA 2.0
-compliance report in markdown format. The report includes an executive summary,
-per-algorithm compliance status, violation details, and approved algorithm
-reference. Output can be written to a file or stdout.`,
+		Short: "Generate a compliance report in markdown for one or more frameworks",
+		Long: `Scan a directory for cryptographic usage and generate a formal compliance
+report in markdown format for the selected framework(s) (default: cnsa-2.0). When multiple
+frameworks are specified the reports are concatenated with --- separators. Each report
+includes an executive summary, per-algorithm compliance status, violation details,
+approved algorithm reference, and key deadlines. Output can be written to a file or stdout.
+
+Supported frameworks: ` + strings.Join(compliance.SupportedIDs(), ", "),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(reportStandards) == 0 {
+				reportStandards = []string{string(compliance.StandardCNSA20)}
+			}
+
+			// Validate all framework IDs before scanning so the user gets a complete
+			// error message listing every unknown ID rather than a first-match failure.
+			if err := validateComplianceFlags(reportStandards); err != nil {
+				return err
+			}
+
 			absPath, err := filepath.Abs(targetPath)
 			if err != nil {
 				return fmt.Errorf("resolve path: %w", err)
@@ -2933,7 +3073,8 @@ reference. Output can be written to a file or stdout.`,
 			if len(selected) == 0 {
 				return fmt.Errorf("no scanner engines found — run 'oqs-scanner engines install --all' or ensure binaries are in PATH")
 			}
-			fmt.Fprintf(os.Stderr, "Scanning %s with %d engine(s) for compliance report...\n", absPath, len(selected))
+			fmt.Fprintf(os.Stderr, "Scanning %s with %d engine(s) for compliance report (%s)...\n",
+				absPath, len(selected), strings.Join(reportStandards, ", "))
 
 			scanStart := time.Now()
 			ff, _, err := orch.ScanWithImpact(ctx, opts)
@@ -2942,9 +3083,6 @@ reference. Output can be written to a file or stdout.`,
 				return fmt.Errorf("scan failed: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "Scan completed in %s — %d findings\n", scanDuration.Round(time.Millisecond), len(ff))
-
-			violations := compliance.Evaluate(ff)
-			data := compliance.BuildReportData(ff, violations, project, version, time.Now())
 
 			var w io.Writer = os.Stdout
 			var outFile *os.File
@@ -2957,12 +3095,33 @@ reference. Output can be written to a file or stdout.`,
 				w = f
 			}
 
-			if err := compliance.GenerateMarkdown(w, data); err != nil {
-				if outFile != nil {
-					outFile.Close()
+			scanDate := time.Now()
+			var totalViolations int
+			anyFail := false
+			for i, fwID := range reportStandards {
+				fw, _ := compliance.Get(fwID) // already validated above
+				violations := fw.Evaluate(ff)
+				data := compliance.BuildReportData(fw, ff, violations, project, version, scanDate)
+				if i > 0 {
+					if _, err := fmt.Fprint(w, "\n---\n\n"); err != nil {
+						if outFile != nil {
+							outFile.Close()
+						}
+						return fmt.Errorf("write separator: %w", err)
+					}
 				}
-				return fmt.Errorf("generate report: %w", err)
+				if err := compliance.GenerateMarkdown(w, data); err != nil {
+					if outFile != nil {
+						outFile.Close()
+					}
+					return fmt.Errorf("generate report for %s: %w", fwID, err)
+				}
+				totalViolations += len(violations)
+				if !data.Compliant {
+					anyFail = true
+				}
 			}
+
 			if outFile != nil {
 				if err := outFile.Sync(); err != nil {
 					outFile.Close()
@@ -2975,8 +3134,8 @@ reference. Output can be written to a file or stdout.`,
 
 			if outputFile != "" {
 				status := "PASS"
-				if !data.Compliant {
-					status = fmt.Sprintf("FAIL (%d violation(s))", len(violations))
+				if anyFail {
+					status = fmt.Sprintf("FAIL (%d total violation(s))", totalViolations)
 				}
 				fmt.Fprintf(os.Stderr, "Compliance report written to %s — %s\n", outputFile, status)
 			}
@@ -2986,6 +3145,8 @@ reference. Output can be written to a file or stdout.`,
 	cmd.Flags().StringVar(&targetPath, "path", ".", "Directory to scan")
 	cmd.Flags().StringVar(&outputFile, "output", "", "Output file path (default: stdout)")
 	cmd.Flags().StringVar(&projectOvr, "project", "", "Project name for report header (default: inferred from git)")
+	cmd.Flags().StringSliceVar(&reportStandards, "compliance", []string{string(compliance.StandardCNSA20)},
+		"Compliance framework(s) to report on, comma-separated or repeated (supported: "+strings.Join(compliance.SupportedIDs(), ", ")+")")
 	return cmd
 }
 

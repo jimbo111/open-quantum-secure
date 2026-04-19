@@ -13,11 +13,15 @@ const echPartialReason = "ECH_ENABLED"
 // annotated as partial inventory due to ECH. It is exported so that the
 // orchestrator can call it between the tls-probe and ct-lookup engine runs,
 // pre-populating CTLookupTargets with ECH-obscured hosts before ct-lookup Scan().
+//
+// The reason string may be a composed value like "ECH_ENABLED+ENUMERATION_TRUNCATED"
+// when S8 enumeration truncates an ECH target (see tlsprobe/classify.go). We match
+// via strings.HasPrefix so the ECH signal survives composition.
 func ExtractECHHostnames(ff []findings.UnifiedFinding) []string {
 	seen := make(map[string]bool)
 	var hosts []string
 	for _, f := range ff {
-		if !f.PartialInventory || f.PartialInventoryReason != echPartialReason {
+		if !f.PartialInventory || !strings.HasPrefix(f.PartialInventoryReason, echPartialReason) {
 			continue
 		}
 		h := hostnameFromFile(f.Location.File)

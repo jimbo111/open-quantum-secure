@@ -7,12 +7,16 @@ package tlsprobe
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/tlsprobe/rawhello"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
+	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
 )
 
 const (
@@ -99,6 +103,243 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	}
 	wg.Wait()
 
+	// Deep-probe pass (--deep-probe, Sprint 7): for each reachable target, probe
+	// each group in DefaultProbeGroups individually using hand-crafted ClientHellos.
+	// Run sequentially per target to avoid rate-limiting (groups are already
+	// sequential inside rawhello.DeepProbe; targets could be parallelised but
+	// sequential is safe and keeps the code simple for MVP).
+	if opts.DeepProbe {
+		for i := range results {
+			r := &results[i]
+			if r.Error != nil || r.ResolvedIP == "" {
+				continue
+			}
+			if ctx.Err() != nil {
+				break
+			}
+			host, port, err := parseHostPort(r.Target)
+			if err != nil {
+				continue
+			}
+			addr := net.JoinHostPort(r.ResolvedIP, port)
+			groupResults, deepErr := rawhello.DeepProbe(ctx, addr, host, timeout, rawhello.DefaultProbeGroups())
+			if deepErr != nil && len(groupResults) == 0 {
+				if opts.Verbose {
+					fmt.Fprintf(os.Stderr, "deep-probe: %s: %v\n", r.Target, deepErr)
+				}
+				continue
+			}
+			for _, gr := range groupResults {
+				switch gr.Outcome {
+				case rawhello.OutcomeAccepted:
+					r.DeepProbeAcceptedGroups = append(r.DeepProbeAcceptedGroups, gr.GroupID)
+				case rawhello.OutcomeHRR:
+					if gr.SelectedGroup != 0 {
+						r.DeepProbeHRRGroups = append(r.DeepProbeHRRGroups, gr.SelectedGroup)
+					}
+				}
+			}
+			if opts.Verbose {
+				fmt.Fprintf(os.Stderr, "deep-probe: %s — %d/%d groups accepted, %d HRR\n",
+					r.Target, len(r.DeepProbeAcceptedGroups), len(groupResults), len(r.DeepProbeHRRGroups))
+			}
+		}
+	}
+
+	// maxProbes and per-target probe counts span S8 enumeration and S9 TLS 1.2
+	// fallback so that both passes share the same budget.
+	// Default 30 guards against the ~39-probe worst case
+	// (1 initial + 6 deep + 13 group-enum + 17 sigalg + 2 preference + 1 tls12).
+	maxProbes := opts.MaxProbesPerTarget
+	if maxProbes == 0 {
+		maxProbes = 30
+	}
+	probesUsedPerTarget := make([]int, len(results))
+	for idx := range probesUsedPerTarget {
+		probesUsedPerTarget[idx] = 1 // initial TLS probe
+		if opts.DeepProbe {
+			probesUsedPerTarget[idx] += len(rawhello.DefaultProbeGroups())
+		}
+	}
+
+	// Sprint 8 enumeration passes: run after deep-probe so addr is already resolved.
+	// Passes run sequentially per target (same rate-limit rationale as deep-probe).
+	// Total per-target budget: 60 s enforced by a child context.
+	if opts.EnumerateGroups || opts.EnumerateSigAlgs || opts.DetectServerPreference {
+		for i := range results {
+			r := &results[i]
+			if r.Error != nil || r.ResolvedIP == "" {
+				continue
+			}
+			if ctx.Err() != nil {
+				break
+			}
+
+			host, port, err := parseHostPort(r.Target)
+			if err != nil {
+				continue
+			}
+			addr := net.JoinHostPort(r.ResolvedIP, port)
+
+			budgetExhausted := func() bool {
+				return probesUsedPerTarget[i] >= maxProbes
+			}
+			markBudgetExhausted := func() {
+				r.EnumTruncated = true
+				r.EnumTruncationReason = "PROBE_BUDGET_EXHAUSTED"
+			}
+
+			// S8 enumeration holds the per-target semaphore slot to honour Sprint 2's
+			// 5-concurrency cap across probe + deep-probe + enum. Safe now (sequential
+			// target loop), required if the outer loop is ever parallelised.
+			sem <- struct{}{}
+
+			// 60-second budget for all enumeration passes on this target.
+			enumCtx, enumCancel := context.WithTimeout(ctx, 60*time.Second)
+
+			var modes []string
+
+			if opts.EnumerateGroups {
+				if budgetExhausted() {
+					markBudgetExhausted()
+				} else {
+					gr, gErr := enumerateGroups(enumCtx, addr, host, timeout)
+					hasGroups := len(gr.AcceptedGroups) > 0 || len(gr.HRRGroups) > 0
+					probesUsedPerTarget[i] += len(gr.AcceptedGroups) + len(gr.HRRGroups) + len(gr.RejectedGroups)
+					if gErr != nil && !hasGroups {
+						if opts.Verbose {
+							fmt.Fprintf(os.Stderr, "enumerate-groups: %s: %v\n", r.Target, gErr)
+						}
+					} else {
+						r.EnumAcceptedGroups = gr.AcceptedGroups
+						r.EnumHRRGroups = gr.HRRGroups
+						modes = append(modes, "groups")
+						if gErr != nil {
+							// Partial results — some probes succeeded before context/transport error.
+							r.EnumTruncated = true
+							r.EnumTruncationReason = "enumerate-groups: " + gErr.Error()
+						}
+					}
+				}
+			}
+
+			if opts.EnumerateSigAlgs {
+				// TLS 1.3 encrypts the sig-alg negotiation (CertificateVerify); probing is
+				// only meaningful on TLS 1.3 connections. Skip for TLS ≤ 1.2 to avoid
+				// returning zero results that look like "no sig algs supported".
+				// 0x0304 = TLS 1.3. TLSVersion=0 means handshake failed; also skip.
+				const tls13Version = 0x0304
+				if r.TLSVersion != 0 && r.TLSVersion < tls13Version {
+					modes = append(modes, "sigalgs-skipped-tls12")
+				} else if budgetExhausted() {
+					markBudgetExhausted()
+				} else {
+					sr, sErr := enumerateSigAlgs(enumCtx, addr, host, timeout)
+					probesUsedPerTarget[i] += len(sr.AcceptedSigAlgs) + len(sr.RejectedSigAlgs)
+					if sErr != nil && len(sr.AcceptedSigAlgs) == 0 {
+						if opts.Verbose {
+							fmt.Fprintf(os.Stderr, "enumerate-sigalgs: %s: %v\n", r.Target, sErr)
+						}
+					} else {
+						r.EnumSupportedSigAlgs = sr.AcceptedSigAlgs
+						modes = append(modes, "sigalgs")
+						if sErr != nil {
+							// Partial results — some probes succeeded before context/transport error.
+							r.EnumTruncated = true
+							r.EnumTruncationReason = "enumerate-sigalgs: " + sErr.Error()
+						}
+					}
+				}
+			}
+
+			if opts.DetectServerPreference {
+				// Use enum-accepted groups when available; fall back to deep-probe accepted.
+				prefCandidates := r.EnumAcceptedGroups
+				if len(prefCandidates) == 0 {
+					prefCandidates = r.DeepProbeAcceptedGroups
+				}
+				// Preference probe costs 2 connections (forward + reverse ordering).
+				if len(prefCandidates) >= 2 && !budgetExhausted() && probesUsedPerTarget[i]+2 <= maxProbes {
+					prefResult, pErr := detectServerGroupPreference(enumCtx, addr, host, timeout, prefCandidates)
+					probesUsedPerTarget[i] += 2
+					if pErr != nil {
+						if opts.Verbose {
+							fmt.Fprintf(os.Stderr, "detect-server-preference: %s: %v\n", r.Target, pErr)
+						}
+					} else {
+						r.EnumServerPrefGroup = prefResult.PreferredGroup
+						r.EnumServerPrefMode = prefResult.Mode
+						modes = append(modes, "preference")
+					}
+				} else if len(prefCandidates) >= 2 {
+					// Not enough budget for preference probe.
+					markBudgetExhausted()
+				}
+			}
+
+			if len(modes) > 0 {
+				r.EnumerationMode = joinModes(modes)
+			}
+
+			enumCancel()
+			<-sem // release semaphore slot after all enum passes for this target
+		}
+	}
+
+	// TLS 1.2 fallback probe (Sprint 9, Feature 3): for each target that
+	// negotiated a PQC key-share via TLS 1.3, attempt a TLS 1.2 handshake to
+	// detect downgrade vulnerability. Runs sequentially (same rate-limit rationale
+	// as deep-probe). Counts +1 toward MaxProbesPerTarget per PQC target.
+	if !opts.SkipTLS12Fallback {
+		for i := range results {
+			r := &results[i]
+			if r.Error != nil || r.ResolvedIP == "" {
+				continue
+			}
+			if ctx.Err() != nil {
+				break
+			}
+
+			// Only probe targets that negotiated a PQC key-share in TLS 1.3.
+			groupInfo, groupKnown := quantum.ClassifyTLSGroup(r.NegotiatedGroupID)
+			if !groupKnown || !groupInfo.PQCPresent {
+				continue
+			}
+
+			// Respect the probe budget (shared with S8 enumeration passes).
+			if maxProbes > 0 && probesUsedPerTarget[i] >= maxProbes {
+				r.EnumTruncated = true
+				r.EnumTruncationReason = "PROBE_BUDGET_EXHAUSTED"
+				continue
+			}
+
+			host, port, err := parseHostPort(r.Target)
+			if err != nil {
+				continue
+			}
+			addr := net.JoinHostPort(r.ResolvedIP, port)
+
+			// Acquire per-target semaphore slot (Sprint 2, 5-concurrent cap).
+			// The send is not ctx-cancellable (no select/default) — intentional per
+			// Sprint 2 M1: targets run sequentially here, so the send never blocks
+			// longer than one in-flight probe.
+			sem <- struct{}{}
+			tls12Res, tls12Err := tls12probeFn(ctx, addr, host, timeout, probeOpts.DenyPrivate)
+			<-sem
+
+			if tls12Err != nil {
+				if opts.Verbose {
+					fmt.Fprintf(os.Stderr, "tls12-fallback: %s: %v\n", r.Target, tls12Err)
+				}
+				continue
+			}
+			probesUsedPerTarget[i]++
+			r.AcceptedTLS12 = tls12Res.AcceptedTLS12
+			r.TLS12CipherSuite = tls12Res.CipherSuiteID
+			r.TLS12CipherSuiteName = tls12Res.CipherSuiteName
+		}
+	}
+
 	// Collect findings and track errors.
 	var allFindings []findings.UnifiedFinding
 	var reachable, unreachable int
@@ -129,4 +370,10 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	}
 
 	return allFindings, nil
+}
+
+// joinModes concatenates Sprint 8 enumeration mode names with "+".
+// Example: joinModes([]string{"groups", "preference"}) → "groups+preference".
+func joinModes(modes []string) string {
+	return strings.Join(modes, "+")
 }

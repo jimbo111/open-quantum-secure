@@ -1,6 +1,6 @@
 // Package compliance implements compliance framework evaluation for scan findings.
-// Currently supports CNSA 2.0 (NSA Commercial National Security Algorithm Suite 2.0,
-// May 2025 update).
+// Supported frameworks are registered via framework.go's registry; each framework
+// file calls Register() from its init().
 package compliance
 
 import (
@@ -9,7 +9,8 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 )
 
-// Standard is a compliance standard identifier.
+// Standard is a compliance standard identifier (used by the CLI --compliance flag
+// and main.go for backward-compatible handling).
 type Standard string
 
 const (
@@ -17,28 +18,37 @@ const (
 	StandardCNSA20 Standard = "cnsa-2.0"
 )
 
-// Violation is a single CNSA 2.0 rule breach for a finding.
-type Violation struct {
-	// Algorithm is the algorithm name that triggered the violation (may be empty
-	// for quantum-vulnerable dependency findings).
-	Algorithm string
-
-	// Rule is the machine-readable rule identifier (e.g. "cnsa2-slh-dsa-excluded").
-	Rule string
-
-	// Message is the human-readable description.
-	Message string
-
-	// Deadline is the ISO 8601 date by which the issue must be resolved.
-	// "2027-01-01" for key exchange, "2035-12-31" for all others.
-	Deadline string
-}
-
 // CNSA 2.0 deadlines (NSA guidance, May 2025 update).
 const (
 	deadlineKeyExchange = "2030-01-01" // all NSS must use PQC for key exchange by this date
 	deadlineFull        = "2035-12-31" // full transition complete
 )
+
+// cnsa20Framework implements Framework for NSA CNSA 2.0 (May 2025 update).
+// Source: NSA CNSA 2.0 Algorithm Suite, Sep 2022 + May 2025 clarification memo.
+// https://media.defense.gov/2022/Sep/07/2003071834/-1/-1/0/CSA_CNSA_2.0_ALGORITHMS_.PDF
+type cnsa20Framework struct{}
+
+func (cnsa20Framework) ID() string          { return "cnsa-2.0" }
+func (cnsa20Framework) Name() string        { return "CNSA 2.0" }
+func (cnsa20Framework) Description() string { return "NSA CNSA 2.0 (May 2025)" }
+
+func (cnsa20Framework) ApprovedAlgos() []ApprovedAlgoRef {
+	return []ApprovedAlgoRef{
+		{"Key Exchange", "ML-KEM-1024", "FIPS 203"},
+		{"Digital Signatures", "ML-DSA-87", "FIPS 204"},
+		{"Firmware/Software Signing", "LMS/HSS, XMSS/XMSS^MT", "SP 800-208"},
+		{"Symmetric Encryption", "AES-256", "FIPS 197"},
+		{"Hashing", "SHA-384, SHA-512", "FIPS 180-4"},
+	}
+}
+
+func (cnsa20Framework) Deadlines() []DeadlineRef {
+	return []DeadlineRef{
+		{"2030-01-01", "All key exchange must use ML-KEM-1024"},
+		{"2035-12-31", "Full CNSA 2.0 transition complete"},
+	}
+}
 
 // Evaluate checks each finding in ff against CNSA 2.0 rules and returns all
 // violations found. The returned slice is nil when there are no violations.
@@ -51,7 +61,7 @@ const (
 //   - Symmetric: AES-256 required (AES-128/192 insufficient)
 //   - Hash: SHA-384 or SHA-512 required (SHA-256 insufficient)
 //   - Quantum-vulnerable algorithms: violation with appropriate deadline
-func Evaluate(ff []findings.UnifiedFinding) []Violation {
+func (cnsa20Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 	var violations []Violation
 
 	for i := range ff {
@@ -59,12 +69,12 @@ func Evaluate(ff []findings.UnifiedFinding) []Violation {
 		if f.Algorithm == nil {
 			// Dependency finding with no algorithm — only flag if quantum-vulnerable.
 			if f.QuantumRisk == findings.QRVulnerable {
-				violations = append(violations, Violation{
-					Algorithm: f.RawIdentifier,
-					Rule:      "cnsa2-quantum-vulnerable",
-					Message:   "quantum-vulnerable dependency must be replaced with CNSA 2.0 approved algorithms",
-					Deadline:  deadlineForHNDL(f.HNDLRisk),
-				})
+				violations = append(violations, newCNSA2Violation(
+					f.RawIdentifier,
+					"cnsa2-quantum-vulnerable",
+					"quantum-vulnerable dependency must be replaced with CNSA 2.0 approved algorithms",
+					deadlineForHNDL(f.HNDLRisk),
+				))
 			}
 			continue
 		}
@@ -75,35 +85,35 @@ func Evaluate(ff []findings.UnifiedFinding) []Violation {
 
 		// --- Rule: quantum-vulnerable algorithms ---
 		if f.QuantumRisk == findings.QRVulnerable || f.QuantumRisk == findings.QRDeprecated {
-			violations = append(violations, Violation{
-				Algorithm: name,
-				Rule:      "cnsa2-quantum-vulnerable",
-				Message:   name + " is quantum-vulnerable and not approved for CNSA 2.0; migrate to an approved PQC algorithm",
-				Deadline:  deadlineForHNDL(f.HNDLRisk),
-			})
+			violations = append(violations, newCNSA2Violation(
+				name,
+				"cnsa2-quantum-vulnerable",
+				name+" is quantum-vulnerable and not approved for CNSA 2.0; migrate to an approved PQC algorithm",
+				deadlineForHNDL(f.HNDLRisk),
+			))
 			continue
 		}
 
 		// --- Rule: SLH-DSA excluded ---
 		// SLH-DSA (FIPS 205) is not approved by NSA CNSA 2.0 despite NIST standardisation.
 		if strings.HasPrefix(upper, "SLH-DSA") {
-			violations = append(violations, Violation{
-				Algorithm: name,
-				Rule:      "cnsa2-slh-dsa-excluded",
-				Message:   "SLH-DSA is excluded from CNSA 2.0 despite NIST FIPS 205 approval; use ML-DSA-87 instead",
-				Deadline:  deadlineFull,
-			})
+			violations = append(violations, newCNSA2Violation(
+				name,
+				"cnsa2-slh-dsa-excluded",
+				"SLH-DSA is excluded from CNSA 2.0 despite NIST FIPS 205 approval; use ML-DSA-87 instead",
+				deadlineFull,
+			))
 			continue
 		}
 
 		// --- Rule: HashML-DSA excluded ---
 		if strings.HasPrefix(upper, "HASHML-DSA") || upper == "HASH-ML-DSA" {
-			violations = append(violations, Violation{
-				Algorithm: name,
-				Rule:      "cnsa2-hashml-dsa-excluded",
-				Message:   "HashML-DSA is not approved for CNSA 2.0; use ML-DSA-87 instead",
-				Deadline:  deadlineFull,
-			})
+			violations = append(violations, newCNSA2Violation(
+				name,
+				"cnsa2-hashml-dsa-excluded",
+				"HashML-DSA is not approved for CNSA 2.0; use ML-DSA-87 instead",
+				deadlineFull,
+			))
 			continue
 		}
 
@@ -111,42 +121,78 @@ func Evaluate(ff []findings.UnifiedFinding) []Violation {
 		// HQC was selected by NIST as the 5th PQC standard (March 2025) but is not
 		// yet included in NSA CNSA 2.0. Use ML-KEM-1024 for CNSA 2.0 compliance.
 		if strings.HasPrefix(upper, "HQC") {
-			violations = append(violations, Violation{
-				Algorithm: name,
-				Rule:      "cnsa2-hqc-not-approved",
-				Message:   "HQC is not yet approved for CNSA 2.0; use ML-KEM-1024 instead",
-				Deadline:  deadlineKeyExchange,
-			})
+			violations = append(violations, newCNSA2Violation(
+				name,
+				"cnsa2-hqc-not-approved",
+				"HQC is not yet approved for CNSA 2.0; use ML-KEM-1024 instead",
+				deadlineKeyExchange,
+			))
+			continue
+		}
+
+		// --- Rule: hybrid KEM below ML-KEM-1024 grade ---
+		// CNSA 2.0 requires ML-KEM-1024 for key exchange. Hybrid KEMs that use a
+		// sub-1024 ML-KEM variant (e.g. X25519MLKEM768) do not meet the grade requirement.
+		if isHybridKEM(f) {
+			variant := mlVariantLevel(name)
+			if variant > 0 && variant < 1024 {
+				violations = append(violations, newCNSA2Violation(
+					name,
+					"cnsa2-hybrid-sub-1024",
+					"CNSA 2.0 requires ML-KEM-1024; "+name+" is a hybrid KEM using a sub-1024 ML-KEM variant — upgrade to use ML-KEM-1024",
+					deadlineKeyExchange,
+				))
+			}
 			continue
 		}
 
 		// --- Rule: ML-KEM key size minimum ---
 		// CNSA 2.0 requires ML-KEM-1024. ML-KEM-512 and ML-KEM-768 are insufficient.
-		if strings.HasPrefix(upper, "ML-KEM") {
+		// Matches both hyphenated ("ML-KEM-768") and hyphen-less ("MLKEM768") forms.
+		if isMLKEMName(name) {
 			variant := mlVariantLevel(name)
 			if variant > 0 && variant < 1024 {
-				violations = append(violations, Violation{
-					Algorithm: name,
-					Rule:      "cnsa2-ml-kem-key-size",
-					Message:   "CNSA 2.0 requires ML-KEM-1024; " + name + " is insufficient — upgrade to ML-KEM-1024",
-					Deadline:  deadlineKeyExchange,
-				})
+				violations = append(violations, newCNSA2Violation(
+					name,
+					"cnsa2-ml-kem-key-size",
+					"CNSA 2.0 requires ML-KEM-1024; "+name+" is insufficient — upgrade to ML-KEM-1024",
+					deadlineKeyExchange,
+				))
 			}
 			continue
 		}
 
 		// --- Rule: ML-DSA parameter set minimum ---
 		// CNSA 2.0 requires ML-DSA-87. ML-DSA-44 and ML-DSA-65 are insufficient.
-		if strings.HasPrefix(upper, "ML-DSA") {
+		// Matches both hyphenated ("ML-DSA-44") and hyphen-less ("MLDSA44") forms.
+		if isMLDSAName(name) {
 			variant := mlVariantLevel(name)
 			if variant > 0 && variant < 87 {
-				violations = append(violations, Violation{
-					Algorithm: name,
-					Rule:      "cnsa2-ml-dsa-param-set",
-					Message:   "CNSA 2.0 requires ML-DSA-87; " + name + " is insufficient — upgrade to ML-DSA-87",
-					Deadline:  deadlineFull,
-				})
+				violations = append(violations, newCNSA2Violation(
+					name,
+					"cnsa2-ml-dsa-param-set",
+					"CNSA 2.0 requires ML-DSA-87; "+name+" is insufficient — upgrade to ML-DSA-87",
+					deadlineFull,
+				))
 			}
+			continue
+		}
+
+		// --- Rule: KEM default-deny (non-ML-KEM quantum-safe KEMs) ---
+		// CNSA 2.0 approves only ML-KEM-1024 (pure) and ML-KEM-1024 hybrids.
+		// Any other quantum-safe KEM — FrodoKEM, Classic McEliece, HQC variants,
+		// BIKE, future NIST Round 4 alternates — is NOT on the CNSA 2.0 approved
+		// list. The earlier explicit HQC rule fires for HQC; this default-deny
+		// catches every remaining quantum-safe KEM not previously matched.
+		// Matched by primitive (isKEMPrimitive) rather than name prefix so new
+		// algorithms are rejected without code updates.
+		if isKEMPrimitive(f) && f.QuantumRisk != findings.QRVulnerable && f.QuantumRisk != findings.QRDeprecated {
+			violations = append(violations, newCNSA2Violation(
+				name,
+				"cnsa2-kem-not-approved",
+				name+" is not a CNSA 2.0 approved KEM; CNSA 2.0 approves only ML-KEM-1024 (pure or in hybrid combinations using ML-KEM-1024)",
+				deadlineKeyExchange,
+			))
 			continue
 		}
 
@@ -158,23 +204,23 @@ func Evaluate(ff []findings.UnifiedFinding) []Violation {
 		if strings.HasPrefix(upper, "ARIA") || strings.HasPrefix(upper, "CAMELLIA") ||
 			strings.HasPrefix(upper, "CHACHA") || strings.HasPrefix(upper, "SEED") ||
 			strings.HasPrefix(upper, "TWOFISH") || strings.HasPrefix(upper, "SERPENT") {
-			violations = append(violations, Violation{
-				Algorithm: name,
-				Rule:      "cnsa2-symmetric-unapproved",
-				Message:   name + " is not a CNSA 2.0 approved symmetric cipher; only AES-256 is approved",
-				Deadline:  deadlineFull,
-			})
+			violations = append(violations, newCNSA2Violation(
+				name,
+				"cnsa2-symmetric-unapproved",
+				name+" is not a CNSA 2.0 approved symmetric cipher; only AES-256 is approved",
+				deadlineFull,
+			))
 			continue
 		}
 		if strings.HasPrefix(upper, "AES") {
 			effective := resolveSymmetricKeySize(upper, keySize)
 			if effective > 0 && effective < 256 {
-				violations = append(violations, Violation{
-					Algorithm: name,
-					Rule:      "cnsa2-symmetric-key-size",
-					Message:   "CNSA 2.0 requires AES-256 (or equivalent 256-bit symmetric); " + name + " has insufficient key size — upgrade to AES-256",
-					Deadline:  deadlineFull,
-				})
+				violations = append(violations, newCNSA2Violation(
+					name,
+					"cnsa2-symmetric-key-size",
+					"CNSA 2.0 requires AES-256 (or equivalent 256-bit symmetric); "+name+" has insufficient key size — upgrade to AES-256",
+					deadlineFull,
+				))
 			}
 			continue
 		}
@@ -184,29 +230,29 @@ func Evaluate(ff []findings.UnifiedFinding) []Violation {
 		// SHA-3, BLAKE, and other hash families are NOT approved.
 		if isHashFamily(upper) {
 			// Check if it's SHA-2 family (not SHA-3 or other).
-			// Note: "SHA-384" starts with "SHA-3" so we must check for "SHA-3-" or "SHA3-"
-			// to distinguish SHA-2's SHA-384 from SHA-3 variants like SHA-3-256.
+			// Note: "SHA-384" starts with "SHA-3" so we must check for "SHA-3-" (with trailing dash)
+			// or "SHA3-" to distinguish SHA-2's SHA-384 from SHA-3 variants like SHA-3-256.
 			isSHA3 := strings.HasPrefix(upper, "SHA3-") || strings.HasPrefix(upper, "SHA-3-") || upper == "SHA3" || upper == "SHA-3"
 			isSHA2 := (strings.HasPrefix(upper, "SHA-") || strings.HasPrefix(upper, "SHA2") ||
 				upper == "SHA256" || upper == "SHA384" || upper == "SHA512") && !isSHA3
 			isHMACSHA2 := strings.HasPrefix(upper, "HMAC-SHA") && !strings.Contains(upper, "SHA3")
 			if !isSHA2 && !isHMACSHA2 {
-				violations = append(violations, Violation{
-					Algorithm: name,
-					Rule:      "cnsa2-hash-unapproved",
-					Message:   name + " is not a CNSA 2.0 approved hash; only SHA-384 and SHA-512 (SHA-2 family) are approved",
-					Deadline:  deadlineFull,
-				})
+				violations = append(violations, newCNSA2Violation(
+					name,
+					"cnsa2-hash-unapproved",
+					name+" is not a CNSA 2.0 approved hash; only SHA-384 and SHA-512 (SHA-2 family) are approved",
+					deadlineFull,
+				))
 				continue
 			}
 			size := resolveHashOutputSize(upper, keySize)
 			if size > 0 && size < 384 {
-				violations = append(violations, Violation{
-					Algorithm: name,
-					Rule:      "cnsa2-hash-output-size",
-					Message:   "CNSA 2.0 requires SHA-384 or SHA-512; " + name + " has insufficient output size — upgrade to SHA-384 or SHA-512",
-					Deadline:  deadlineFull,
-				})
+				violations = append(violations, newCNSA2Violation(
+					name,
+					"cnsa2-hash-output-size",
+					"CNSA 2.0 requires SHA-384 or SHA-512; "+name+" has insufficient output size — upgrade to SHA-384 or SHA-512",
+					deadlineFull,
+				))
 			}
 			continue
 		}
@@ -218,33 +264,35 @@ func Evaluate(ff []findings.UnifiedFinding) []Violation {
 	return violations
 }
 
+func init() {
+	Register(cnsa20Framework{})
+}
+
+// Evaluate is a package-level shim for backward compatibility with callers
+// that do not need to select the framework (e.g. existing main.go paths).
+func Evaluate(ff []findings.UnifiedFinding) []Violation {
+	return cnsa20Framework{}.Evaluate(ff)
+}
+
+// newCNSA2Violation constructs a Violation with Remediation populated via
+// remediationForRule so that the generic report generator can render it.
+func newCNSA2Violation(algorithm, rule, message, deadline string) Violation {
+	return Violation{
+		Algorithm:   algorithm,
+		Rule:        rule,
+		Message:     message,
+		Deadline:    deadline,
+		Remediation: remediationForRule(rule, algorithm),
+	}
+}
+
 // deadlineForHNDL returns the appropriate CNSA 2.0 deadline based on HNDL risk.
-// Key exchange has an earlier (2027) deadline than other algorithms (2035).
+// Key exchange has an earlier (2030) deadline than other algorithms (2035).
 func deadlineForHNDL(hndlRisk string) string {
 	if hndlRisk == "immediate" {
 		return deadlineKeyExchange
 	}
 	return deadlineFull
-}
-
-// mlVariantLevel extracts the numeric parameter level from an ML-KEM or ML-DSA
-// name. For example: "ML-KEM-768" → 768, "ML-DSA-44" → 44, "ML-KEM" → 0.
-// Returns 0 when no numeric suffix is present.
-func mlVariantLevel(name string) int {
-	// Find the last '-' and parse the suffix as an integer.
-	idx := strings.LastIndex(name, "-")
-	if idx < 0 || idx == len(name)-1 {
-		return 0
-	}
-	suffix := name[idx+1:]
-	n := 0
-	for _, ch := range suffix {
-		if ch < '0' || ch > '9' {
-			return 0
-		}
-		n = n*10 + int(ch-'0')
-	}
-	return n
 }
 
 // resolveSymmetricKeySize returns the effective key size for a symmetric algorithm.
@@ -297,4 +345,42 @@ func isHashFamily(upper string) bool {
 		}
 	}
 	return false
+}
+
+// remediationForRule returns actionable remediation text for a known CNSA 2.0 rule ID.
+func remediationForRule(rule, algorithm string) string {
+	switch rule {
+	case "cnsa2-quantum-vulnerable":
+		upper := strings.ToUpper(algorithm)
+		switch {
+		case isRSAFamily(upper), isDHFamily(upper):
+			return "Migrate to ML-KEM-1024 for key exchange or ML-DSA-87 for digital signatures"
+		case isECDHFamily(upper), isECDSAFamily(upper):
+			return "Migrate to ML-KEM-1024 for key exchange or ML-DSA-87 for digital signatures"
+		case isDSAFamily(upper):
+			return "Migrate to ML-DSA-87 for digital signatures"
+		default:
+			return "Replace with an approved CNSA 2.0 algorithm (ML-KEM-1024, ML-DSA-87, AES-256, SHA-384/SHA-512)"
+		}
+	case "cnsa2-hybrid-sub-1024":
+		return "Upgrade the ML-KEM component to ML-KEM-1024; CNSA 2.0 requires the 1024 parameter set regardless of hybrid configuration"
+	case "cnsa2-ml-kem-key-size":
+		return "Upgrade to ML-KEM-1024; ML-KEM-512 and ML-KEM-768 do not meet CNSA 2.0 minimum"
+	case "cnsa2-ml-dsa-param-set":
+		return "Upgrade to ML-DSA-87; ML-DSA-44 and ML-DSA-65 do not meet CNSA 2.0 minimum"
+	case "cnsa2-slh-dsa-excluded":
+		return "Replace with ML-DSA-87; SLH-DSA (FIPS 205) is excluded from CNSA 2.0 despite NIST approval"
+	case "cnsa2-hashml-dsa-excluded":
+		return "Replace with ML-DSA-87; HashML-DSA is not approved for CNSA 2.0"
+	case "cnsa2-symmetric-key-size":
+		return "Upgrade to AES-256; smaller AES key sizes do not meet CNSA 2.0 requirements"
+	case "cnsa2-symmetric-unapproved":
+		return "Replace with AES-256; only AES is approved for symmetric encryption under CNSA 2.0"
+	case "cnsa2-hash-output-size":
+		return "Upgrade to SHA-384 or SHA-512; shorter hash outputs do not meet CNSA 2.0 requirements"
+	case "cnsa2-hash-unapproved":
+		return "Replace with SHA-384 or SHA-512 (SHA-2 family only); SHA-3 and other hash families are not approved"
+	default:
+		return "Review and remediate per the applicable compliance framework guidance"
+	}
 }

@@ -124,6 +124,38 @@ type UnifiedFinding struct {
 	// the TLS handshake exchange.
 	HandshakeVolumeClass string `json:"handshakeVolumeClass,omitempty"` // "classical", "hybrid-kem", "full-pqc", "unknown"
 	HandshakeBytes       int64  `json:"handshakeBytes,omitempty"`       // total handshake bytes (in+out)
+
+	// Deep-probe fields (populated by tls-probe --deep-probe raw ClientHello pass, Sprint 7).
+	// DeepProbeSupportedGroups lists the IANA TLS SupportedGroup codepoints that the
+	// server accepted (responded with ServerHello, not HRR or Alert) during the
+	// raw probe. Only set on the kex finding for a target when --deep-probe is enabled.
+	DeepProbeSupportedGroups []uint16 `json:"deepProbeSupportedGroups,omitempty"`
+	// DeepProbeHRRGroups lists the IANA TLS SupportedGroup codepoints that the server
+	// named via HelloRetryRequest (supported-but-not-preferred). Positive PQC evidence
+	// distinct from full ServerHello acceptance. Populated by --deep-probe.
+	DeepProbeHRRGroups []uint16 `json:"deepProbeHRRGroups,omitempty"`
+
+	// Group + sig-alg enumeration fields (Sprint 8, --enumerate-groups / --enumerate-sigalgs).
+	// Populated only on the kex finding for a target; empty when enumeration is disabled.
+
+	// SupportedGroups lists IANA TLS SupportedGroup codepoints accepted by the server
+	// (ServerHello) or signalled via HRR during full group enumeration.
+	SupportedGroups []uint16 `json:"supportedGroups,omitempty"`
+	// SupportedSigAlgs lists TLS SignatureScheme codepoints provisionally accepted by the
+	// server (ServerHello received without an immediate post-SH alert) during sig-alg
+	// enumeration. "Provisional" because TLS 1.3 encrypts CertificateVerify.
+	SupportedSigAlgs []uint16 `json:"supportedSigAlgs,omitempty"`
+	// ServerPreferredGroup is the IANA TLS SupportedGroup codepoint the server chose
+	// in the forward-order probe during --detect-server-preference. 0 when not probed or on error.
+	ServerPreferredGroup uint16 `json:"serverPreferredGroup,omitempty"`
+	// ServerPreferenceMode classifies the server's group preference behaviour:
+	// "server-fixed" (same group regardless of client ordering),
+	// "client-order" (server mirrors client's offered ordering), or
+	// "indeterminate" (probe inconclusive or not run).
+	ServerPreferenceMode string `json:"serverPreferenceMode,omitempty"`
+	// EnumerationMode records which Sprint 8 enumeration passes ran: "groups",
+	// "sigalgs", "preference", or a combination joined by "+". Empty when none ran.
+	EnumerationMode string `json:"enumerationMode,omitempty"`
 }
 
 // MigrationSnippet holds a language-specific PQC migration code example.
@@ -159,6 +191,18 @@ func (f *UnifiedFinding) Clone() UnifiedFinding {
 	}
 	if f.DataFlowPath != nil {
 		c.DataFlowPath = append([]FlowStep(nil), f.DataFlowPath...)
+	}
+	if f.DeepProbeSupportedGroups != nil {
+		c.DeepProbeSupportedGroups = append([]uint16(nil), f.DeepProbeSupportedGroups...)
+	}
+	if f.DeepProbeHRRGroups != nil {
+		c.DeepProbeHRRGroups = append([]uint16(nil), f.DeepProbeHRRGroups...)
+	}
+	if f.SupportedGroups != nil {
+		c.SupportedGroups = append([]uint16(nil), f.SupportedGroups...)
+	}
+	if f.SupportedSigAlgs != nil {
+		c.SupportedSigAlgs = append([]uint16(nil), f.SupportedSigAlgs...)
 	}
 	return c
 }

@@ -214,3 +214,40 @@ func TestExtractECHHostnames_WrongReason(t *testing.T) {
 		t.Errorf("wrong reason: expected 0 hosts, got %v", hosts)
 	}
 }
+
+// TestExtractECHHostnames_ComposedReason verifies that the ECH signal survives
+// composition with later partial-inventory reasons (e.g. S8 enum truncation on an
+// ECH target). Regression test for Bug 2: S8 truncation used to overwrite
+// "ECH_ENABLED" with "ENUMERATION_TRUNCATED", silently breaking the S3 CT-lookup
+// auto-chain.
+func TestExtractECHHostnames_ComposedReason(t *testing.T) {
+	ff := []findings.UnifiedFinding{
+		{
+			Location:               findings.Location{File: "(tls-probe)/ech-host.com:443#kex"},
+			PartialInventory:       true,
+			PartialInventoryReason: "ECH_ENABLED+ENUMERATION_TRUNCATED",
+		},
+		{
+			Location:               findings.Location{File: "(tls-probe)/ech-host2.com:443#kex"},
+			PartialInventory:       true,
+			PartialInventoryReason: "ECH_ENABLED+enumerate-groups: context deadline exceeded",
+		},
+		{
+			// Reversed order: ECH must come first for HasPrefix to match.
+			// This case documents the invariant — classify.go always sets ECH first.
+			Location:               findings.Location{File: "(tls-probe)/no-ech-host.com:443#kex"},
+			PartialInventory:       true,
+			PartialInventoryReason: "ENUMERATION_TRUNCATED+ECH_ENABLED",
+		},
+	}
+	hosts := ExtractECHHostnames(ff)
+	if len(hosts) != 2 {
+		t.Fatalf("composed reason: expected 2 hosts (ECH-prefix only), got %d: %v", len(hosts), hosts)
+	}
+	want := map[string]bool{"ech-host.com": true, "ech-host2.com": true}
+	for _, h := range hosts {
+		if !want[h] {
+			t.Errorf("composed reason: unexpected host %q in %v", h, hosts)
+		}
+	}
+}

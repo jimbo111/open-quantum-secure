@@ -251,6 +251,22 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 	if f.HandshakeBytes > 0 {
 		props["handshakeBytes"] = f.HandshakeBytes
 	}
+	// Sprint 8 group + sig-alg enumeration fields.
+	if len(f.SupportedGroups) > 0 {
+		props["supportedGroups"] = f.SupportedGroups
+	}
+	if len(f.SupportedSigAlgs) > 0 {
+		props["supportedSigAlgs"] = f.SupportedSigAlgs
+	}
+	if f.ServerPreferredGroup != 0 {
+		props["serverPreferredGroup"] = f.ServerPreferredGroup
+	}
+	if f.ServerPreferenceMode != "" {
+		props["serverPreferenceMode"] = f.ServerPreferenceMode
+	}
+	if f.EnumerationMode != "" {
+		props["enumerationMode"] = f.EnumerationMode
+	}
 	result.Properties = props
 
 	return result

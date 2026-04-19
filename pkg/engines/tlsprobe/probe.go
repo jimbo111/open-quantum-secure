@@ -7,11 +7,15 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
 )
 
 // ProbeResult captures the TLS handshake data from a single endpoint.
@@ -24,7 +28,8 @@ type ProbeResult struct {
 	NegotiatedGroupID uint16 // IANA SupportedGroup codepoint from ConnectionState().CurveID; 0 = none/unknown
 	LeafCertKeyAlgo   string // "RSA", "ECDSA", "Ed25519"
 	LeafCertKeySize   int    // bits
-	LeafCertSigAlgo   string // e.g. "SHA256-RSA"
+	LeafCertSigAlgo   string // human-readable sig alg, e.g. "SHA256-RSA", "mldsa65"
+	LeafCertSigAlgOID string // dotted OID, e.g. "2.16.840.1.101.3.4.3.18"; empty for unknown
 	Verified          bool   // true if manual cert verification passed
 	VerifyError       string // non-empty if verification failed
 	Error             error  // non-nil means handshake failed entirely
@@ -43,6 +48,49 @@ type ProbeResult struct {
 	ECHDetected bool   // true when Encrypted Client Hello is detected
 	// Diagnostic: surfaced in JSON output via /dashboard only; not consumed by classifier.
 	ECHSource   string // "dns-https-rr", "tls-ext", or "" when not detected
+
+	// Deep-probe fields (Sprint 7, S7.4).
+	// DeepProbeAcceptedGroups lists IANA SupportedGroup codepoints for which the
+	// server returned a ServerHello (not HRR, not Alert) during the raw probe pass.
+	DeepProbeAcceptedGroups []uint16
+	// DeepProbeHRRGroups lists IANA SupportedGroup codepoints named by the server
+	// via HelloRetryRequest. HRR means "supported but not the server's first choice" —
+	// positive PQC evidence worth recording separately from full ServerHello acceptance.
+	DeepProbeHRRGroups []uint16
+
+	// Sprint 8 enumeration fields (--enumerate-groups / --enumerate-sigalgs / --detect-server-preference).
+	// Set on the ProbeResult for a target when the corresponding flag is enabled.
+
+	// EnumAcceptedGroups lists groups where the server sent ServerHello (full acceptance).
+	// From --enumerate-groups (GroupEnumResult.AcceptedGroups).
+	EnumAcceptedGroups []uint16
+	// EnumHRRGroups lists groups the server named via HRR (supported, not first choice).
+	// From --enumerate-groups (GroupEnumResult.HRRGroups).
+	EnumHRRGroups []uint16
+	// EnumSupportedSigAlgs lists TLS SignatureScheme codepoints provisionally accepted.
+	// From --enumerate-sigalgs (SigAlgEnumResult.AcceptedSigAlgs).
+	EnumSupportedSigAlgs []uint16
+	// EnumServerPrefGroup is the IANA codepoint the server chose in the forward-order
+	// probe during --detect-server-preference.
+	EnumServerPrefGroup uint16
+	// EnumServerPrefMode classifies the server's preference behaviour:
+	// "server-fixed", "client-order", or "indeterminate".
+	EnumServerPrefMode string
+	// EnumerationMode records which S8 passes ran; joined by "+" (e.g. "groups+preference").
+	EnumerationMode string
+	// EnumTruncated is true when at least one enumeration pass returned partial results
+	// (some probes succeeded before the context expired or a transport error occurred).
+	EnumTruncated bool
+	// EnumTruncationReason is a human-readable explanation set when EnumTruncated is true.
+	EnumTruncationReason string
+
+	// TLS 1.2 fallback probe fields (Sprint 9, Feature 3).
+	// Set after the primary TLS 1.3 probe when the target negotiated PQC and
+	// --skip-tls12-fallback is not set. AcceptedTLS12=true means the server also
+	// accepted a TLS 1.2 handshake — a downgrade vulnerability when PQC is present.
+	AcceptedTLS12       bool   // true when server accepted TLS 1.2
+	TLS12CipherSuite    uint16 // cipher suite ID negotiated in TLS 1.2 handshake
+	TLS12CipherSuiteName string // human-readable name of the TLS 1.2 cipher suite
 }
 
 // ProbeOpts configures a single TLS probe.
@@ -164,7 +212,27 @@ func probe(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
 	if len(capturedCerts) > 0 {
 		leaf := capturedCerts[0]
 		result.LeafCertKeyAlgo, result.LeafCertKeySize = extractKeyInfo(leaf)
-		result.LeafCertSigAlgo = leaf.SignatureAlgorithm.String()
+
+		// Populate sig alg name and OID. For known algorithms Go's String()
+		// returns a readable name (e.g. "SHA256-RSA"). For PQC algorithms not yet
+		// in Go's standard library, String() returns "UnknownSignatureAlgorithm";
+		// we parse the raw OID from the TBSCertificate and look it up in the PQC
+		// OID table to produce a canonical name (e.g. "mldsa65").
+		sigAlgOID := extractSigAlgOIDFromRawTBS(leaf.RawTBSCertificate)
+		result.LeafCertSigAlgOID = sigAlgOID
+		sigAlgName := leaf.SignatureAlgorithm.String()
+		if sigAlgName == "UnknownSignatureAlgorithm" {
+			if pqcName := quantum.LookupPQCSigAlgName(sigAlgOID); pqcName != "" {
+				sigAlgName = pqcName
+			} else if sigAlgOID != "" {
+				oid := sigAlgOID
+				if len(oid) > 128 {
+					oid = oid[:128]
+				}
+				sigAlgName = "unknown-" + oid
+			}
+		}
+		result.LeafCertSigAlgo = sigAlgName
 	}
 
 	// Manual certificate verification (unless --tls-insecure).
@@ -234,6 +302,28 @@ func parseHostPort(target string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid port %q in target %q (must be 1-65535)", port, target)
 	}
 	return host, port, nil
+}
+
+// tbsCertPartial is used to extract the signature algorithm from a TBSCertificate
+// without unmarshalling the full structure. Only the first three fields are needed.
+type tbsCertPartial struct {
+	Version            int               `asn1:"optional,explicit,default:0,tag:0"`
+	SerialNumber       asn1.RawValue     // parsed as raw bytes to avoid math/big import
+	SignatureAlgorithm pkix.AlgorithmIdentifier
+}
+
+// extractSigAlgOIDFromRawTBS parses the signature algorithm OID from the
+// DER-encoded TBSCertificate in rawTBS and returns the dotted OID string.
+// Returns "" on any parse error — callers must treat "" as "unknown".
+func extractSigAlgOIDFromRawTBS(rawTBS []byte) string {
+	var tbs tbsCertPartial
+	if _, err := asn1.Unmarshal(rawTBS, &tbs); err != nil {
+		return ""
+	}
+	if len(tbs.SignatureAlgorithm.Algorithm) == 0 {
+		return ""
+	}
+	return tbs.SignatureAlgorithm.Algorithm.String()
 }
 
 // loadCACert reads a PEM file and returns a certificate pool.

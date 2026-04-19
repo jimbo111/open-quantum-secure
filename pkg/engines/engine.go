@@ -94,6 +94,38 @@ type ScanOptions struct {
 	SSHTargets     []string // host:port targets to probe SSH KEX advertisement (empty = skip ssh-probe)
 	SSHTimeout     int      // per-target dial+KEXINIT timeout in seconds (0 = default 10s)
 	SSHDenyPrivate bool     // reject RFC 1918 / loopback / link-local target IPs (--ssh-strict)
+
+	// Deep-probe options (Sprint 7).
+	// When DeepProbe is true, the tls-probe engine opens a second raw TCP
+	// connection per target and probes DefaultProbeGroups individually using
+	// hand-crafted ClientHellos. This reveals PQC group support that Go's
+	// stdlib crypto/tls does not expose via CurveID (e.g. pure ML-KEM groups).
+	DeepProbe bool // enable raw ClientHello deep-probe for PQC group detection
+
+	// Group + sig-alg enumeration options (Sprint 8).
+	// These flags are additive — any combination can be enabled.
+	// --deep-probe (Sprint 7) is the fast 6-group path; the Sprint 8 flags add
+	// richer enumeration over a larger group/sigalg universe.
+	EnumerateGroups        bool // probe all 13 groups in fullEnumGroups individually (--enumerate-groups)
+	EnumerateSigAlgs       bool // probe each sig alg in fullSigAlgList individually (--enumerate-sigalgs)
+	DetectServerPreference bool // send all accepted groups at once; record server's chosen group (--detect-server-preference)
+
+	// MaxProbesPerTarget caps the total number of TCP probe connections opened
+	// per target across all passes (initial probe + deep-probe + enumeration).
+	// 0 = unlimited. Default 30 guards against runaway probe counts when all
+	// Sprint 8 flags are enabled simultaneously (worst case ~39 connections).
+	MaxProbesPerTarget int
+
+	// SkipTLS12Fallback disables the TLS 1.2 fallback probe (Sprint 9, Feature 3).
+	// When false (the default), after a primary TLS 1.3 probe that detects PQC
+	// key exchange, the engine runs a secondary TLS 1.2 handshake to detect
+	// downgrade vulnerabilities. Set to true to suppress this extra connection.
+	SkipTLS12Fallback bool
+
+	// Verbose enables detailed progress logging to stderr. When false (the
+	// default), enum pass progress is suppressed to avoid leaking inventory
+	// counts (accepted groups, preferred codepoints) into CI logs.
+	Verbose bool
 }
 
 // Engine is the interface every scanner engine must implement.
