@@ -335,13 +335,11 @@ func remediationForRule(rule, algorithm string) string {
 	case "cnsa2-quantum-vulnerable":
 		upper := strings.ToUpper(algorithm)
 		switch {
-		case strings.HasPrefix(upper, "RSA"), strings.HasPrefix(upper, "DH"),
-			strings.Contains(upper, "DIFFIE"):
+		case isRSAFamily(upper), isDHFamily(upper):
 			return "Migrate to ML-KEM-1024 for key exchange or ML-DSA-87 for digital signatures"
-		case strings.HasPrefix(upper, "EC"), strings.HasPrefix(upper, "ECDH"),
-			strings.HasPrefix(upper, "ECDSA"):
+		case isECDHFamily(upper), isECDSAFamily(upper):
 			return "Migrate to ML-KEM-1024 for key exchange or ML-DSA-87 for digital signatures"
-		case strings.HasPrefix(upper, "DSA"):
+		case isDSAFamily(upper):
 			return "Migrate to ML-DSA-87 for digital signatures"
 		default:
 			return "Replace with an approved CNSA 2.0 algorithm (ML-KEM-1024, ML-DSA-87, AES-256, SHA-384/SHA-512)"

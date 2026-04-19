@@ -88,7 +88,6 @@ func (nistIR8547Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 
 		// All NIST PQC standards (ML-KEM, ML-DSA, SLH-DSA) at all parameter sets
 		// are approved. LMS/HSS/XMSS are also approved. No further restrictions.
-		_ = upper
 	}
 
 	if len(violations) == 0 {
@@ -103,10 +102,9 @@ func init() {
 
 func nist8547Remediation(upper string) string {
 	switch {
-	case strings.HasPrefix(upper, "RSA"), strings.Contains(upper, "ECDH"),
-		strings.HasPrefix(upper, "DH-"), upper == "DH", strings.Contains(upper, "DIFFIE"):
+	case isRSAFamily(upper), isECDHFamily(upper), isDHFamily(upper):
 		return "Migrate to ML-KEM (FIPS 203) for key exchange per NIST IR 8547 §3.1"
-	case strings.Contains(upper, "ECDSA"), strings.HasPrefix(upper, "DSA"):
+	case isECDSAFamily(upper), isDSAFamily(upper):
 		return "Migrate to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205) for digital signatures per NIST IR 8547 §3.1"
 	default:
 		return "Replace with a NIST-standardised PQC algorithm per NIST IR 8547 transition schedule"

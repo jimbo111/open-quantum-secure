@@ -40,6 +40,29 @@ func isMLDSAName(name string) bool {
 	return strings.HasPrefix(upper, "ML-DSA") || strings.HasPrefix(upper, "MLDSA")
 }
 
+// Algorithm family predicates — used by multiple frameworks to identify classical
+// algorithms subject to quantum-vulnerability rules. Each predicate operates on
+// an uppercased algorithm name.
+
+// isRSAFamily returns true for RSA algorithms (any key size or padding scheme).
+func isRSAFamily(upper string) bool { return strings.HasPrefix(upper, "RSA") }
+
+// isECDHFamily returns true for ECDH/ECDHE key exchange algorithms.
+func isECDHFamily(upper string) bool { return strings.Contains(upper, "ECDH") }
+
+// isDHFamily returns true for DH/DHE key exchange and Diffie-Hellman variants.
+// Uses prefix "DH-" and exact "DH" to avoid overmatching (e.g. "MLKEMDH").
+func isDHFamily(upper string) bool {
+	return strings.HasPrefix(upper, "DH-") || upper == "DH" || strings.Contains(upper, "DIFFIE")
+}
+
+// isECDSAFamily returns true for ECDSA digital signature algorithms.
+func isECDSAFamily(upper string) bool { return strings.Contains(upper, "ECDSA") }
+
+// isDSAFamily returns true for DSA and EdDSA digital signature algorithms
+// (excluding ECDSA — use isECDSAFamily for that).
+func isDSAFamily(upper string) bool { return strings.HasPrefix(upper, "DSA") }
+
 // isHybridKEM returns true when the finding represents a hybrid PQC+classical
 // key exchange (e.g. X25519MLKEM768, SecP256r1MLKEM768). It checks
 // NegotiatedGroupName first (set by the TLS probe), then falls back to

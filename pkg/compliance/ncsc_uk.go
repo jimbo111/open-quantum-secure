@@ -95,8 +95,7 @@ func init() {
 // deadlineForAlgorithmType returns a NIST-aligned deadline for the given algorithm.
 // Key-exchange algorithms face the earlier 2030 deadline; others get 2035.
 func deadlineForAlgorithmType(upper string) string {
-	if strings.Contains(upper, "ECDH") || strings.Contains(upper, "DH") ||
-		strings.HasPrefix(upper, "RSA") {
+	if isECDHFamily(upper) || isDHFamily(upper) || isRSAFamily(upper) {
 		return ncscDeadlineKEX
 	}
 	return ncscDeadlineFull
@@ -104,10 +103,9 @@ func deadlineForAlgorithmType(upper string) string {
 
 func ncscRemediation(upper string) string {
 	switch {
-	case strings.HasPrefix(upper, "RSA"), strings.Contains(upper, "ECDH"),
-		strings.Contains(upper, "DH"):
+	case isRSAFamily(upper), isECDHFamily(upper), isDHFamily(upper):
 		return "Migrate to ML-KEM (consider hybrid X25519MLKEM768) per NCSC UK post-quantum guidance"
-	case strings.Contains(upper, "ECDSA"), strings.HasPrefix(upper, "DSA"):
+	case isECDSAFamily(upper), isDSAFamily(upper):
 		return "Migrate to ML-DSA or SLH-DSA per NCSC UK post-quantum guidance"
 	default:
 		return "Replace with a NIST-standardised PQC algorithm per NCSC UK post-quantum guidance"
