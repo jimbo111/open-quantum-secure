@@ -125,13 +125,14 @@ func algNameUpper(f *findings.UnifiedFinding) string {
 	return ""
 }
 
-// isKEMPrimitive returns true when the finding's primitive suggests key exchange.
-// This includes TLS probe findings (NegotiatedGroupName set) and code findings
-// with a KEM or key-exchange primitive.
+// isKEMPrimitive returns true when the finding's primitive is a key-exchange /
+// KEM primitive. Authoritative check is Algorithm.Primitive — we must NOT short-
+// circuit on NegotiatedGroupName because the TLS probe's applyGroupFields stamps
+// NGN on every finding of a connection (cipher, MAC, cert-key, cert-sig, kex),
+// not just the kex finding. Treating NGN as a primitive signal caused ANSSI/BSI
+// hybrid-required rules to overfire on AES / SHA findings, mis-labelling them
+// as non-hybrid KEMs (ultrareview bug_005).
 func isKEMPrimitive(f *findings.UnifiedFinding) bool {
-	if f.NegotiatedGroupName != "" {
-		return true
-	}
 	if f.Algorithm == nil {
 		return false
 	}

@@ -117,6 +117,62 @@ func TestANSSI_EmptyInput(t *testing.T) {
 	}
 }
 
+// TestANSSI_HybridRule_DoesNotOverfireOnNonKEX is the regression test for
+// ultrareview bug_005. The TLS probe's applyGroupFields stamps
+// NegotiatedGroupName onto EVERY finding in a connection (cipher, MAC, cert
+// key, cert sig, kex). The old isKEMPrimitive short-circuited on NGN, causing
+// the anssi-hybrid-kem-required rule to fire on cipher + MAC + cert findings,
+// producing duplicate and mis-attributed violations like "AES-256-GCM is a
+// non-hybrid KEM". Fix removes the NGN shortcut; primitive check is
+// authoritative. Only the actual kex finding now triggers the rule.
+func TestANSSI_HybridRule_DoesNotOverfireOnNonKEX(t *testing.T) {
+	// Simulate a TLS-probe session negotiating pure ML-KEM-768: 5 findings all
+	// share NegotiatedGroupName="MLKEM768" but only the kex finding is a KEM.
+	ngn := "MLKEM768"
+	ff := []findings.UnifiedFinding{
+		{
+			NegotiatedGroupName: ngn,
+			Algorithm:           &findings.Algorithm{Name: "MLKEM768", Primitive: "key-exchange"},
+			QuantumRisk:         findings.QRSafe,
+		},
+		{
+			NegotiatedGroupName: ngn,
+			Algorithm:           &findings.Algorithm{Name: "AES-256-GCM", Primitive: "symmetric", KeySize: 256},
+			QuantumRisk:         findings.QRSafe,
+		},
+		{
+			NegotiatedGroupName: ngn,
+			Algorithm:           &findings.Algorithm{Name: "SHA-384", Primitive: "hash", KeySize: 384},
+			QuantumRisk:         findings.QRSafe,
+		},
+		{
+			NegotiatedGroupName: ngn,
+			Algorithm:           &findings.Algorithm{Name: "ECDSA", Primitive: "signature"},
+			QuantumRisk:         findings.QRVulnerable,
+		},
+		{
+			NegotiatedGroupName: ngn,
+			Algorithm:           &findings.Algorithm{Name: "SHA256-RSA", Primitive: "digital-signature"},
+			QuantumRisk:         findings.QRVulnerable,
+		},
+	}
+	v := anssi.Evaluate(ff)
+	// Expect: 1 hybrid-kem-required on the KEX finding + 2 quantum-vulnerable on the ECDSA/RSA sigs = 3 total.
+	// NOT: 5× hybrid-kem-required (one per finding).
+	hybridCount := 0
+	for _, vi := range v {
+		if vi.Rule == "anssi-hybrid-kem-required" {
+			hybridCount++
+			if vi.Algorithm != "MLKEM768" {
+				t.Errorf("hybrid rule fired on non-KEX finding: Algorithm=%q (expected MLKEM768 only)", vi.Algorithm)
+			}
+		}
+	}
+	if hybridCount != 1 {
+		t.Errorf("anssi-hybrid-kem-required fired %d times (expected 1 — only on KEX finding). Full violations: %+v", hybridCount, v)
+	}
+}
+
 func TestANSSI_RegistrationAndID(t *testing.T) {
 	fw, ok := Get("anssi-guide-pqc")
 	if !ok {
