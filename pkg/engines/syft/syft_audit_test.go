@@ -154,27 +154,27 @@ exit 0
 	}
 }
 
-// TestAudit_SyftSlowSubprocessRespectsContextTimeout — syft hangs for 3s;
-// context times out at 100ms. Scan must return the context error within a
-// reasonable window, NOT block until syft finishes.
+// TestAudit_SyftSlowSubprocessRespectsContextTimeout — syft hangs; context
+// times out at 100ms. Scan must return the context error bounded by
+// cmd.WaitDelay (2s) + slop, NOT the full subprocess lifetime.
 //
-// KNOWN FINDING (F-SYFT-CTX, medium): with cmd.Stderr = &bytes.Buffer, Go's
-// os/exec spawns a goroutine that reads the subprocess stderr pipe and does
-// NOT return from cmd.Wait() until the pipe is closed. If the syft shell
-// script has grand-child processes (e.g. `sleep 10 &` double-forks, or the
-// "sleep" built-in is actually a separate PID not killed by SIGKILL to the
-// parent shell), the stderr-copy goroutine blocks until those children exit.
-// Result: Scan blocks for the FULL subprocess lifetime despite ctx cancel.
-// The test uses a short sleep so it passes quickly; the timing inequality
-// tolerates the pathological 10s case so CI remains green while documenting
-// the risk.
+// Background: with cmd.Stderr = &bytes.Buffer, Go's os/exec spawns a goroutine
+// that reads the subprocess stderr pipe and won't return from cmd.Wait() until
+// the pipe closes. Grand-children that inherit the stderr write-end (e.g.
+// `sleep 30 &` double-forks) keep the pipe open past SIGKILL to the parent
+// shell. Before the F1 fix this meant Scan blocked for the full subprocess
+// lifetime; now cmd.WaitDelay force-closes the pipe 2s after kill.
 func TestAudit_SyftSlowSubprocessRespectsContextTimeout(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows — sleep semantics differ")
 	}
-	// Use a short sleep so the test completes regardless of which branch
-	// Go's os/exec takes (kill-clean or stderr-block).
-	body := `sleep 2; exit 0`
+	// Double-fork a detached child that inherits the stderr pipe and
+	// would keep it open past SIGKILL on the shell. Without WaitDelay
+	// this blocks Scan for the full sleep 30 duration; with WaitDelay
+	// it bounds to ~100ms + 2s.
+	body := `sleep 30 &
+exec 2>&-
+exit 0`
 	bin := writeFakeBinary(t, "syft", body)
 	e := &Engine{binaryPath: bin}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -189,10 +189,11 @@ func TestAudit_SyftSlowSubprocessRespectsContextTimeout(t *testing.T) {
 	if !strings.Contains(err.Error(), "deadline") && !strings.Contains(err.Error(), "context") && !strings.Contains(err.Error(), "killed") {
 		t.Errorf("expected context/killed-related error, got %v", err)
 	}
-	// AUDIT: we DO NOT enforce elapsed < ctx.deadline here. Empirically Scan
-	// can block up to the full sleep duration on darwin because of Go's
-	// stderr-pipe copy-goroutine behaviour. See F-SYFT-CTX.
-	t.Logf("Scan returned after %v (ctx deadline was 100ms) — err=%v", elapsed, err)
+	// ctx.deadline=100ms + WaitDelay=2s → expect <3s with slop for CI jitter.
+	if elapsed > 3*time.Second {
+		t.Errorf("Scan blocked %v past ctx deadline of 100ms — WaitDelay should bound this to ~2s", elapsed)
+	}
+	t.Logf("Scan returned after %v (ctx deadline was 100ms, WaitDelay=2s) — err=%v", elapsed, err)
 }
 
 // TestAudit_SyftUnknownCycloneDXFieldsIgnored — syft 1.8 adds a new top-level

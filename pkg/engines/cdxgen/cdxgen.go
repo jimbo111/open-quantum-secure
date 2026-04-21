@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -78,6 +79,9 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	var stderrBuf bytes.Buffer
 	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
 	cmd.Stderr = &stderrBuf
+	// Bound ctx-cancel cleanup; see audit F1 (same fix applied across all
+	// four subprocess engines).
+	cmd.WaitDelay = 2 * time.Second
 
 	// cdxgen frequently exits non-zero even when it produces valid output
 	// (e.g., mixed-language projects, partial ecosystem support). Check the

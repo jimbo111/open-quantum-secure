@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -72,6 +73,11 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	var stderrBuf bytes.Buffer
 	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
 	cmd.Stderr = &stderrBuf
+	// Bound ctx-cancel cleanup: grand-children that inherit the stderr pipe
+	// (e.g. double-forked helpers) can keep the pipe open past Kill, causing
+	// Run() to block on the reader goroutine for the full subprocess lifetime.
+	// WaitDelay force-closes the pipe 2s after kill. See audit F1.
+	cmd.WaitDelay = 2 * time.Second
 
 	// cbomkit-theia exits non-zero in practice when some internal scanners
 	// partially fail while others produce valid output. Read the output file
