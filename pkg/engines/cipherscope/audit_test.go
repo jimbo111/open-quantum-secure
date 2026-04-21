@@ -57,9 +57,10 @@ func TestAudit_ParseAlgorithm_LastNumericWinsOverwritesKeySize(t *testing.T) {
 		id      string
 		wantKey int
 	}{
-		{"AES-128-CBC-256", 256}, // 128 is truth, got clobbered by trailing 256
-		{"RSA-2048-4096", 4096},  // which one is real?
-		{"AES-256-GCM-96", 96},   // 96 >= 64 threshold, clobbers 256 (AES-256-GCM with 96-bit IV length spuriously becomes KeySize=96)
+		// 2026-04-21: flipped after fix — first authoritative numeric wins.
+		{"AES-128-CBC-256", 128}, // 256 is a MAC/tag length, not the AES key
+		{"RSA-2048-4096", 2048},  // first numeric is the key size
+		{"AES-256-GCM-96", 256},  // 96 is the GCM IV length
 	}
 	for _, tc := range cases {
 		tc := tc

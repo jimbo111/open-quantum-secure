@@ -189,11 +189,15 @@ func parseAlgorithm(identifier string) findings.Algorithm {
 		return alg
 	}
 
-	// Try to extract key size and mode from the parts
+	// Try to extract key size and mode from the parts. The FIRST numeric
+	// segment >= 64 is treated as the key size; later numerics (IV lengths
+	// in GCM-96, MAC tag lengths in CBC-256, etc.) are ignored so they don't
+	// clobber the authoritative value.
 	for _, part := range parts[1:] {
 		if n, err := strconv.Atoi(part); err == nil && n >= 64 {
-			// Only treat as key size if >= 64 bits (avoids SHA-1, SHA-3, etc.)
-			alg.KeySize = n
+			if alg.KeySize == 0 {
+				alg.KeySize = n
+			}
 		} else {
 			// Likely a mode like GCM, CBC, CTR, etc.
 			upper := strings.ToUpper(part)

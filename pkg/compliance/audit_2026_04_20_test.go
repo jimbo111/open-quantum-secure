@@ -181,15 +181,15 @@ func TestAudit_CNSA2_DefaultDeny_QRBranches(t *testing.T) {
 // with 256-bit security — it should NOT meet CNSA 2.0's 384-bit minimum.
 // ---------------------------------------------------------------------------
 func TestAudit_CNSA2_SHA512_256_Truncated_IncorrectlyApproved(t *testing.T) {
-	// SHA-512/256 is the truncated variant. Per NIST FIPS 180-4.
+	// 2026-04-21: flipped after fix. SHA-512/256 is the truncated variant
+	// (256-bit output) per NIST FIPS 180-4; CNSA 2.0 requires 384-bit
+	// minimum so this must produce a violation.
 	f := algFinding("SHA-512/256", "hash", 0, findings.QRResistant, "")
 	v := Evaluate([]findings.UnifiedFinding{f})
 	if len(v) == 0 {
-		t.Logf("AUDIT CONFIRMED (medium): CNSA 2.0 silently approves SHA-512/256 — " +
-			"the truncated variant has 256-bit output and should fail the 384-bit minimum. " +
-			"Root: resolveHashOutputSize uses substring search that matches 512 first.")
-	} else {
-		t.Logf("AUDIT NOTE: SHA-512/256 now produces %d violation(s): %+v", len(v), v)
+		t.Errorf("SHA-512/256 must be rejected by CNSA 2.0 (256-bit output < 384-bit minimum); got 0 violations")
+	} else if v[0].Rule != "cnsa2-hash-output-size" {
+		t.Errorf("SHA-512/256: expected rule cnsa2-hash-output-size, got %q", v[0].Rule)
 	}
 }
 
@@ -203,24 +203,21 @@ func TestAudit_CNSA2_SHA512_256_Truncated_IncorrectlyApproved(t *testing.T) {
 // if a name contains "256" incidentally.
 // ---------------------------------------------------------------------------
 func TestAudit_CNSA2_AES_SubstringKeySizeConfusion(t *testing.T) {
-	// Confusing names that contain "256" incidentally while being 128-bit:
+	// 2026-04-21: flipped after fix. These 128-bit ciphers contain "256"
+	// in their cipher suite name (SHA256 MAC) but the AES key is 128-bit
+	// so CNSA 2.0 must reject them with a key-size violation.
 	confusing := []string{
-		"AES-128-SHA256",     // 128-bit cipher + SHA256 MAC — would incorrectly match 256
-		"AES-128-HMAC-SHA256", // same pattern
+		"AES-128-SHA256",
+		"AES-128-HMAC-SHA256",
 	}
 	for _, name := range confusing {
 		t.Run(name, func(t *testing.T) {
-			// Explicit keySize=0 forces inference from name.
 			f := algFinding(name, "symmetric", 0, findings.QRWeakened, "")
 			v := Evaluate([]findings.UnifiedFinding{f})
 			if len(v) == 0 {
-				t.Logf("AUDIT CONFIRMED (medium): CNSA 2.0 silently approves %q — "+
-					"substring-based key-size inference matches '256' within the name "+
-					"even though this is a 128-bit cipher. "+
-					"Recommend: only infer from name when keySize==0 AND name matches strict regex like /AES-(\\d+)(-|$)/.",
-					name)
-			} else {
-				t.Logf("AUDIT NOTE: %q now produces %d violation(s): %+v", name, len(v), v)
+				t.Errorf("CNSA 2.0 must reject %q (128-bit AES key): got 0 violations", name)
+			} else if v[0].Rule != "cnsa2-symmetric-key-size" {
+				t.Errorf("%q: expected rule cnsa2-symmetric-key-size, got %q", name, v[0].Rule)
 			}
 		})
 	}
@@ -232,13 +229,26 @@ func TestAudit_CNSA2_AES_SubstringKeySizeConfusion(t *testing.T) {
 // (bug upstream), CNSA 2.0 doesn't have a name-based ECDSA rejection.
 // ---------------------------------------------------------------------------
 func TestAudit_CNSA2_MisclassifiedECDSA_FallsThroughToNoViolation(t *testing.T) {
-	// ECDSA accidentally tagged QRSafe (hypothetical upstream misclassification).
-	f := algFinding("ECDSA", "signature", 0, findings.QRSafe, "deferred")
-	v := Evaluate([]findings.UnifiedFinding{f})
-	if len(v) == 0 {
-		t.Logf("AUDIT CONFIRMED (medium): CNSA 2.0 relies entirely on upstream QR classification. " +
-			"If ECDSA is mis-classified as QRSafe, no name-based defence-in-depth catches it. " +
-			"Recommend: add a name-based blacklist for RSA/ECDSA/ECDH/DH/DSA in CNSA 2.0 Evaluate.")
+	// 2026-04-21: flipped after fix. Defence-in-depth: even if an engine
+	// misclassifies ECDSA as QRSafe, CNSA 2.0 must still reject by name.
+	cases := []struct {
+		name      string
+		primitive string
+	}{
+		{"ECDSA", "signature"},
+		{"RSA-2048", "kem"},
+		{"ECDH-P256", "kem"},
+		{"DH", "kem"},
+		{"DSA", "signature"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := algFinding(c.name, c.primitive, 0, findings.QRSafe, "deferred")
+			v := Evaluate([]findings.UnifiedFinding{f})
+			if len(v) == 0 {
+				t.Errorf("%s tagged QRSafe must still be rejected by CNSA 2.0 name-based defence, got 0 violations", c.name)
+			}
+		})
 	}
 }
 
@@ -553,7 +563,8 @@ func TestAudit_ResolveHashOutputSize_SubstringOrdering(t *testing.T) {
 		{"SHA-256", 256},
 		{"SHA-384", 384},
 		{"SHA-512", 512},
-		{"SHA-512/256", 512}, // substring match order: 512 before 256
+		// 2026-04-21: truncated form must report its real 256-bit output.
+		{"SHA-512/256", 256},
 		{"HMAC-SHA-384", 384},
 	}
 	for _, c := range cases {
@@ -564,9 +575,6 @@ func TestAudit_ResolveHashOutputSize_SubstringOrdering(t *testing.T) {
 			}
 		})
 	}
-	// Document: SHA-512/256 returns 512, even though effective output is 256.
-	t.Logf("AUDIT NOTE: resolveHashOutputSize(SHA-512/256) returns 512, " +
-		"making CNSA 2.0 silently approve the truncated 256-bit variant.")
 }
 
 // ---------------------------------------------------------------------------
