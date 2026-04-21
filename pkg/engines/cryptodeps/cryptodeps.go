@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -94,7 +93,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 
 	if len(data) == 0 {
 		if waitErr != nil {
-			msg := strings.TrimSpace(stderrBuf.String())
+			msg := engines.RedactStderr(stderrBuf.String())
 			if msg != "" {
 				return nil, fmt.Errorf("cryptodeps exited: %w: %s", waitErr, msg)
 			}
@@ -111,7 +110,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	result := normalize(raw, opts.TargetPath)
 
 	if waitErr != nil {
-		msg := strings.TrimSpace(stderrBuf.String())
+		msg := engines.RedactStderr(stderrBuf.String())
 		if msg != "" {
 			return result, fmt.Errorf("cryptodeps exited: %w: %s", waitErr, msg)
 		}

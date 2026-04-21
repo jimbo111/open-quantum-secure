@@ -92,7 +92,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	data, err := os.ReadFile(tmpPath)
 	if err != nil || len(data) == 0 {
 		if runErr != nil {
-			msg := strings.TrimSpace(stderrBuf.String())
+			msg := engines.RedactStderr(stderrBuf.String())
 			if msg != "" {
 				return nil, fmt.Errorf("cdxgen exited with no output: %w: %s", runErr, msg)
 			}
@@ -101,7 +101,11 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		if err != nil {
 			return nil, fmt.Errorf("cdxgen read output: %w", err)
 		}
-		return nil, nil // empty output, no error = no findings
+		// Previously: empty output, no error → silently returned (nil, nil).
+		// That masked broken installs where cdxgen exits 0 without writing
+		// anything. Now surface it as an explicit error so operators see
+		// the problem instead of assuming "no findings".
+		return nil, fmt.Errorf("cdxgen produced no output (check installation)")
 	}
 
 	// cdxgen frequently exits non-zero even with valid output; ignore exit code if we have data.

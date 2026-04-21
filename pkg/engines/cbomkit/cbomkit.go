@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -79,7 +78,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("cbomkit-theia: %w", ctx.Err())
 		}
-		msg := strings.TrimSpace(stderrBuf.String())
+		msg := engines.RedactStderr(stderrBuf.String())
 		if msg != "" {
 			return nil, fmt.Errorf("cbomkit-theia exited: %w: %s", err, msg)
 		}

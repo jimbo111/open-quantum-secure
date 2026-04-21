@@ -88,7 +88,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("syft: %w", ctx.Err())
 		}
-		msg := strings.TrimSpace(stderrBuf.String())
+		msg := engines.RedactStderr(stderrBuf.String())
 		if msg != "" {
 			return nil, fmt.Errorf("syft run: %w: %s", err, msg)
 		}

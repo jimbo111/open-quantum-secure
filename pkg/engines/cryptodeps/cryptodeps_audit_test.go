@@ -98,15 +98,19 @@ func TestAudit_CryptodepsEmptyStdoutExitZero(t *testing.T) {
 	}
 }
 
-// TestAudit_CryptodepsStderrLeaksIntoError — subprocess writes secret to
-// stderr and exits non-zero with no stdout. Stderr is embedded in err.
-func TestAudit_CryptodepsStderrLeaksIntoError(t *testing.T) {
+// TestAudit_CryptodepsStderrRedacted — subprocess writes a secret-looking
+// line to stderr and exits non-zero. The secret value must be redacted from
+// the returned error while the key name is preserved so operators can still
+// debug.
+// 2026-04-21: was TestAudit_CryptodepsStderrLeaksIntoError; flipped after
+// engines.RedactStderr was applied.
+func TestAudit_CryptodepsStderrRedacted(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
 	}
-	secret := "DB_PASSWORD=hunter2-very-secret"
+	secret := "hunter2-very-secret"
 	body := `
-echo "` + secret + `" 1>&2
+echo "DB_PASSWORD=` + secret + `" 1>&2
 exit 2
 `
 	bin := writeFakeBin(t, "cryptodeps", body)
@@ -115,8 +119,11 @@ exit 2
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), secret) {
-		t.Errorf("expected stderr leak — got %v", err)
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("stderr secret leaked into error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "<redacted>") {
+		t.Errorf("expected <redacted> marker in error, got: %v", err)
 	}
 }
 
