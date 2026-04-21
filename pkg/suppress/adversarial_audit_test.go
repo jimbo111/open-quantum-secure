@@ -147,20 +147,14 @@ func TestAudit_F4_NegationPatternSemantics(t *testing.T) {
 	trusted := filepath.Join(dir, "vendor/trusted/crypto.go")
 	untrusted := filepath.Join(dir, "vendor/untrusted/crypto.go")
 
-	trustedMatches := s.MatchesIgnorePattern(trusted)
-	untrustedMatches := s.MatchesIgnorePattern(untrusted)
-
-	t.Logf("negation pattern documented behaviour: vendor/trusted matches=%v (gitignore would say false), "+
-		"vendor/untrusted matches=%v",
-		trustedMatches, untrustedMatches)
-
-	// Divergence from gitignore: the `!` is treated as a literal pattern char,
-	// so both trusted and untrusted match. Logged (not Errorf) — the bug is
-	// captured in the audit report.
-	if trustedMatches {
-		t.Logf("CONFIRMED F4 DIVERGENCE: vendor/trusted should be UN-ignored by `!vendor/trusted/**`,"+
-			" but MatchesIgnorePattern returned true (diverges from gitignore). Ignore patterns: %v",
-			s.ignorePatterns)
+	// 2026-04-21: flipped after negation support fix. vendor/trusted must
+	// be re-included by `!vendor/trusted/**` even though `vendor/**` would
+	// match it.
+	if s.MatchesIgnorePattern(trusted) {
+		t.Errorf("vendor/trusted should be UN-ignored by `!vendor/trusted/**` negation")
+	}
+	if !s.MatchesIgnorePattern(untrusted) {
+		t.Errorf("vendor/untrusted should still be ignored by `vendor/**`")
 	}
 }
 
