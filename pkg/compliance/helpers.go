@@ -140,6 +140,29 @@ func isKEMPrimitive(f *findings.UnifiedFinding) bool {
 	return prim == "kem" || prim == "key-exchange" || prim == "kex" || prim == "key_exchange"
 }
 
+// isSignaturePrimitive returns true when the finding's primitive is a digital
+// signature. Mirrors isKEMPrimitive for the signature default-deny path.
+func isSignaturePrimitive(f *findings.UnifiedFinding) bool {
+	if f.Algorithm == nil {
+		return false
+	}
+	prim := strings.ToLower(f.Algorithm.Primitive)
+	return prim == "signature" || prim == "digital-signature" || prim == "digital_signature" || prim == "sig"
+}
+
+// isStatefulHashSignatureName returns true when name denotes an NIST SP 800-208
+// approved stateful hash-based signature scheme: LMS, HSS (multi-tree LMS),
+// XMSS, or XMSS^MT (multi-tree XMSS). These are CNSA 2.0 approved for firmware
+// and software signing (but not general digital signatures).
+func isStatefulHashSignatureName(upper string) bool {
+	return strings.HasPrefix(upper, "LMS") ||
+		strings.HasPrefix(upper, "HSS") ||
+		strings.HasPrefix(upper, "XMSS") ||
+		strings.HasPrefix(upper, "XMSSMT") ||
+		strings.HasPrefix(upper, "XMSS^MT") ||
+		strings.HasPrefix(upper, "XMSS-MT")
+}
+
 // depViolation returns a Violation for a quantum-vulnerable dependency finding
 // (Algorithm == nil && QuantumRisk == QRVulnerable), or nil otherwise.
 // This eliminates the repeated nil-Algorithm block across framework Evaluate methods.

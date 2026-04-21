@@ -196,6 +196,26 @@ func (cnsa20Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
+		// --- Rule: signature default-deny (non-ML-DSA quantum-safe signatures) ---
+		// CNSA 2.0 approves only ML-DSA-87 for general digital signatures and
+		// LMS/HSS/XMSS/XMSS^MT (per NIST SP 800-208) for firmware/software
+		// signing. Any other signature scheme — Falcon/FN-DSA, SPHINCS+ (non-
+		// SLH-DSA), future NIST Round 4 alternates — is NOT approved. ML-DSA
+		// and SLH-DSA are handled by earlier explicit rules that `continue`
+		// before reaching here; this default-deny catches the rest.
+		// LMS/HSS/XMSS/XMSS^MT are approved firmware-signing schemes and are
+		// exempted from this rule.
+		if isSignaturePrimitive(f) && !isStatefulHashSignatureName(upper) &&
+			f.QuantumRisk != findings.QRVulnerable && f.QuantumRisk != findings.QRDeprecated {
+			violations = append(violations, newCNSA2Violation(
+				name,
+				"cnsa2-signature-not-approved",
+				name+" is not a CNSA 2.0 approved signature; CNSA 2.0 approves only ML-DSA-87 for general signatures and LMS/HSS/XMSS/XMSS^MT for firmware/software signing",
+				deadlineFull,
+			))
+			continue
+		}
+
 		// Note: LMS/HSS and XMSS/XMSS^MT are ALL approved per NIST SP 800-208.
 		// HSS is the multi-tree generalization of LMS; XMSS^MT is the multi-tree
 		// generalization of XMSS. Both are approved for firmware/software signing.

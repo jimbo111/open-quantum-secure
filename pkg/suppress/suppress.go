@@ -101,7 +101,11 @@ func (s *Scanner) scanContent(filePath, content string) []Suppression {
 	for i, line := range lines {
 		lineNum := i + 1
 		trimmed := strings.TrimSpace(line)
-		matches := directivePattern.FindStringSubmatch(trimmed)
+		// Strip string-literal contents before matching so that a directive
+		// appearing INSIDE "..." / `...` / '...' is not mistaken for a real
+		// comment directive (F1).
+		scannable := stripStringLiterals(trimmed)
+		matches := directivePattern.FindStringSubmatch(scannable)
 		if matches == nil {
 			continue
 		}
@@ -284,6 +288,41 @@ func matchSegments(pat, path []string) bool {
 		path = path[1:]
 	}
 	return len(path) == 0
+}
+
+// stripStringLiterals removes content between matched quote pairs so a
+// subsequent regex scan doesn't treat text inside string data as a comment
+// directive. Handles Go/Python/Ruby/C quote styles: "...", '...', and Go raw
+// backtick strings. A backslash escapes the next character inside "..." and
+// '...' but not inside `...` (raw strings). Unmatched openings consume the
+// rest of the line, which is the safe choice — better to miss a possible
+// trailing directive than to match one embedded in unterminated string data.
+func stripStringLiterals(line string) string {
+	var out strings.Builder
+	out.Grow(len(line))
+	i := 0
+	for i < len(line) {
+		c := line[i]
+		if c == '"' || c == '\'' || c == '`' {
+			quote := c
+			i++
+			for i < len(line) {
+				if quote != '`' && line[i] == '\\' && i+1 < len(line) {
+					i += 2
+					continue
+				}
+				if line[i] == quote {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		out.WriteByte(c)
+		i++
+	}
+	return out.String()
 }
 
 // Stats returns suppression statistics.

@@ -280,9 +280,7 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 	// Pre-populate EngineEntries keys so goroutines only touch per-engine
 	// inner maps (no outer map writes → concurrent reads are safe).
 	for _, eng := range available {
-		if sc.EngineEntries[eng.Name()] == nil {
-			sc.EngineEntries[eng.Name()] = make(map[string]*cache.CacheEntry)
-		}
+		sc.EnsureEngineEntry(eng.Name())
 	}
 
 	for i, eng := range available {
@@ -376,7 +374,7 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 	// cache state so those engines get re-scanned next time.
 	for i, eng := range available {
 		if !results[i].scanFailed {
-			sc.EngineVersions[eng.Name()] = eng.Version()
+			sc.SetEngineVersion(eng.Name(), eng.Version())
 		}
 	}
 
