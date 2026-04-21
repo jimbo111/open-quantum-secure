@@ -73,25 +73,30 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
 	cmd.Stderr = &stderrBuf
 
-	if err := cmd.Run(); err != nil {
-		// Propagate context cancellation instead of raw exec error.
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("cbomkit-theia: %w", ctx.Err())
-		}
-		msg := engines.RedactStderr(stderrBuf.String())
-		if msg != "" {
-			return nil, fmt.Errorf("cbomkit-theia exited: %w: %s", err, msg)
-		}
-		return nil, fmt.Errorf("cbomkit-theia exited: %w", err)
+	// cbomkit-theia exits non-zero in practice when some internal scanners
+	// partially fail while others produce valid output. Read the output file
+	// regardless of exit code and let presence-of-data drive the decision —
+	// mirrors cdxgen's pattern.
+	runErr := cmd.Run()
+
+	// Propagate context cancellation before reading stale/empty output.
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("cbomkit-theia: %w", ctx.Err())
 	}
 
 	data, err := os.ReadFile(tmpPath)
-	if err != nil {
-		return nil, fmt.Errorf("cbomkit-theia read output: %w", err)
-	}
-
-	if len(data) == 0 {
-		return nil, nil
+	if err != nil || len(data) == 0 {
+		if runErr != nil {
+			msg := engines.RedactStderr(stderrBuf.String())
+			if msg != "" {
+				return nil, fmt.Errorf("cbomkit-theia exited with no output: %w: %s", runErr, msg)
+			}
+			return nil, fmt.Errorf("cbomkit-theia exited with no output: %w", runErr)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("cbomkit-theia read output: %w", err)
+		}
+		return nil, fmt.Errorf("cbomkit-theia produced no output (check installation)")
 	}
 
 	var raw rawOutput

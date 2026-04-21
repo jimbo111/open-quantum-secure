@@ -28,12 +28,14 @@ func writeFakeBin(t *testing.T, name, body string) string {
 	return p
 }
 
-// TestAudit_CbomkitHardFailsWithValidOutput — unlike cdxgen, cbomkit-theia
-// hard-errors on any non-zero exit even if it produced a usable asset list.
-// Real-world cbomkit-theia exits non-zero when some scanners partially fail
-// but still emit data. Current behaviour drops the good findings.
-// Severity: medium — policy bypass + reduced correctness.
-func TestAudit_CbomkitHardFailsWithValidOutput(t *testing.T) {
+// TestAudit_CbomkitToleratesNonZeroExitWithValidOutput — cbomkit-theia writes
+// a valid asset list to --output then exits non-zero (simulating partial
+// internal-scanner failure). The findings on disk must be consumed; only
+// missing-output should promote the exit code into an error. Matches
+// cdxgen's tolerant pattern.
+// 2026-04-21: was TestAudit_CbomkitHardFailsWithValidOutput; flipped after
+// F5 fix made cbomkit read the output file regardless of exit code.
+func TestAudit_CbomkitToleratesNonZeroExitWithValidOutput(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
 	}
@@ -54,13 +56,15 @@ exit 1
 	bin := writeFakeBin(t, "cbomkit-theia", body)
 	e := &Engine{binaryPath: bin}
 	res, err := e.Scan(context.Background(), engines.ScanOptions{TargetPath: t.TempDir()})
-	if err == nil {
-		t.Error("current behaviour: cbomkit-theia Scan errors on non-zero exit. Update this test if behaviour changed.")
+	if err != nil {
+		t.Fatalf("expected tolerance of non-zero exit with valid JSON, got err: %v", err)
 	}
-	if len(res) != 0 {
-		t.Errorf("findings were dropped because non-zero exit won: got %d", len(res))
+	if len(res) != 1 {
+		t.Fatalf("expected 1 finding from valid JSON, got %d", len(res))
 	}
-	// DOCUMENTED GAP: cdxgen tolerates exit-non-zero-with-output; cbomkit-theia does not.
+	if res[0].Algorithm == nil || res[0].Algorithm.Name != "RSA" {
+		t.Errorf("unexpected algorithm on recovered finding: %+v", res[0].Algorithm)
+	}
 }
 
 // TestAudit_CbomkitMalformedJSON — malformed JSON → parse error, not panic.
