@@ -260,10 +260,12 @@ func primitiveFromRuleID(ruleID string) string {
 		return "asymmetric"
 	case strings.Contains(id, "aes") || strings.Contains(id, "cipher") || strings.Contains(id, "encrypt") || strings.Contains(id, "decrypt") || strings.Contains(id, "secret-key"):
 		return "symmetric"
-	case strings.Contains(id, "sha") || strings.Contains(id, "md5") || strings.Contains(id, "digest") || strings.Contains(id, "hash"):
-		return "hash"
+	// Check hmac/mac BEFORE hash: HMAC-SHA* rule IDs contain both "hmac" and "sha",
+	// and the hash branch would otherwise swallow them.
 	case strings.Contains(id, "hmac") || strings.Contains(id, "mac"):
 		return "mac"
+	case strings.Contains(id, "sha") || strings.Contains(id, "md5") || strings.Contains(id, "digest") || strings.Contains(id, "hash"):
+		return "hash"
 	case strings.Contains(id, "tls") || strings.Contains(id, "-ssl-") || strings.HasSuffix(id, "-ssl"):
 		return "protocol"
 	case strings.Contains(id, "kdf"):

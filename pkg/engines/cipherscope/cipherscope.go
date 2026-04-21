@@ -179,6 +179,16 @@ func parseAlgorithm(identifier string) findings.Algorithm {
 		return alg
 	}
 
+	// PQC parameter-set names (ML-KEM-768, Kyber-512, ML-DSA-87, SLH-DSA-128f,
+	// Falcon-512, and their hybrid forms like X25519-MLKEM-768) use trailing
+	// numerics as parameter-set identifiers, NOT classical key sizes. Skip
+	// numeric-to-KeySize inference for these names so downstream consumers
+	// (policy, compliance, quantum) don't misinterpret a PQC param set as a
+	// classical bit length.
+	if isPQCFamilyIdentifier(identifier) {
+		return alg
+	}
+
 	// Try to extract key size and mode from the parts
 	for _, part := range parts[1:] {
 		if n, err := strconv.Atoi(part); err == nil && n >= 64 {
@@ -197,6 +207,37 @@ func parseAlgorithm(identifier string) findings.Algorithm {
 	}
 
 	return alg
+}
+
+// isPQCFamilyIdentifier reports whether identifier denotes a post-quantum
+// algorithm whose trailing numeric token is a parameter-set identifier (not a
+// classical key size in bits). The check is case-insensitive and handles both
+// hyphenated ("ML-KEM-768") and hyphen-less ("MLKEM768") forms, plus hybrid
+// KEM names like "X25519-MLKEM-768" and "SecP256r1-MLKEM-768".
+func isPQCFamilyIdentifier(identifier string) bool {
+	upper := strings.ToUpper(identifier)
+	for _, token := range []string{
+		"ML-KEM", "MLKEM",
+		"ML-DSA", "MLDSA",
+		"SLH-DSA", "SLHDSA",
+		"HASH-ML-DSA", "HASHML-DSA", "HASHMLDSA",
+		"KYBER",
+		"DILITHIUM",
+		"FALCON", "FN-DSA", "FNDSA",
+		"SPHINCS",
+		"HQC",
+		"BIKE",
+		"FRODOKEM", "FRODO-KEM",
+		"CLASSICMCELIECE", "CLASSIC-MCELIECE",
+		"XMSS", "XMSSMT", "XMSS-MT", "XMSS^MT",
+		"LMS",
+		"HSS",
+	} {
+		if strings.Contains(upper, token) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseKeySize attempts to extract a numeric key size from cipherscope metadata.
