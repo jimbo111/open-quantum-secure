@@ -49,6 +49,10 @@ type Algorithm struct {
 // Dependency describes a detected cryptographic library import.
 type Dependency struct {
 	Library string `json:"library"`
+	// Version is the declared or resolved version of the dependency, when
+	// known. Participates in DedupeKey so two findings for the same library
+	// at different versions don't collapse into one.
+	Version string `json:"version,omitempty"`
 }
 
 // QuantumRisk represents the quantum computing threat level.
@@ -221,8 +225,13 @@ func (f *UnifiedFinding) DedupeKey() string {
 	if f.Algorithm != nil && f.Algorithm.Name != "" {
 		return fileKey + "|" + itoa(f.Location.Line) + "|alg|" + f.Algorithm.Name
 	}
-	// For dependencies: file + library name (line varies between engines)
+	// For dependencies: file + library name + version (line varies between
+	// engines). Including Version prevents the same library at two different
+	// versions from collapsing into one finding.
 	if f.Dependency != nil && f.Dependency.Library != "" {
+		if f.Dependency.Version != "" {
+			return fileKey + "|dep|" + f.Dependency.Library + "@" + f.Dependency.Version
+		}
 		return fileKey + "|dep|" + f.Dependency.Library
 	}
 	// Fallback: file + line + raw identifier + source engine to avoid collisions

@@ -418,18 +418,23 @@ func joinEngines(source string, corroboratedBy []string) string {
 // SARIF 2.1.0 §3.49.3 requires ruleId to be a "stable, opaque identifier",
 // which in practice means no angle brackets or quoting characters that
 // would need XML/HTML escaping in downstream consumers.
+//
+// Every non-safe character is replaced with a readable token rather than
+// dropped, so distinct inputs always produce distinct rule IDs. Previously
+// both "A<B" and "A>B" sanitised to "AB" — rule IDs collapsed and SARIF
+// consumers couldn't tell them apart.
 func sanitizeID(name string) string {
 	r := strings.NewReplacer(
 		" ", "-",
 		"/", "-",
 		".", "-",
-		"(", "",
-		")", "",
-		"<", "",
-		">", "",
-		`"`, "",
-		"'", "",
-		"&", "-",
+		"(", "-LP-",
+		")", "-RP-",
+		"<", "-LT-",
+		">", "-GT-",
+		`"`, "-DQ-",
+		"'", "-SQ-",
+		"&", "-AMP-",
 		"+", "PLUS",
 	)
 	return strings.ToUpper(r.Replace(name))

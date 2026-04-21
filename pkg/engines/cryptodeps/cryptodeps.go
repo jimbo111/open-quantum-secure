@@ -144,6 +144,7 @@ func normalize(raw rawOutput, targetPath string) []findings.UnifiedFinding {
 			RawIdentifier: rawID,
 			Dependency: &findings.Dependency{
 				Library: dep.Name,
+				Version: dep.Version,
 			},
 		}
 		result = append(result, depFinding)

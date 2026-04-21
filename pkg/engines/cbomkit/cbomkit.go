@@ -109,6 +109,11 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 }
 
 // normalize converts a cbomkit-theia raw asset into a UnifiedFinding.
+//
+// When the raw asset has no File (certificate detected in-memory, keystore
+// entry with no file association) we synthesise a pseudo-path of the form
+// "cbom://<asset-type>" so that different asset types don't all collapse to
+// the same DedupeKey ("|0|alg|RSA" for every empty-File RSA asset).
 func normalize(asset rawAsset) findings.UnifiedFinding {
 	var alg *findings.Algorithm
 	if asset.Algorithm != "" {
@@ -120,9 +125,14 @@ func normalize(asset rawAsset) findings.UnifiedFinding {
 		}
 	}
 
+	file := asset.File
+	if file == "" && asset.Type != "" {
+		file = "cbom://" + asset.Type
+	}
+
 	return findings.UnifiedFinding{
 		Location: findings.Location{
-			File: asset.File,
+			File: file,
 			Line: asset.Line,
 		},
 		Algorithm:     alg,
