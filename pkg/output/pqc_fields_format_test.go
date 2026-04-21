@@ -460,21 +460,32 @@ func TestPartialInventory_SARIF_Properties(t *testing.T) {
 		t.Fatalf("expected 2 results, got %d", len(sarifDoc.Runs[0].Results))
 	}
 
-	// RSA: partialInventory must be absent.
+	// RSA: both keys must be absent.
 	rsaProps := sarifDoc.Runs[0].Results[0].Properties
-	if _, ok := rsaProps["partialInventory"]; ok {
-		t.Error("SARIF RSA: partialInventory must be absent")
+	for _, k := range []string{"partialInventory", "partialInventoryReason"} {
+		if _, ok := rsaProps[k]; ok {
+			t.Errorf("SARIF RSA: %q must be absent", k)
+		}
 	}
 
-	// ECH finding: partialInventory must be present with value "ECH_ENABLED".
+	// ECH finding: partialInventory=true (bool) and partialInventoryReason="ECH_ENABLED"
+	// (string). This matches the CBOM field layout and the CLAUDE.md spec.
 	echProps := sarifDoc.Runs[0].Results[1].Properties
 	if v, ok := echProps["partialInventory"]; !ok {
 		t.Error("SARIF ECH finding: partialInventory absent")
 	} else {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil || !b {
+			t.Errorf("SARIF ECH finding: partialInventory = %s, want true (bool)", string(v))
+		}
+	}
+	if v, ok := echProps["partialInventoryReason"]; !ok {
+		t.Error("SARIF ECH finding: partialInventoryReason absent")
+	} else {
 		var reason string
 		_ = json.Unmarshal(v, &reason)
 		if reason != "ECH_ENABLED" {
-			t.Errorf("SARIF ECH finding: partialInventory=%q, want ECH_ENABLED", reason)
+			t.Errorf("SARIF ECH finding: partialInventoryReason=%q, want ECH_ENABLED", reason)
 		}
 	}
 }

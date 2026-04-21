@@ -243,7 +243,10 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 		props["pqcMaturity"] = f.PQCMaturity
 	}
 	if f.PartialInventory {
-		props["partialInventory"] = f.PartialInventoryReason
+		props["partialInventory"] = true
+		if f.PartialInventoryReason != "" {
+			props["partialInventoryReason"] = f.PartialInventoryReason
+		}
 	}
 	if f.HandshakeVolumeClass != "" {
 		props["handshakeVolumeClass"] = f.HandshakeVolumeClass
