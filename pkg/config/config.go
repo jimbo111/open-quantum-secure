@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -102,13 +104,29 @@ func loadProjectConfig(targetPath string) (Config, error) {
 		}
 
 		var cfg Config
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return Config{}, err
+		if err := unmarshalStrict(data, &cfg); err != nil {
+			return Config{}, fmt.Errorf("parse %s: %w", p, err)
 		}
 		return cfg, nil
 	}
 
 	return Config{}, nil
+}
+
+// unmarshalStrict decodes YAML into out and rejects unknown keys. Typos like
+// `fail_on` (vs canonical `failOn`) surface as an immediate error instead of
+// being silently dropped, which would leave a fail-on rule disabled without
+// the user noticing.
+func unmarshalStrict(data []byte, out interface{}) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(out); err != nil {
+		if err == io.EOF {
+			return nil // empty document is valid
+		}
+		return err
+	}
+	return nil
 }
 
 // Load searches for a project config file, loads the global config, and merges

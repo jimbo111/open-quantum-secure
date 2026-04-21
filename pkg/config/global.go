@@ -1,11 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
-
-	"gopkg.in/yaml.v3"
 )
 
 // ConfigDir returns the path to the OQS configuration directory.
@@ -66,8 +65,8 @@ func LoadGlobal() (Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return Config{}, err
+	if err := unmarshalStrict(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse %s: %w", GlobalConfigPath(), err)
 	}
 	return cfg, nil
 }
