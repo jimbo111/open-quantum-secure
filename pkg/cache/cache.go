@@ -188,15 +188,29 @@ func (sc *ScanCache) IsValid(currentScannerVersion string, currentEngineVersions
 //   - cachedFindings: all findings from files that have not changed
 //   - changedPaths:   absolute paths of files that are new or have changed
 //
+// currentScannerVersion guards against stale findings surviving a scanner
+// upgrade: when the stored ScannerVersion or cache format version does not
+// match, every path is reported as changed (forcing a fresh scan) and no
+// cached findings are returned.
+//
 // Files that exist in the cache but are no longer on disk are silently dropped
 // (their findings are not included).
 //
 // allFileHashes is a map of absolute path → SHA-256 hash for every file
 // currently on disk in the target directory. Callers should compute this
 // with HashFiles before calling GetUnchangedFindings.
-func (sc *ScanCache) GetUnchangedFindings(allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
+func (sc *ScanCache) GetUnchangedFindings(currentScannerVersion string, allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
+	// Version guard: if the cache format or scanner version doesn't match,
+	// every file is stale from this caller's perspective.
+	if sc.Version != cacheFormatVersion || sc.ScannerVersion != currentScannerVersion {
+		changedPaths = make([]string, 0, len(allFileHashes))
+		for path := range allFileHashes {
+			changedPaths = append(changedPaths, path)
+		}
+		return nil, changedPaths
+	}
 	for path, hash := range allFileHashes {
 		entry, ok := sc.Entries[path]
 		if !ok || entry.ContentHash != hash {
@@ -263,15 +277,28 @@ func (sc *ScanCache) IsValidForEngine(engineName, currentVersion string) bool {
 // GetUnchangedFindingsForEngine is the per-engine variant of GetUnchangedFindings.
 // It checks only the entries belonging to engineName in EngineEntries.
 //
+// currentVersion guards against stale findings surviving an engine upgrade:
+// when the recorded EngineVersions[engineName] or cache format version does
+// not match, every path is reported as changed (forcing a fresh scan) and no
+// cached findings are returned.
+//
 // Returns:
 //   - cachedFindings: findings from files whose content hash has not changed
 //   - changedPaths: absolute paths of files that are new or have changed
 //
 // Files in the engine's cache that are not in allFileHashes (deleted or no
 // longer relevant) are silently dropped.
-func (sc *ScanCache) GetUnchangedFindingsForEngine(engineName string, allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
+func (sc *ScanCache) GetUnchangedFindingsForEngine(engineName, currentVersion string, allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
+	// Version guard: cache format or engine version mismatch → all paths changed.
+	if sc.Version != cacheFormatVersion || sc.EngineVersions[engineName] != currentVersion {
+		changedPaths = make([]string, 0, len(allFileHashes))
+		for path := range allFileHashes {
+			changedPaths = append(changedPaths, path)
+		}
+		return nil, changedPaths
+	}
 	engineFiles := sc.EngineEntries[engineName]
 	for path, hash := range allFileHashes {
 		if engineFiles == nil {

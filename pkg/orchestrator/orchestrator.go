@@ -328,7 +328,7 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 			var changedPaths []string
 
 			if engineValid {
-				cached, changedPaths = sc.GetUnchangedFindingsForEngine(eng.Name(), engineHashes)
+				cached, changedPaths = sc.GetUnchangedFindingsForEngine(eng.Name(), eng.Version(), engineHashes)
 			} else {
 				// Engine version changed or new engine → re-scan all its files.
 				for p := range engineHashes {

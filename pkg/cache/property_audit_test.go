@@ -77,7 +77,7 @@ func TestProp_UpdateGet_RoundTrip(t *testing.T) {
 			},
 			map[string]string{path: hash},
 		)
-		cached, changed := sc.GetUnchangedFindings(map[string]string{path: hash})
+		cached, changed := sc.GetUnchangedFindings("", map[string]string{path: hash})
 		if len(cached) != 1 || len(changed) != 0 {
 			return false
 		}

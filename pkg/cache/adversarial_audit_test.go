@@ -94,7 +94,7 @@ func TestAudit_F22_GetAndUpdateInterleaved_Race(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
 				h := map[string]string{"/src/seed.go": "h1"}
-				_, _ = sc.GetUnchangedFindings(h)
+				_, _ = sc.GetUnchangedFindings("", h)
 				reads.Add(1)
 			}
 		}()
@@ -124,7 +124,11 @@ func TestAudit_F22_GetAndUpdateInterleaved_Race(t *testing.T) {
 // The V1 flat map path (GetUnchangedFindings) does NOT call IsValid — it
 // simply returns cached findings. If the caller forgets to check IsValid,
 // stale findings leak. This test documents the contract failure.
-func TestAudit_F23_V1_GetUnchangedFindings_IgnoresScannerVersion(t *testing.T) {
+func TestAudit_F23_V1_GetUnchangedFindings_VersionGuard(t *testing.T) {
+	// 2026-04-21: signature now requires the current scanner version.
+	// If the cache was written by a different scanner version, every
+	// path is reported as changed (forces re-scan) and no cached
+	// findings leak.
 	sc := New()
 	sc.ScannerVersion = "v1.0.0-OLD"
 	sc.Entries["/src/a.go"] = &CacheEntry{
@@ -132,28 +136,30 @@ func TestAudit_F23_V1_GetUnchangedFindings_IgnoresScannerVersion(t *testing.T) {
 		Findings:    []findings.UnifiedFinding{sampleFinding("eng", "/src/a.go", "RSA-2048", 1)},
 	}
 
-	// Caller "upgrades to v2.0.0" but forgets to call IsValid.
 	allHashes := map[string]string{"/src/a.go": "hash_a"}
-	cached, changed := sc.GetUnchangedFindings(allHashes)
 
-	// The API happily returns the stale cached finding — there is no
-	// internal check, so ANY caller who skips IsValid leaks stale results.
-	if len(cached) != 1 {
-		t.Errorf("unexpected cached count=%d", len(cached))
+	// Caller upgrades to v2.0.0 — must see all paths as changed.
+	cached, changed := sc.GetUnchangedFindings("v2.0.0", allHashes)
+	if len(cached) != 0 {
+		t.Errorf("stale finding leaked across scanner upgrade: got %d cached, want 0", len(cached))
 	}
-	if len(changed) != 0 {
-		t.Errorf("unexpected changed count=%d", len(changed))
+	if len(changed) != 1 {
+		t.Errorf("expected 1 changed path after version mismatch, got %d", len(changed))
 	}
 
-	// Record: the API returns stale entries regardless of scanner version.
-	// This is a contract-sharp-edge, documented as F23.
-	t.Logf("CONTRACT DOC: GetUnchangedFindings returned %d cached findings despite ScannerVersion mismatch;"+
-		" caller MUST check IsValid separately. If they forget → regression hazard.", len(cached))
+	// Same version → cache hit.
+	cached2, changed2 := sc.GetUnchangedFindings("v1.0.0-OLD", allHashes)
+	if len(cached2) != 1 {
+		t.Errorf("same-version path should hit cache: got %d cached", len(cached2))
+	}
+	if len(changed2) != 0 {
+		t.Errorf("same-version path should have 0 changed, got %d", len(changed2))
+	}
 }
 
-// Audit_F24_PerEngine_GetUnchangedFindingsForEngine_IgnoresVersion — same
-// sharp edge for the per-engine path.
-func TestAudit_F24_PerEngine_GetUnchangedFindingsForEngine_IgnoresVersion(t *testing.T) {
+// Audit_F24_PerEngine_GetUnchangedFindingsForEngine_VersionGuard — signature
+// now requires engine version and refuses to serve stale entries on mismatch.
+func TestAudit_F24_PerEngine_GetUnchangedFindingsForEngine_VersionGuard(t *testing.T) {
 	sc := New()
 	sc.EngineVersions["cipherscope"] = "0.3.0-OLD"
 	sc.EngineEntries["cipherscope"] = map[string]*CacheEntry{
@@ -163,15 +169,22 @@ func TestAudit_F24_PerEngine_GetUnchangedFindingsForEngine_IgnoresVersion(t *tes
 		},
 	}
 
-	// Caller upgrades cipherscope to 0.3.1 but forgets IsValidForEngine.
 	allHashes := map[string]string{"/src/b.go": "hash_b"}
-	cached, _ := sc.GetUnchangedFindingsForEngine("cipherscope", allHashes)
 
-	if len(cached) != 1 {
-		t.Errorf("unexpected cached count = %d", len(cached))
+	// Upgraded cipherscope — must not serve stale findings.
+	cached, changed := sc.GetUnchangedFindingsForEngine("cipherscope", "0.3.1", allHashes)
+	if len(cached) != 0 {
+		t.Errorf("stale finding leaked across engine upgrade: got %d cached, want 0", len(cached))
 	}
-	t.Logf("CONTRACT DOC: GetUnchangedFindingsForEngine ignored EngineVersion mismatch."+
-		" Caller must call IsValidForEngine first. Bug class: silent-stale.")
+	if len(changed) != 1 {
+		t.Errorf("expected 1 changed path after engine-version mismatch, got %d", len(changed))
+	}
+
+	// Same version → cache hit.
+	cached2, _ := sc.GetUnchangedFindingsForEngine("cipherscope", "0.3.0-OLD", allHashes)
+	if len(cached2) != 1 {
+		t.Errorf("same engine version should hit cache: got %d cached", len(cached2))
+	}
 }
 
 // Audit_F25_CacheFormatVersion_Increment_Invalidates verifies that bumping
@@ -212,7 +225,7 @@ func TestAudit_F26_RenamePath_DoubleScans(t *testing.T) {
 	newHash, _ := HashFile(newPath)
 
 	allHashes := map[string]string{newPath: newHash}
-	cached, changed := sc.GetUnchangedFindings(allHashes)
+	cached, changed := sc.GetUnchangedFindings("", allHashes)
 
 	// Identical content at a new path counts as a MISS — re-scan required.
 	// Document this path-keyed cost.
@@ -296,7 +309,7 @@ func TestAudit_F29_SameContent_DifferentPaths_NoSharing(t *testing.T) {
 
 	// p2 has same content but different path — expect MISS.
 	hashes := map[string]string{p1: h, p2: h}
-	cached, changed := sc.GetUnchangedFindings(hashes)
+	cached, changed := sc.GetUnchangedFindings("", hashes)
 	if len(cached) != 1 {
 		t.Errorf("p1 should hit cache (1 finding), got %d", len(cached))
 	}
@@ -422,7 +435,7 @@ func TestAudit_F33_ModTimeChangedContentSame_HitCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cached, changed := sc.GetUnchangedFindings(map[string]string{p: h})
+	cached, changed := sc.GetUnchangedFindings("", map[string]string{p: h})
 	if len(cached) != 1 {
 		t.Errorf("modtime bump with same content should hit cache; got %d cached, %d changed",
 			len(cached), len(changed))
