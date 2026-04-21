@@ -92,12 +92,13 @@ func TestAudit_FailOn_CaseSensitive_UppercaseIgnored(t *testing.T) {
 // policy that silently never matches.
 // ---------------------------------------------------------------------------
 func TestAudit_BlockedAlgorithms_GlobPatterns_AreLiteralMatches(t *testing.T) {
+	// 2026-04-21: glob matching now supported. `RSA*` blocks every RSA
+	// variant rather than requiring an exact literal name match.
 	ff := []findings.UnifiedFinding{
 		algFinding("RSA-2048", findings.SevHigh, findings.QRVulnerable),
 		algFinding("RSA-3072", findings.SevHigh, findings.QRVulnerable),
 		algFinding("RSA-OAEP", findings.SevHigh, findings.QRVulnerable),
 	}
-	// User intent: block all RSA variants. But "RSA*" is treated as literal.
 	p := Policy{BlockedAlgorithms: []string{"RSA*"}}
 	r := Evaluate(p, ff, nil, summaryFrom(ff))
 
@@ -107,20 +108,8 @@ func TestAudit_BlockedAlgorithms_GlobPatterns_AreLiteralMatches(t *testing.T) {
 			blocked++
 		}
 	}
-	if blocked > 0 {
-		t.Logf("AUDIT NOTE: BlockedAlgorithms={'RSA*'} matched %d findings — glob support appears to be implemented (verify).", blocked)
-	} else {
-		t.Logf("AUDIT CONFIRMED: BlockedAlgorithms={'RSA*'} matched 0 findings. " +
-			"Globs/wildcards are NOT supported (exact-match only). This is a policy-bypass risk: " +
-			"users writing 'RSA*' believe they are blocking all RSA variants; they are not.")
-	}
-	// Document the actual behaviour: a literal "RSA*" alg name would match.
-	ff2 := []findings.UnifiedFinding{
-		algFinding("RSA*", findings.SevHigh, findings.QRVulnerable), // literal asterisk
-	}
-	r2 := Evaluate(p, ff2, nil, summaryFrom(ff2))
-	if len(r2.Violations) == 0 || r2.Violations[0].Rule != "blocked-algorithm" {
-		t.Errorf("Literal alg name 'RSA*' should match BlockedAlgorithms={'RSA*'}; got: %v", r2.Violations)
+	if blocked != 3 {
+		t.Errorf("BlockedAlgorithms=%q: expected 3 matches (all RSA variants), got %d", []string{"RSA*"}, blocked)
 	}
 }
 

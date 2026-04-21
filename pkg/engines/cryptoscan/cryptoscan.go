@@ -146,8 +146,10 @@ func mapConfidence(cs string) findings.Confidence {
 }
 
 // mapPrimitive normalizes cryptoscan primitive names to our convention.
+// The comparison is case-insensitive so upstream engines emitting "PKE" or
+// "AEAD" still get mapped correctly.
 func mapPrimitive(p string) string {
-	switch p {
+	switch strings.ToLower(p) {
 	case "pke":
 		return "asymmetric"
 	case "kem":
@@ -161,7 +163,9 @@ func mapPrimitive(p string) string {
 	case "key-exchange":
 		return "key-exchange"
 	default:
-		return p // hash, signature, kdf, mac pass through
+		// hash, signature, kdf, mac — normalise casing so downstream
+		// consumers (policy, compliance) don't see a mix of "HASH" / "hash".
+		return strings.ToLower(p)
 	}
 }
 
