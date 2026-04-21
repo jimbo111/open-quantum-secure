@@ -65,8 +65,10 @@ func Evaluate(p Policy, ff []findings.UnifiedFinding, qrs *quantum.QRS, summary 
 	allowedSet := buildLookupSet(p.AllowedAlgorithms)
 	blockedSet := buildLookupSet(p.BlockedAlgorithms)
 
-	// failOn threshold (0 if FailOn is empty or unknown).
-	failOnLevel, hasFailOn := severityRank[findings.Severity(p.FailOn)]
+	// failOn threshold (0 if FailOn is empty or unknown). Normalise to
+	// lowercase so users can write `failOn: HIGH` or `failOn: Critical` in
+	// YAML/config without the rule being silently skipped.
+	failOnLevel, hasFailOn := severityRank[findings.Severity(strings.ToLower(p.FailOn))]
 
 	for i := range ff {
 		f := &ff[i]
