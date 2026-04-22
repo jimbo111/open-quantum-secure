@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -24,6 +25,10 @@ const cacheFormatVersion = "2"
 // only invalidate that engine's cache, not the entire cache. The flat Entries
 // map is kept for backward compatibility during the transition.
 type ScanCache struct {
+	// mu guards every map field below. All public methods acquire mu; callers
+	// that read or write map fields directly must synchronise externally.
+	mu sync.RWMutex `json:"-"`
+
 	// Version is the cache format version (bumped when the schema changes).
 	Version string `json:"version"`
 
@@ -107,7 +112,9 @@ func Load(path string) (*ScanCache, error) {
 // Save persists the cache to path using an atomic temp-rename write so that
 // a crash mid-write never leaves a corrupt file.
 func (sc *ScanCache) Save(path string) error {
+	sc.mu.RLock()
 	data, err := json.MarshalIndent(sc, "", "  ")
+	sc.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("marshal cache: %w", err)
 	}
@@ -157,6 +164,8 @@ func (sc *ScanCache) Save(path string) error {
 // IsValid reports whether the cache was produced by the same scanner version
 // and engine versions. A version mismatch means all entries are stale.
 func (sc *ScanCache) IsValid(currentScannerVersion string, currentEngineVersions map[string]string) bool {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	if sc.Version != cacheFormatVersion {
 		return false
 	}
@@ -179,13 +188,29 @@ func (sc *ScanCache) IsValid(currentScannerVersion string, currentEngineVersions
 //   - cachedFindings: all findings from files that have not changed
 //   - changedPaths:   absolute paths of files that are new or have changed
 //
+// currentScannerVersion guards against stale findings surviving a scanner
+// upgrade: when the stored ScannerVersion or cache format version does not
+// match, every path is reported as changed (forcing a fresh scan) and no
+// cached findings are returned.
+//
 // Files that exist in the cache but are no longer on disk are silently dropped
 // (their findings are not included).
 //
 // allFileHashes is a map of absolute path → SHA-256 hash for every file
 // currently on disk in the target directory. Callers should compute this
 // with HashFiles before calling GetUnchangedFindings.
-func (sc *ScanCache) GetUnchangedFindings(allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
+func (sc *ScanCache) GetUnchangedFindings(currentScannerVersion string, allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	// Version guard: if the cache format or scanner version doesn't match,
+	// every file is stale from this caller's perspective.
+	if sc.Version != cacheFormatVersion || sc.ScannerVersion != currentScannerVersion {
+		changedPaths = make([]string, 0, len(allFileHashes))
+		for path := range allFileHashes {
+			changedPaths = append(changedPaths, path)
+		}
+		return nil, changedPaths
+	}
 	for path, hash := range allFileHashes {
 		entry, ok := sc.Entries[path]
 		if !ok || entry.ContentHash != hash {
@@ -205,6 +230,8 @@ func (sc *ScanCache) GetUnchangedFindings(allFileHashes map[string]string) (cach
 //   - allFileHashes:   maps absolute file path → current content hash
 //     (used to record hashes and prune deleted files)
 func (sc *ScanCache) Update(changedFindings map[string][]findings.UnifiedFinding, allFileHashes map[string]string) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 	now := time.Now()
 
 	// Update entries for changed/new files.
@@ -235,6 +262,8 @@ func (sc *ScanCache) Update(changedFindings map[string][]findings.UnifiedFinding
 // named engine at the given version. Returns false if the cache format is
 // wrong, the engine is not in the cache, or its version doesn't match.
 func (sc *ScanCache) IsValidForEngine(engineName, currentVersion string) bool {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	if sc.Version != cacheFormatVersion {
 		return false
 	}
@@ -248,13 +277,28 @@ func (sc *ScanCache) IsValidForEngine(engineName, currentVersion string) bool {
 // GetUnchangedFindingsForEngine is the per-engine variant of GetUnchangedFindings.
 // It checks only the entries belonging to engineName in EngineEntries.
 //
+// currentVersion guards against stale findings surviving an engine upgrade:
+// when the recorded EngineVersions[engineName] or cache format version does
+// not match, every path is reported as changed (forcing a fresh scan) and no
+// cached findings are returned.
+//
 // Returns:
 //   - cachedFindings: findings from files whose content hash has not changed
 //   - changedPaths: absolute paths of files that are new or have changed
 //
 // Files in the engine's cache that are not in allFileHashes (deleted or no
 // longer relevant) are silently dropped.
-func (sc *ScanCache) GetUnchangedFindingsForEngine(engineName string, allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
+func (sc *ScanCache) GetUnchangedFindingsForEngine(engineName, currentVersion string, allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	// Version guard: cache format or engine version mismatch → all paths changed.
+	if sc.Version != cacheFormatVersion || sc.EngineVersions[engineName] != currentVersion {
+		changedPaths = make([]string, 0, len(allFileHashes))
+		for path := range allFileHashes {
+			changedPaths = append(changedPaths, path)
+		}
+		return nil, changedPaths
+	}
 	engineFiles := sc.EngineEntries[engineName]
 	for path, hash := range allFileHashes {
 		if engineFiles == nil {
@@ -281,6 +325,8 @@ func (sc *ScanCache) GetUnchangedFindingsForEngine(engineName string, allFileHas
 // the changed files — pruning would destroy valid cached entries for unchanged
 // files.
 func (sc *ScanCache) UpdateEngine(engineName string, changedFindings map[string][]findings.UnifiedFinding, allFileHashes map[string]string, pruneDeleted bool) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 	engineFiles, ok := sc.EngineEntries[engineName]
 	if !ok {
 		engineFiles = make(map[string]*CacheEntry)
@@ -313,10 +359,35 @@ func (sc *ScanCache) UpdateEngine(engineName string, changedFindings map[string]
 	}
 }
 
+// EnsureEngineEntry ensures that EngineEntries[engineName] is a non-nil map.
+// It is safe to call concurrently. Used by callers (e.g. orchestrator) that
+// want to pre-populate engine keys so later goroutine writes into the inner
+// map don't need to take the outer lock.
+func (sc *ScanCache) EnsureEngineEntry(engineName string) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if sc.EngineEntries[engineName] == nil {
+		sc.EngineEntries[engineName] = make(map[string]*CacheEntry)
+	}
+}
+
+// SetEngineVersion records the version string for a named engine. Safe for
+// concurrent use.
+func (sc *ScanCache) SetEngineVersion(engineName, version string) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if sc.EngineVersions == nil {
+		sc.EngineVersions = make(map[string]string)
+	}
+	sc.EngineVersions[engineName] = version
+}
+
 // PruneDeletedFiles removes entries for files that no longer exist on disk,
 // across both the flat Entries map and all EngineEntries. allFileHashes should
 // contain every file currently on disk.
 func (sc *ScanCache) PruneDeletedFiles(allFileHashes map[string]string) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 	for path := range sc.Entries {
 		if _, exists := allFileHashes[path]; !exists {
 			delete(sc.Entries, path)
@@ -334,7 +405,9 @@ func (sc *ScanCache) PruneDeletedFiles(allFileHashes map[string]string) {
 // MarshalGzip serializes the cache to gzip-compressed JSON bytes.
 // It is the inverse of UnmarshalGzip.
 func (sc *ScanCache) MarshalGzip() ([]byte, error) {
+	sc.mu.RLock()
 	data, err := json.Marshal(sc)
+	sc.mu.RUnlock()
 	if err != nil {
 		return nil, fmt.Errorf("cache: marshal: %w", err)
 	}

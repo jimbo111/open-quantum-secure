@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -69,6 +69,11 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	var stderrBuf bytes.Buffer
 	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
 	cmd.Stderr = &stderrBuf
+	// Bound ctx-cancel cleanup. Critical here because io.ReadAll(stdout)
+	// below only returns when the stdout pipe reaches EOF — a grand-child
+	// holding stdout open would hang ReadAll past ctx cancellation.
+	// See audit F1.
+	cmd.WaitDelay = 2 * time.Second
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -94,7 +99,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 
 	if len(data) == 0 {
 		if waitErr != nil {
-			msg := strings.TrimSpace(stderrBuf.String())
+			msg := engines.RedactStderr(stderrBuf.String())
 			if msg != "" {
 				return nil, fmt.Errorf("cryptodeps exited: %w: %s", waitErr, msg)
 			}
@@ -111,7 +116,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	result := normalize(raw, opts.TargetPath)
 
 	if waitErr != nil {
-		msg := strings.TrimSpace(stderrBuf.String())
+		msg := engines.RedactStderr(stderrBuf.String())
 		if msg != "" {
 			return result, fmt.Errorf("cryptodeps exited: %w: %s", waitErr, msg)
 		}
@@ -144,6 +149,7 @@ func normalize(raw rawOutput, targetPath string) []findings.UnifiedFinding {
 			RawIdentifier: rawID,
 			Dependency: &findings.Dependency{
 				Library: dep.Name,
+				Version: dep.Version,
 			},
 		}
 		result = append(result, depFinding)

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -72,6 +73,10 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
 	cmd.Stderr = &stderr
+	// Bound ctx-cancel cleanup. Critical with StdoutPipe+bufio.Scanner —
+	// a grand-child holding stdout open would hang scanner.Scan() past
+	// ctx cancel. See audit F1.
+	cmd.WaitDelay = 2 * time.Second
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -179,11 +184,25 @@ func parseAlgorithm(identifier string) findings.Algorithm {
 		return alg
 	}
 
-	// Try to extract key size and mode from the parts
+	// PQC parameter-set names (ML-KEM-768, Kyber-512, ML-DSA-87, SLH-DSA-128f,
+	// Falcon-512, and their hybrid forms like X25519-MLKEM-768) use trailing
+	// numerics as parameter-set identifiers, NOT classical key sizes. Skip
+	// numeric-to-KeySize inference for these names so downstream consumers
+	// (policy, compliance, quantum) don't misinterpret a PQC param set as a
+	// classical bit length.
+	if isPQCFamilyIdentifier(identifier) {
+		return alg
+	}
+
+	// Try to extract key size and mode from the parts. The FIRST numeric
+	// segment >= 64 is treated as the key size; later numerics (IV lengths
+	// in GCM-96, MAC tag lengths in CBC-256, etc.) are ignored so they don't
+	// clobber the authoritative value.
 	for _, part := range parts[1:] {
 		if n, err := strconv.Atoi(part); err == nil && n >= 64 {
-			// Only treat as key size if >= 64 bits (avoids SHA-1, SHA-3, etc.)
-			alg.KeySize = n
+			if alg.KeySize == 0 {
+				alg.KeySize = n
+			}
 		} else {
 			// Likely a mode like GCM, CBC, CTR, etc.
 			upper := strings.ToUpper(part)
@@ -197,6 +216,37 @@ func parseAlgorithm(identifier string) findings.Algorithm {
 	}
 
 	return alg
+}
+
+// isPQCFamilyIdentifier reports whether identifier denotes a post-quantum
+// algorithm whose trailing numeric token is a parameter-set identifier (not a
+// classical key size in bits). The check is case-insensitive and handles both
+// hyphenated ("ML-KEM-768") and hyphen-less ("MLKEM768") forms, plus hybrid
+// KEM names like "X25519-MLKEM-768" and "SecP256r1-MLKEM-768".
+func isPQCFamilyIdentifier(identifier string) bool {
+	upper := strings.ToUpper(identifier)
+	for _, token := range []string{
+		"ML-KEM", "MLKEM",
+		"ML-DSA", "MLDSA",
+		"SLH-DSA", "SLHDSA",
+		"HASH-ML-DSA", "HASHML-DSA", "HASHMLDSA",
+		"KYBER",
+		"DILITHIUM",
+		"FALCON", "FN-DSA", "FNDSA",
+		"SPHINCS",
+		"HQC",
+		"BIKE",
+		"FRODOKEM", "FRODO-KEM",
+		"CLASSICMCELIECE", "CLASSIC-MCELIECE",
+		"XMSS", "XMSSMT", "XMSS-MT", "XMSS^MT",
+		"LMS",
+		"HSS",
+	} {
+		if strings.Contains(upper, token) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseKeySize attempts to extract a numeric key size from cipherscope metadata.

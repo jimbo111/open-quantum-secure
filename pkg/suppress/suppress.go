@@ -101,7 +101,11 @@ func (s *Scanner) scanContent(filePath, content string) []Suppression {
 	for i, line := range lines {
 		lineNum := i + 1
 		trimmed := strings.TrimSpace(line)
-		matches := directivePattern.FindStringSubmatch(trimmed)
+		// Strip string-literal contents before matching so that a directive
+		// appearing INSIDE "..." / `...` / '...' is not mistaken for a real
+		// comment directive (F1).
+		scannable := stripStringLiterals(trimmed)
+		matches := directivePattern.FindStringSubmatch(scannable)
 		if matches == nil {
 			continue
 		}
@@ -197,6 +201,11 @@ func (s *Scanner) IsSuppressed(filePath string, line int, algorithm string) bool
 }
 
 // MatchesIgnorePattern checks if filePath matches any .oqs-ignore pattern.
+//
+// Patterns are evaluated top-to-bottom gitignore-style: each pattern either
+// sets or clears the "ignored" flag. A leading `!` negates — it re-includes
+// files that an earlier pattern matched. The final flag wins, so ordering
+// matters (just like .gitignore).
 func (s *Scanner) MatchesIgnorePattern(filePath string) bool {
 	if len(s.ignorePatterns) == 0 {
 		return false
@@ -211,37 +220,52 @@ func (s *Scanner) MatchesIgnorePattern(filePath string) bool {
 	}
 	relPath = filepath.ToSlash(relPath)
 
+	ignored := false
 	for _, pattern := range s.ignorePatterns {
-		pattern = filepath.ToSlash(pattern)
-
-		// Handle ** recursive patterns
-		if strings.Contains(pattern, "**") {
-			if matchDoubleStar(pattern, relPath) {
-				return true
+		negate := strings.HasPrefix(pattern, "!")
+		if negate {
+			pattern = pattern[1:]
+			// Only negations can CLEAR an ignore; skip if not currently ignored.
+			if !ignored {
+				continue
 			}
-			continue
-		}
-
-		// Exact glob match
-		if matched, err := filepath.Match(pattern, relPath); err == nil && matched {
-			return true
-		}
-
-		// Match against basename
-		if matched, err := filepath.Match(pattern, filepath.Base(relPath)); err == nil && matched {
-			return true
-		}
-
-		// Match against path suffixes
-		parts := strings.Split(relPath, "/")
-		for i := range parts {
-			suffix := strings.Join(parts[i:], "/")
-			if matched, err := filepath.Match(pattern, suffix); err == nil && matched {
-				return true
+		} else {
+			// Positive pattern only matters if not already ignored (short-circuit).
+			if ignored {
+				continue
 			}
+		}
+		if patternMatchesPath(pattern, relPath) {
+			ignored = !negate
 		}
 	}
+	return ignored
+}
 
+// patternMatchesPath reports whether pattern matches relPath using the same
+// matching rules as MatchesIgnorePattern's inner loop (handles `**`, whole
+// path, basename, and path suffix forms).
+func patternMatchesPath(pattern, relPath string) bool {
+	pattern = filepath.ToSlash(pattern)
+
+	if strings.Contains(pattern, "**") {
+		return matchDoubleStar(pattern, relPath)
+	}
+
+	if matched, err := filepath.Match(pattern, relPath); err == nil && matched {
+		return true
+	}
+	if matched, err := filepath.Match(pattern, filepath.Base(relPath)); err == nil && matched {
+		return true
+	}
+
+	parts := strings.Split(relPath, "/")
+	for i := range parts {
+		suffix := strings.Join(parts[i:], "/")
+		if matched, err := filepath.Match(pattern, suffix); err == nil && matched {
+			return true
+		}
+	}
 	return false
 }
 
@@ -284,6 +308,41 @@ func matchSegments(pat, path []string) bool {
 		path = path[1:]
 	}
 	return len(path) == 0
+}
+
+// stripStringLiterals removes content between matched quote pairs so a
+// subsequent regex scan doesn't treat text inside string data as a comment
+// directive. Handles Go/Python/Ruby/C quote styles: "...", '...', and Go raw
+// backtick strings. A backslash escapes the next character inside "..." and
+// '...' but not inside `...` (raw strings). Unmatched openings consume the
+// rest of the line, which is the safe choice — better to miss a possible
+// trailing directive than to match one embedded in unterminated string data.
+func stripStringLiterals(line string) string {
+	var out strings.Builder
+	out.Grow(len(line))
+	i := 0
+	for i < len(line) {
+		c := line[i]
+		if c == '"' || c == '\'' || c == '`' {
+			quote := c
+			i++
+			for i < len(line) {
+				if quote != '`' && line[i] == '\\' && i+1 < len(line) {
+					i += 2
+					continue
+				}
+				if line[i] == quote {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		out.WriteByte(c)
+		i++
+	}
+	return out.String()
 }
 
 // Stats returns suppression statistics.

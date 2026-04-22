@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -95,6 +96,8 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
 	cmd.Stderr = &stderr
+	// Bound ctx-cancel cleanup; see audit F1.
+	cmd.WaitDelay = 2 * time.Second
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -260,10 +263,12 @@ func primitiveFromRuleID(ruleID string) string {
 		return "asymmetric"
 	case strings.Contains(id, "aes") || strings.Contains(id, "cipher") || strings.Contains(id, "encrypt") || strings.Contains(id, "decrypt") || strings.Contains(id, "secret-key"):
 		return "symmetric"
-	case strings.Contains(id, "sha") || strings.Contains(id, "md5") || strings.Contains(id, "digest") || strings.Contains(id, "hash"):
-		return "hash"
+	// Check hmac/mac BEFORE hash: HMAC-SHA* rule IDs contain both "hmac" and "sha",
+	// and the hash branch would otherwise swallow them.
 	case strings.Contains(id, "hmac") || strings.Contains(id, "mac"):
 		return "mac"
+	case strings.Contains(id, "sha") || strings.Contains(id, "md5") || strings.Contains(id, "digest") || strings.Contains(id, "hash"):
+		return "hash"
 	case strings.Contains(id, "tls") || strings.Contains(id, "-ssl-") || strings.HasSuffix(id, "-ssl"):
 		return "protocol"
 	case strings.Contains(id, "kdf"):

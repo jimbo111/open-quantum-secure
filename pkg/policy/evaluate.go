@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -61,12 +62,16 @@ var severityRank = map[findings.Severity]int{
 func Evaluate(p Policy, ff []findings.UnifiedFinding, qrs *quantum.QRS, summary ScanSummary) PolicyResult {
 	var violations []Violation
 
-	// Build lookup sets for algorithm allow/block lists (case-insensitive).
-	allowedSet := buildLookupSet(p.AllowedAlgorithms)
-	blockedSet := buildLookupSet(p.BlockedAlgorithms)
+	// Build pattern lists for algorithm allow/block rules. Patterns support
+	// shell-style globs (*, ?, character classes) so policies like
+	// BlockedAlgorithms: ["RSA*"] block every RSA-* variant.
+	allowedPatterns := buildPatternList(p.AllowedAlgorithms)
+	blockedPatterns := buildPatternList(p.BlockedAlgorithms)
 
-	// failOn threshold (0 if FailOn is empty or unknown).
-	failOnLevel, hasFailOn := severityRank[findings.Severity(p.FailOn)]
+	// failOn threshold (0 if FailOn is empty or unknown). Normalise to
+	// lowercase so users can write `failOn: HIGH` or `failOn: Critical` in
+	// YAML/config without the rule being silently skipped.
+	failOnLevel, hasFailOn := severityRank[findings.Severity(strings.ToLower(p.FailOn))]
 
 	for i := range ff {
 		f := &ff[i]
@@ -91,8 +96,8 @@ func Evaluate(p Policy, ff []findings.UnifiedFinding, qrs *quantum.QRS, summary 
 		algNameLower := strings.ToLower(algName)
 
 		// --- Rule: blockedAlgorithms ---
-		if len(blockedSet) > 0 {
-			if _, blocked := blockedSet[algNameLower]; blocked {
+		if len(blockedPatterns) > 0 {
+			if matchesAnyPattern(algNameLower, blockedPatterns) {
 				violations = append(violations, Violation{
 					Rule:     "blocked-algorithm",
 					Severity: "high",
@@ -103,8 +108,8 @@ func Evaluate(p Policy, ff []findings.UnifiedFinding, qrs *quantum.QRS, summary 
 		}
 
 		// --- Rule: allowedAlgorithms ---
-		if len(allowedSet) > 0 {
-			if _, allowed := allowedSet[algNameLower]; !allowed {
+		if len(allowedPatterns) > 0 {
+			if !matchesAnyPattern(algNameLower, allowedPatterns) {
 				violations = append(violations, Violation{
 					Rule:     "allowed-algorithms",
 					Severity: "high",
@@ -170,8 +175,55 @@ func Evaluate(p Policy, ff []findings.UnifiedFinding, qrs *quantum.QRS, summary 
 	}
 }
 
-// buildLookupSet converts a string slice into a lowercase key set for O(1) lookup.
-// Empty and whitespace-only entries are skipped.
+// buildPatternList converts a string slice into a deduplicated, lowercase,
+// whitespace-trimmed list of patterns. Each pattern may be a literal
+// algorithm name (exact match) or a shell-style glob (*, ?, character
+// classes) per Go's path.Match semantics.
+func buildPatternList(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.ToLower(strings.TrimSpace(item))
+		if trimmed == "" {
+			continue
+		}
+		if _, dup := seen[trimmed]; dup {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// matchesAnyPattern reports whether algNameLower matches any of the
+// lowercased patterns. Patterns containing `*`, `?`, or `[` are treated as
+// shell globs via path.Match; all other patterns are exact-match.
+func matchesAnyPattern(algNameLower string, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.ContainsAny(p, "*?[") {
+			ok, err := path.Match(p, algNameLower)
+			if err == nil && ok {
+				return true
+			}
+			continue
+		}
+		if p == algNameLower {
+			return true
+		}
+	}
+	return false
+}
+
+// buildLookupSet is retained for backward compatibility with callers that
+// want a simple set membership check. Prefer buildPatternList +
+// matchesAnyPattern for new uses that should support globs.
 func buildLookupSet(items []string) map[string]struct{} {
 	if len(items) == 0 {
 		return nil

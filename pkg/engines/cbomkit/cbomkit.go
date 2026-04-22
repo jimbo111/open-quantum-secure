@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -73,26 +73,36 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	var stderrBuf bytes.Buffer
 	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
 	cmd.Stderr = &stderrBuf
+	// Bound ctx-cancel cleanup: grand-children that inherit the stderr pipe
+	// (e.g. double-forked helpers) can keep the pipe open past Kill, causing
+	// Run() to block on the reader goroutine for the full subprocess lifetime.
+	// WaitDelay force-closes the pipe 2s after kill. See audit F1.
+	cmd.WaitDelay = 2 * time.Second
 
-	if err := cmd.Run(); err != nil {
-		// Propagate context cancellation instead of raw exec error.
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("cbomkit-theia: %w", ctx.Err())
-		}
-		msg := strings.TrimSpace(stderrBuf.String())
-		if msg != "" {
-			return nil, fmt.Errorf("cbomkit-theia exited: %w: %s", err, msg)
-		}
-		return nil, fmt.Errorf("cbomkit-theia exited: %w", err)
+	// cbomkit-theia exits non-zero in practice when some internal scanners
+	// partially fail while others produce valid output. Read the output file
+	// regardless of exit code and let presence-of-data drive the decision —
+	// mirrors cdxgen's pattern.
+	runErr := cmd.Run()
+
+	// Propagate context cancellation before reading stale/empty output.
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("cbomkit-theia: %w", ctx.Err())
 	}
 
 	data, err := os.ReadFile(tmpPath)
-	if err != nil {
-		return nil, fmt.Errorf("cbomkit-theia read output: %w", err)
-	}
-
-	if len(data) == 0 {
-		return nil, nil
+	if err != nil || len(data) == 0 {
+		if runErr != nil {
+			msg := engines.RedactStderr(stderrBuf.String())
+			if msg != "" {
+				return nil, fmt.Errorf("cbomkit-theia exited with no output: %w: %s", runErr, msg)
+			}
+			return nil, fmt.Errorf("cbomkit-theia exited with no output: %w", runErr)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("cbomkit-theia read output: %w", err)
+		}
+		return nil, fmt.Errorf("cbomkit-theia produced no output (check installation)")
 	}
 
 	var raw rawOutput
@@ -109,6 +119,11 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 }
 
 // normalize converts a cbomkit-theia raw asset into a UnifiedFinding.
+//
+// When the raw asset has no File (certificate detected in-memory, keystore
+// entry with no file association) we synthesise a pseudo-path of the form
+// "cbom://<asset-type>" so that different asset types don't all collapse to
+// the same DedupeKey ("|0|alg|RSA" for every empty-File RSA asset).
 func normalize(asset rawAsset) findings.UnifiedFinding {
 	var alg *findings.Algorithm
 	if asset.Algorithm != "" {
@@ -120,9 +135,14 @@ func normalize(asset rawAsset) findings.UnifiedFinding {
 		}
 	}
 
+	file := asset.File
+	if file == "" && asset.Type != "" {
+		file = "cbom://" + asset.Type
+	}
+
 	return findings.UnifiedFinding{
 		Location: findings.Location{
-			File: asset.File,
+			File: file,
 			Line: asset.Line,
 		},
 		Algorithm:     alg,

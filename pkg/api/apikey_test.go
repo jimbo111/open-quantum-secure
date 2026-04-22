@@ -74,7 +74,7 @@ func TestCreateAPIKey(t *testing.T) {
 
 	t.Run("empty name returns client-side error", func(t *testing.T) {
 		// No server needed — validation is client-side.
-		c := NewClient("https://localhost", "1.0.0", noToken)
+		c, _ := NewClient("https://localhost", "1.0.0", noToken)
 		_, err := c.CreateAPIKey(context.Background(), "")
 		if err == nil {
 			t.Fatal("expected error for empty name")
@@ -290,7 +290,7 @@ func TestRevokeAPIKey(t *testing.T) {
 	})
 
 	t.Run("empty prefix returns client-side error", func(t *testing.T) {
-		c := NewClient("https://localhost", "1.0.0", noToken)
+		c, _ := NewClient("https://localhost", "1.0.0", noToken)
 		err := c.RevokeAPIKey(context.Background(), "")
 		if err == nil {
 			t.Fatal("expected error for empty prefix")

@@ -661,11 +661,13 @@ func parseHCLLines(lines []string, prefix string, out *[]KeyValue, depth int, ba
 			}
 		}
 
-		// Strip block comment openings.
-		if idx := strings.Index(line, "/*"); idx >= 0 {
+		// Strip block comment openings. Only match `/*` that appears OUTSIDE
+		// a quoted string — a literal `/*` inside "..." is string data, not
+		// a comment start.
+		if idx := indexOutsideHCLStrings(line, "/*"); idx >= 0 {
 			before := strings.TrimSpace(line[:idx])
 			after := line[idx+2:]
-			if closeIdx := strings.Index(after, "*/"); closeIdx >= 0 {
+			if closeIdx := indexOutsideHCLStrings(after, "*/"); closeIdx >= 0 {
 				// Inline block comment — remove and continue with rest.
 				line = before + " " + strings.TrimSpace(after[closeIdx+2:])
 				line = strings.TrimSpace(line)
@@ -700,8 +702,10 @@ func parseHCLLines(lines []string, prefix string, out *[]KeyValue, depth int, ba
 				// Strip trailing inline comment.
 				val := hclExtractValue(valPart)
 
-				// Handle heredoc.
-				if strings.HasPrefix(val, "<<") {
+				// Handle heredoc — only when the raw RHS (valPart) starts with
+				// `<<`. If valPart begins with a quote, the `<<` belongs to the
+				// string literal's content and is NOT a heredoc marker.
+				if strings.HasPrefix(valPart, "<<") && strings.HasPrefix(val, "<<") {
 					marker := strings.TrimPrefix(val, "<<")
 					marker = strings.TrimPrefix(marker, "-")
 					marker = strings.TrimSpace(marker)
@@ -805,6 +809,41 @@ func hclTokenize(s string) []string {
 		}
 	}
 	return tokens
+}
+
+// indexOutsideHCLStrings returns the byte index of substr in s, skipping any
+// occurrence that falls inside a double-quoted HCL string literal on the same
+// line. Returns -1 if substr does not occur outside string literals.
+//
+// Backslash escapes `\"` inside "..." are honoured so a value like
+// "contains \"quote\"" is correctly treated as one string. HCL does not use
+// single-quoted strings, so apostrophes are not treated as quote delimiters.
+func indexOutsideHCLStrings(s, substr string) int {
+	if substr == "" {
+		return 0
+	}
+	inString := false
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c == '"' {
+			// Count preceding backslashes to honour `\"` escape.
+			bs := 0
+			for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
+				bs++
+			}
+			if bs%2 == 0 {
+				inString = !inString
+			}
+			i++
+			continue
+		}
+		if !inString && i+len(substr) <= len(s) && s[i:i+len(substr)] == substr {
+			return i
+		}
+		i++
+	}
+	return -1
 }
 
 // hclExtractValue extracts a value from an HCL assignment RHS, handling:

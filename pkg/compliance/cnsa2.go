@@ -4,6 +4,8 @@
 package compliance
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -196,6 +198,26 @@ func (cnsa20Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
+		// --- Rule: signature default-deny (non-ML-DSA quantum-safe signatures) ---
+		// CNSA 2.0 approves only ML-DSA-87 for general digital signatures and
+		// LMS/HSS/XMSS/XMSS^MT (per NIST SP 800-208) for firmware/software
+		// signing. Any other signature scheme — Falcon/FN-DSA, SPHINCS+ (non-
+		// SLH-DSA), future NIST Round 4 alternates — is NOT approved. ML-DSA
+		// and SLH-DSA are handled by earlier explicit rules that `continue`
+		// before reaching here; this default-deny catches the rest.
+		// LMS/HSS/XMSS/XMSS^MT are approved firmware-signing schemes and are
+		// exempted from this rule.
+		if isSignaturePrimitive(f) && !isStatefulHashSignatureName(upper) &&
+			f.QuantumRisk != findings.QRVulnerable && f.QuantumRisk != findings.QRDeprecated {
+			violations = append(violations, newCNSA2Violation(
+				name,
+				"cnsa2-signature-not-approved",
+				name+" is not a CNSA 2.0 approved signature; CNSA 2.0 approves only ML-DSA-87 for general signatures and LMS/HSS/XMSS/XMSS^MT for firmware/software signing",
+				deadlineFull,
+			))
+			continue
+		}
+
 		// Note: LMS/HSS and XMSS/XMSS^MT are ALL approved per NIST SP 800-208.
 		// HSS is the multi-tree generalization of LMS; XMSS^MT is the multi-tree
 		// generalization of XMSS. Both are approved for firmware/software signing.
@@ -295,29 +317,56 @@ func deadlineForHNDL(hndlRisk string) string {
 	return deadlineFull
 }
 
+// aesKeySizeRe captures the AES key size that appears DIRECTLY after the
+// AES prefix (e.g. "AES-128-..." or "AES128-..."), avoiding false matches
+// against unrelated numeric segments like the "256" in "AES-128-SHA256".
+var aesKeySizeRe = regexp.MustCompile(`\bAES[-_]?(128|192|256)\b`)
+
+// shaOutputSizeRe captures the SHA-2 output size. It handles three forms:
+//
+//	SHA-256  / SHA256   → 256
+//	SHA-512/256         → 256 (truncated variant, NIST FIPS 180-4)
+//	SHA-384             → 384
+//
+// The truncated "/256" form is matched FIRST so the ambient "512" doesn't
+// shadow the real 256-bit output. HMAC-SHAxxx forms pass through because
+// the captured digit group is anchored after SHA.
+var shaTruncatedRe = regexp.MustCompile(`\bSHA[-_]?(?:224|256|384|512)/(224|256)\b`)
+var shaOutputSizeRe = regexp.MustCompile(`\bSHA[-_]?3?[-_]?(224|256|384|512)\b`)
+
 // resolveSymmetricKeySize returns the effective key size for a symmetric algorithm.
-// It tries the provided keySize first, then infers from the name.
+// It tries the provided keySize first, then infers from the name using an
+// anchored AES pattern (prevents false positives like "AES-128-SHA256"
+// returning 256 because the SHA MAC name coincidentally contains "256").
 func resolveSymmetricKeySize(upperName string, keySize int) int {
 	if keySize > 0 {
 		return keySize
 	}
-	switch {
-	case strings.Contains(upperName, "256"):
-		return 256
-	case strings.Contains(upperName, "192"):
-		return 192
-	case strings.Contains(upperName, "128"):
-		return 128
+	if m := aesKeySizeRe.FindStringSubmatch(upperName); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
 	}
 	return 0
 }
 
 // resolveHashOutputSize returns the hash output size in bits.
-// It tries the provided keySize first, then infers from the name.
+// Handles the truncated SHA-512/256 form (256-bit output, NIST FIPS 180-4)
+// explicitly so the leading "512" doesn't mask the real output size.
 func resolveHashOutputSize(upperName string, keySize int) int {
 	if keySize > 0 {
 		return keySize
 	}
+	// Check truncated form BEFORE the general SHA pattern so the leading
+	// base size doesn't win.
+	if m := shaTruncatedRe.FindStringSubmatch(upperName); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	if m := shaOutputSizeRe.FindStringSubmatch(upperName); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	// Generic fallback for non-SHA hash names.
 	switch {
 	case strings.Contains(upperName, "512"):
 		return 512

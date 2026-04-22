@@ -613,6 +613,9 @@ func TestRuleKeyForFinding(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSanitizeID(t *testing.T) {
+	// 2026-04-21: special characters now map to readable tokens (not dropped)
+	// so distinct inputs produce distinct rule IDs — "A<B" and "A>B" no longer
+	// collide to "AB".
 	tests := []struct {
 		input string
 		want  string
@@ -623,8 +626,8 @@ func TestSanitizeID(t *testing.T) {
 		{"SHA-256/512", "SHA-256-512"},
 		// Dots become hyphens
 		{"libssl.so.3", "LIBSSL-SO-3"},
-		// Parentheses are removed
-		{"AES(256)", "AES256"},
+		// Parentheses map to collision-free tokens
+		{"AES(256)", "AES-LP-256-RP-"},
 		// Plus becomes PLUS
 		{"ChaCha20+Poly1305", "CHACHA20PLUSPOLY1305"},
 		// Names already clean: hyphens and digits pass through
@@ -633,8 +636,11 @@ func TestSanitizeID(t *testing.T) {
 		// Output is always uppercase
 		{"openssl", "OPENSSL"},
 		{"libsodium", "LIBSODIUM"},
-		// Combined: space + slash + parens — space→hyphen, parens stripped, slash→hyphen
-		{"EC (P-384)/SHA-256", "EC-P-384-SHA-256"},
+		// Combined: space + slash + parens
+		{"EC (P-384)/SHA-256", "EC--LP-P-384-RP--SHA-256"},
+		// Collision-free: distinct inputs must produce distinct outputs
+		{"A<B", "A-LT-B"},
+		{"A>B", "A-GT-B"},
 	}
 
 	for _, tt := range tests {

@@ -66,8 +66,9 @@ func TestMapPrimitive(t *testing.T) {
 		// Edge cases
 		{"empty string passes through as empty", "", ""},
 		{"unknown value passes through", "rng", "rng"},
-		{"uppercase not matched passes through", "PKE", "PKE"},
-		{"mixed case not matched passes through", "Aead", "Aead"},
+		// 2026-04-21: mapPrimitive is now case-insensitive.
+		{"uppercase PKE maps to asymmetric", "PKE", "asymmetric"},
+		{"mixed case Aead maps to symmetric", "Aead", "symmetric"},
 	}
 
 	for _, tc := range tests {

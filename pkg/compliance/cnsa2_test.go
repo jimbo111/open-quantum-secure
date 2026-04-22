@@ -68,10 +68,11 @@ func TestEvaluate_NoViolations(t *testing.T) {
 			name:    "SHA-512/256 sufficient output inferred",
 			finding: algFinding("SHA-512", "hash", 0, findings.QRResistant, ""),
 		},
-		{
-			name:    "quantum-safe unknown algorithm no violation",
-			finding: algFinding("SomeNewPQC", "signature", 0, findings.QRSafe, ""),
-		},
+		// Removed 2026-04-20: "quantum-safe unknown algorithm no violation" encoded
+		// the bug fixed in the CNSA 2.0 signature default-deny. An unknown signature
+		// scheme (e.g. SomeNewPQC) MUST now produce a cnsa2-signature-not-approved
+		// violation — that's the whole point of default-deny. The new behaviour is
+		// covered by TestAudit_CNSA2_Falcon_FalseApproval.
 	}
 
 	for _, tt := range tests {

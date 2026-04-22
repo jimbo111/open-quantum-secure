@@ -21,7 +21,11 @@ func fixedToken(tok string) func(context.Context) (string, error) {
 // newTestClient creates a Client that trusts the TLS server's certificate.
 func newTestClient(srv *httptest.Server, version string, tokenFn func(context.Context) (string, error), opts ...ClientOption) *Client {
 	all := append([]ClientOption{WithHTTPClient(srv.Client())}, opts...)
-	return NewClient(srv.URL, version, tokenFn, all...)
+	c, err := NewClient(srv.URL, version, tokenFn, all...)
+	if err != nil {
+		panic(err)
+	}
+	return c
 }
 
 // writeJSON encodes v as JSON to w with the given status code.
@@ -468,7 +472,7 @@ func TestListScans(t *testing.T) {
 	})
 
 	t.Run("empty project name returns error", func(t *testing.T) {
-		c := NewClient("http://localhost", "1.0.0", noToken)
+		c, _ := NewClient("http://localhost", "1.0.0", noToken)
 		_, err := c.ListScans(context.Background(), "", 10)
 		if err == nil {
 			t.Fatal("expected error for empty project")
@@ -697,7 +701,7 @@ func TestGenerateRequestID(t *testing.T) {
 
 func TestWithHTTPClient(t *testing.T) {
 	custom := &http.Client{}
-	c := NewClient("http://localhost", "1.0.0", noToken, WithHTTPClient(custom))
+	c, _ := NewClient("http://localhost", "1.0.0", noToken, WithHTTPClient(custom))
 	if c.httpClient != custom {
 		t.Error("WithHTTPClient did not set custom client")
 	}

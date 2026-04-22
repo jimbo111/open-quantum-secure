@@ -23,6 +23,12 @@ type Client struct {
 	httpClient *http.Client
 	version    string
 	tokenFn    func(ctx context.Context) (string, error)
+
+	// optErr captures any error produced by a ClientOption during NewClient.
+	// Options are void-returning (for ergonomic call sites) but some — like
+	// WithCACert — can fail. NewClient inspects optErr after running all
+	// options and reports the first failure.
+	optErr error
 }
 
 // ClientOption is a functional option for Client configuration.
@@ -36,15 +42,23 @@ func WithHTTPClient(c *http.Client) ClientOption {
 }
 
 // WithCACert configures TLS to trust the given PEM certificate file.
+// If certPath cannot be read or the file contains no PEM blocks, NewClient
+// returns an error rather than silently falling back to the OS default roots
+// — operators who typo a pinned-cert path should learn immediately, not at
+// the first TLS handshake hours later.
 func WithCACert(certPath string) ClientOption {
 	return func(cl *Client) {
+		if cl.optErr != nil {
+			return
+		}
 		pem, err := os.ReadFile(certPath)
 		if err != nil {
-			// Not fatal at construction time — requests will fail with TLS error.
+			cl.optErr = fmt.Errorf("api: read CA cert %q: %w", certPath, err)
 			return
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pem) {
+			cl.optErr = fmt.Errorf("api: parse CA cert %q: no PEM blocks found", certPath)
 			return
 		}
 		cl.httpClient = &http.Client{
@@ -61,7 +75,9 @@ func WithCACert(certPath string) ClientOption {
 // version: scanner version for the User-Agent header.
 // tokenFn: function that returns the current access token (may return "" for anonymous).
 // opts: optional ClientOption functions applied after defaults.
-func NewClient(endpoint, version string, tokenFn func(ctx context.Context) (string, error), opts ...ClientOption) *Client {
+//
+// Returns an error when any option fails (e.g. WithCACert on a bad PEM).
+func NewClient(endpoint, version string, tokenFn func(ctx context.Context) (string, error), opts ...ClientOption) (*Client, error) {
 	c := &Client{
 		baseURL:    strings.TrimRight(endpoint, "/") + apiPath,
 		version:    version,
@@ -71,7 +87,10 @@ func NewClient(endpoint, version string, tokenFn func(ctx context.Context) (stri
 	for _, opt := range opts {
 		opt(c)
 	}
-	return c
+	if c.optErr != nil {
+		return nil, c.optErr
+	}
+	return c, nil
 }
 
 // do executes an HTTP request with standard OQS headers and returns the response.

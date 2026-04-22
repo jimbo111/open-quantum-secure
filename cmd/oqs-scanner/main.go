@@ -624,8 +624,13 @@ Example with data lifetime adjustment for healthcare:
 					rcProject = resolveProjectFromInfo(cfg.Upload.Project, projInfo, absPath)
 					rcBranch = resolveRemoteBranchFromInfo(remoteCacheBranch, cfg.Cache.RemoteBranch, projInfo)
 					rcLocalCachePath = resolveCachePath(cachePath, absPath)
-					rcClient = newAPIClient(cfg, apiKeyFlag)
-					performRemoteCacheDownload(ctx, rcClient, rcProject, rcBranch, evHash, rcLocalCachePath)
+					var clientErr error
+					rcClient, clientErr = newAPIClient(cfg, apiKeyFlag)
+					if clientErr != nil {
+						fmt.Fprintf(os.Stderr, "WARNING: remote cache disabled: %v\n", clientErr)
+					} else {
+						performRemoteCacheDownload(ctx, rcClient, rcProject, rcBranch, evHash, rcLocalCachePath)
+					}
 				}
 			}
 
@@ -1054,8 +1059,13 @@ Example:
 				rcProject = resolveProjectFromInfo(cfg.Upload.Project, projInfo, absPath)
 				rcBranch = resolveRemoteBranchFromInfo(remoteCacheBranch, cfg.Cache.RemoteBranch, projInfo)
 				rcLocalCachePath = resolveCachePath(cachePath, absPath)
-				rcClient = newAPIClient(cfg, apiKeyFlag)
-				performRemoteCacheDownload(ctx, rcClient, rcProject, rcBranch, evHash, rcLocalCachePath)
+				var clientErr error
+				rcClient, clientErr = newAPIClient(cfg, apiKeyFlag)
+				if clientErr != nil {
+					fmt.Fprintf(os.Stderr, "WARNING: remote cache disabled: %v\n", clientErr)
+				} else {
+					performRemoteCacheDownload(ctx, rcClient, rcProject, rcBranch, evHash, rcLocalCachePath)
+				}
 			}
 
 			scanStart := time.Now()
@@ -1869,10 +1879,16 @@ func isPlatformAvailable(cfg config.Config) bool {
 }
 
 // newScanStore returns a ScanStore backed by local files (no platform) or the
-// remote API (platform configured).
+// remote API (platform configured). Falls back to the local store with a
+// WARNING if API-client construction fails (bad CA cert path, etc.) so that
+// scan functionality continues even when the platform integration is broken.
 func newScanStore(cfg config.Config, apiKeyFlag string) store.ScanStore {
 	if isPlatformAvailable(cfg) {
-		client := newAPIClient(cfg, apiKeyFlag)
+		client, err := newAPIClient(cfg, apiKeyFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: platform client unavailable, using local store: %v\n", err)
+			return store.NewLocalStore(config.ConfigDir())
+		}
 		return store.NewRemoteStore(client)
 	}
 	return store.NewLocalStore(config.ConfigDir())
@@ -2278,7 +2294,7 @@ To connect to a platform:
   oqs-scanner login`
 
 // newAPIClient creates an API client using the shared resolver and config.
-func newAPIClient(cfg config.Config, apiKeyFlag string) *api.Client {
+func newAPIClient(cfg config.Config, apiKeyFlag string) (*api.Client, error) {
 	resolver := newResolver(cfg, apiKeyFlag)
 	endpoint := resolveEndpoint(cfg)
 
@@ -2327,7 +2343,10 @@ func performUploadWithInfo(ctx context.Context, cfg config.Config, apiKeyFlag, s
 		return fmt.Errorf("parse sanitized CBOM: %w", err)
 	}
 
-	client := newAPIClient(cfg, apiKeyFlag)
+	client, err := newAPIClient(cfg, apiKeyFlag)
+	if err != nil {
+		return fmt.Errorf("api client: %w", err)
+	}
 	resp, err := client.UploadCBOM(ctx, api.UploadRequest{
 		Project:   projectName,
 		Branch:    branch,
@@ -2427,9 +2446,12 @@ In headless environments (SSH, CI), use --no-browser for device code flow.`,
 			}
 
 			// Fetch identity to populate user fields.
-			client := api.NewClient(endpoint, version, func(_ context.Context) (string, error) {
+			client, clientErr := api.NewClient(endpoint, version, func(_ context.Context) (string, error) {
 				return tokResp.AccessToken, nil
 			})
+			if clientErr != nil {
+				return fmt.Errorf("api client: %w", clientErr)
+			}
 			identity, identErr := client.GetIdentity(ctx)
 			if identErr == nil {
 				cred.UserEmail = identity.Email
@@ -2517,7 +2539,10 @@ func whoamiCmd() *cobra.Command {
 			// Fetch fresh identity from server using fully-wired resolver
 			// (including RefreshFn so expired-but-refreshable tokens auto-refresh).
 			cfg, _ := config.Load(".")
-			client := newAPIClient(cfg, "")
+			client, err := newAPIClient(cfg, "")
+			if err != nil {
+				return fmt.Errorf("api client: %w", err)
+			}
 
 			identity, err := client.GetIdentity(ctx)
 			if err != nil {
@@ -2617,7 +2642,10 @@ func uploadCmd() *cobra.Command {
 				return saveLocalCBOM(sanitized, projectName)
 			}
 
-			client := newAPIClient(cfg, apiKeyFlag)
+			client, err := newAPIClient(cfg, apiKeyFlag)
+			if err != nil {
+				return fmt.Errorf("api client: %w", err)
+			}
 
 			resp, err := client.UploadCBOM(ctx, api.UploadRequest{
 				Project:   projectName,
@@ -2836,7 +2864,10 @@ func apikeyCreateCmd() *cobra.Command {
 			}
 
 			ctx := context.Background()
-			client := newAPIClient(cfg, apiKeyFlag)
+			client, err := newAPIClient(cfg, apiKeyFlag)
+			if err != nil {
+				return fmt.Errorf("api client: %w", err)
+			}
 
 			result, err := client.CreateAPIKey(ctx, name)
 			if err != nil {
@@ -2875,7 +2906,10 @@ func apikeyListCmd() *cobra.Command {
 			}
 
 			ctx := context.Background()
-			client := newAPIClient(cfg, apiKeyFlag)
+			client, err := newAPIClient(cfg, apiKeyFlag)
+			if err != nil {
+				return fmt.Errorf("api client: %w", err)
+			}
 
 			result, err := client.ListAPIKeys(ctx)
 			if err != nil {
@@ -2940,7 +2974,10 @@ func apikeyRevokeCmd() *cobra.Command {
 			}
 
 			ctx := context.Background()
-			client := newAPIClient(cfg, apiKeyFlag)
+			client, err := newAPIClient(cfg, apiKeyFlag)
+			if err != nil {
+				return fmt.Errorf("api client: %w", err)
+			}
 
 			if err := client.RevokeAPIKey(ctx, keyPrefix); err != nil {
 				return fmt.Errorf("revoke API key: %w", err)

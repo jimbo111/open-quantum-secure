@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -79,6 +80,8 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
 	cmd.Stderr = &stderr
+	// Bound ctx-cancel cleanup; see audit F1.
+	cmd.WaitDelay = 2 * time.Second
 
 	// Semgrep exits 1 when findings are present — tolerate non-zero exit.
 	// But propagate context cancellation and detect real failures.
@@ -281,33 +284,67 @@ func buildRuleMetaLookup(rules []sarifInputRule) map[string]ruleMetadata {
 	return m
 }
 
-// inferAlgorithmFromRuleID extracts a canonical algorithm name from the rule ID.
+// ruleIDTokenSep is the set of characters that separate tokens in a rule ID.
+// Rule IDs are conventionally kebab-case but may also use underscores, dots,
+// or slashes. Splitting on any of these gives the per-token view used by
+// inferAlgorithmFromRuleID to avoid substring false positives.
+const ruleIDTokenSep = "-_./"
+
+// tokenizeRuleID splits ruleID into lowercase tokens. Empty tokens (from
+// consecutive separators) are dropped.
+func tokenizeRuleID(ruleID string) []string {
+	lower := strings.ToLower(ruleID)
+	parts := strings.FieldsFunc(lower, func(r rune) bool {
+		return strings.ContainsRune(ruleIDTokenSep, r)
+	})
+	return parts
+}
+
+// ruleIDHasToken reports whether any of the supplied tokens appears in the
+// rule ID's token list. Used to avoid substring matches like "rsa" inside
+// "persaepe" (false positive) or "parser" (not containing "rsa" anyway).
+func ruleIDHasToken(tokens []string, candidates ...string) bool {
+	for _, t := range tokens {
+		for _, c := range candidates {
+			if t == c {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// inferAlgorithmFromRuleID extracts a canonical algorithm name from the rule
+// ID. Uses token-boundary matching (not substring) so e.g. "persaepe-latin"
+// does NOT resolve to "RSA". Priority ordering is preserved from the prior
+// implementation: more specific algorithms win.
 func inferAlgorithmFromRuleID(ruleID string) string {
-	id := strings.ToLower(ruleID)
+	tokens := tokenizeRuleID(ruleID)
+	lower := strings.ToLower(ruleID)
 	switch {
-	case strings.Contains(id, "rsa"):
+	case ruleIDHasToken(tokens, "rsa"):
 		return "RSA"
-	case strings.Contains(id, "ecdsa"):
+	case ruleIDHasToken(tokens, "ecdsa"):
 		return "ECDSA"
-	case strings.Contains(id, "ecdh"):
+	case ruleIDHasToken(tokens, "ecdh"):
 		return "ECDH"
-	case strings.Contains(id, "aes"):
+	case ruleIDHasToken(tokens, "aes"):
 		return "AES"
-	case strings.Contains(id, "hmac"):
+	case ruleIDHasToken(tokens, "hmac"):
 		return "HMAC"
-	case strings.Contains(id, "sha256") || strings.Contains(id, "sha-256"):
+	case ruleIDHasToken(tokens, "sha256", "sha-256"):
 		return "SHA-256"
-	case strings.Contains(id, "sha512") || strings.Contains(id, "sha-512"):
+	case ruleIDHasToken(tokens, "sha512", "sha-512"):
 		return "SHA-512"
-	case strings.Contains(id, "sha1") || strings.Contains(id, "sha-1"):
+	case ruleIDHasToken(tokens, "sha1", "sha-1"):
 		return "SHA-1"
-	case strings.Contains(id, "sha"):
+	case ruleIDHasToken(tokens, "sha"):
 		return "SHA"
-	case strings.Contains(id, "md5"):
+	case ruleIDHasToken(tokens, "md5"):
 		return "MD5"
-	case strings.Contains(id, "tls"):
+	case ruleIDHasToken(tokens, "tls"):
 		return "TLS"
-	case strings.Contains(id, "-des-") || strings.HasSuffix(id, "-des") || strings.HasPrefix(id, "des-") || id == "des" || strings.Contains(id, "3des") || strings.Contains(id, "triple-des"):
+	case ruleIDHasToken(tokens, "des", "3des") || strings.Contains(lower, "triple-des"):
 		return "DES"
 	}
 	return ""

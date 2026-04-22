@@ -163,7 +163,7 @@ func TestUploadCache_Headers(t *testing.T) {
 }
 
 func TestUploadCache_EmptyProject(t *testing.T) {
-	c := NewClient("https://localhost", "1.0.0", noToken)
+	c, _ := NewClient("https://localhost", "1.0.0", noToken)
 	_, err := c.UploadCache(context.Background(), CacheUploadRequest{
 		Project: "",
 		Data:    []byte("x"),
@@ -338,7 +338,7 @@ func TestInvalidateCache_WithBranch(t *testing.T) {
 }
 
 func TestInvalidateCache_EmptyProject(t *testing.T) {
-	c := NewClient("https://localhost", "1.0.0", noToken)
+	c, _ := NewClient("https://localhost", "1.0.0", noToken)
 	err := c.InvalidateCache(context.Background(), "", "main")
 	if err == nil {
 		t.Fatal("expected error for empty project")
@@ -372,7 +372,7 @@ func TestInvalidateCache_ServerError(t *testing.T) {
 
 func TestDoRaw_HTTPSEnforcement(t *testing.T) {
 	// NewClient with plain HTTP endpoint.
-	c := NewClient("http://not-https.example.com", "1.0.0", noToken)
+	c, _ := NewClient("http://not-https.example.com", "1.0.0", noToken)
 	_, err := c.DownloadCache(context.Background(), CacheDownloadRequest{
 		Project: "org/repo",
 		Branch:  "main",

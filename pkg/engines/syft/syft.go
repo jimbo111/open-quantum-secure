@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -82,13 +83,16 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	var stderrBuf bytes.Buffer
 	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
 	cmd.Stderr = &stderrBuf
+	// Bound ctx-cancel cleanup; see audit F1 (same fix applied across all
+	// four subprocess engines).
+	cmd.WaitDelay = 2 * time.Second
 
 	if err := cmd.Run(); err != nil {
 		// Propagate context cancellation instead of raw exec error.
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("syft: %w", ctx.Err())
 		}
-		msg := strings.TrimSpace(stderrBuf.String())
+		msg := engines.RedactStderr(stderrBuf.String())
 		if msg != "" {
 			return nil, fmt.Errorf("syft run: %w: %s", err, msg)
 		}

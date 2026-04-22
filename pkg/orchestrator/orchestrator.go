@@ -87,6 +87,21 @@ func (o *Orchestrator) EffectiveEngines(opts engines.ScanOptions) []engines.Engi
 }
 
 // appendNetworkEnginesIfAbsent adds Tier5Network engines from all to dst if not already present.
+// scanNetworkEngineWithRecover wraps a Tier-5 network engine's Scan call in a
+// defer/recover so a panic inside the engine (hostile TLS peer, malformed
+// log line, crashing DNS probe, etc.) is converted into a returned error
+// instead of propagating up and crashing the entire scanner. Mirrors the
+// recover pattern already in place for file engines.
+func scanNetworkEngineWithRecover(ctx context.Context, eng engines.Engine, opts engines.ScanOptions) (res []findings.UnifiedFinding, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%s: panic: %v\n%s", eng.Name(), r, debug.Stack())
+			res = nil
+		}
+	}()
+	return eng.Scan(ctx, opts)
+}
+
 func appendNetworkEnginesIfAbsent(dst, all []engines.Engine) []engines.Engine {
 	has := make(map[string]bool, len(dst))
 	for _, e := range dst {
@@ -280,9 +295,7 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 	// Pre-populate EngineEntries keys so goroutines only touch per-engine
 	// inner maps (no outer map writes → concurrent reads are safe).
 	for _, eng := range available {
-		if sc.EngineEntries[eng.Name()] == nil {
-			sc.EngineEntries[eng.Name()] = make(map[string]*cache.CacheEntry)
-		}
+		sc.EnsureEngineEntry(eng.Name())
 	}
 
 	for i, eng := range available {
@@ -315,7 +328,7 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 			var changedPaths []string
 
 			if engineValid {
-				cached, changedPaths = sc.GetUnchangedFindingsForEngine(eng.Name(), engineHashes)
+				cached, changedPaths = sc.GetUnchangedFindingsForEngine(eng.Name(), eng.Version(), engineHashes)
 			} else {
 				// Engine version changed or new engine → re-scan all its files.
 				for p := range engineHashes {
@@ -376,7 +389,7 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 	// cache state so those engines get re-scanned next time.
 	for i, eng := range available {
 		if !results[i].scanFailed {
-			sc.EngineVersions[eng.Name()] = eng.Version()
+			sc.SetEngineVersion(eng.Name(), eng.Version())
 		}
 	}
 
@@ -604,7 +617,7 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 			break
 		}
 		engStart := time.Now()
-		res, err := eng.Scan(ctx, opts)
+		res, err := scanNetworkEngineWithRecover(ctx, eng, opts)
 		dur := time.Since(engStart)
 		em := EngineMetrics{Name: eng.Name(), Duration: dur, Findings: len(res)}
 		if err != nil {
@@ -645,7 +658,7 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 			break
 		}
 		engStart := time.Now()
-		res, err := eng.Scan(ctx, ctlookupOpts)
+		res, err := scanNetworkEngineWithRecover(ctx, eng, ctlookupOpts)
 		dur := time.Since(engStart)
 		em := EngineMetrics{Name: eng.Name(), Duration: dur, Findings: len(res)}
 		if err != nil {

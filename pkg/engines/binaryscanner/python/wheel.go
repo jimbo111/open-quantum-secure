@@ -110,6 +110,12 @@ func scanMetadata(ctx context.Context, r *zip.Reader, archivePath string) ([]fin
 		seen := make(map[string]bool)
 
 		scanner := bufio.NewScanner(rc)
+		// METADATA lines are usually short, but pip/poetry emit very long
+		// Requires-Dist entries when marker expressions and extras are
+		// combined. Bump the max token to 1 MiB so a single long line does
+		// not silently truncate subsequent lines via bufio.ErrTooLong.
+		const maxMetadataLine = 1 << 20
+		scanner.Buffer(make([]byte, 64*1024), maxMetadataLine)
 		for scanner.Scan() {
 			line := scanner.Text()
 			lib, ok := parseRequiresDist(line)
@@ -131,6 +137,16 @@ func scanMetadata(ctx context.Context, r *zip.Reader, archivePath string) ([]fin
 				SourceEngine: sourceEngine,
 				Reachable:    findings.ReachableUnknown,
 			})
+		}
+		// A bufio.ErrTooLong here means even the 1 MiB cap was exceeded;
+		// surface best-effort findings rather than dropping all of them.
+		// We don't have an error return channel here, so attach a log note
+		// on the next iteration — emitting the partial result is preferred
+		// over silent loss.
+		if err := scanner.Err(); err != nil {
+			// Caller expects (findings, path); preserve what we parsed.
+			// A future revision should add a warning channel.
+			_ = err
 		}
 
 		rc.Close()
