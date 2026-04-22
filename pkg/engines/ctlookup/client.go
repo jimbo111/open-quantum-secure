@@ -160,11 +160,21 @@ func (c *crtShClient) doWithRetry(ctx context.Context, req *http.Request) (*http
 }
 
 // retryAfterDuration parses the Retry-After response header as seconds.
-// Falls back to 2s when the header is absent or unparseable.
+// Falls back to 2s when the header is absent or unparseable. An
+// attacker-controlled Retry-After must not overflow or stall the scanner,
+// so values beyond maxRetryAfter are clamped.
 func retryAfterDuration(resp *http.Response) time.Duration {
+	const maxRetryAfter = 1 * time.Hour
 	if s := resp.Header.Get("Retry-After"); s != "" {
 		var secs float64
 		if _, err := fmt.Sscanf(s, "%f", &secs); err == nil && secs > 0 {
+			// Clamp before multiplying — secs * 1e9 can overflow int64
+			// (float→int conversion of an out-of-range value is
+			// implementation-defined per Go spec; observed to saturate
+			// to MaxInt64 on darwin and wrap to MinInt64 on linux).
+			if secs >= maxRetryAfter.Seconds() {
+				return maxRetryAfter
+			}
 			return time.Duration(secs * float64(time.Second))
 		}
 	}
