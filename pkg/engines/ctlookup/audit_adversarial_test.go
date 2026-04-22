@@ -159,11 +159,12 @@ func TestAuditCT_RateLimiter_ConcurrentBurst_NoLostTokens(t *testing.T) {
 	}
 }
 
-// TestAuditCT_RetryAfter_Overflow_Clamps ensures a malicious Retry-After
-// header with a huge numeric value does not overflow time.Duration into a
-// negative wait (which would cause an immediate retry storm). The current
-// implementation multiplies before clamping — if this test fails, the
-// overflow finding is real.
+// TestAuditCT_RetryAfter_Overflow_Clamps — a malicious Retry-After header
+// with a huge numeric value must not overflow time.Duration into a negative
+// wait (retry-storm) or stall the scanner for an unreasonable positive
+// duration (DoS). Both modes were reachable before the source clamp: wrap
+// to MinInt64 on linux/amd64, saturation to MaxInt64 on darwin. Fix in
+// retryAfterDuration caps at 1h regardless of platform.
 func TestAuditCT_RetryAfter_Overflow_Clamps(t *testing.T) {
 	t.Parallel()
 
@@ -172,15 +173,11 @@ func TestAuditCT_RetryAfter_Overflow_Clamps(t *testing.T) {
 		Header: http.Header{"Retry-After": []string{"1000000000000000000"}}, // 1e18
 	}
 	got := retryAfterDuration(resp)
-	// On overflow, time.Duration becomes negative or wraps.
-	// Expected safe behaviour: clamp to a sane cap (say ≤ 1 h).
 	if got < 0 {
 		t.Errorf("retryAfterDuration overflowed to negative: %v (retry storm risk)", got)
 	}
 	if got > 1*time.Hour {
-		// Document: the library currently does NOT clamp; an attacker-controlled
-		// Retry-After can delay the scanner for a huge (but positive) duration.
-		t.Logf("retryAfterDuration returned %v for Retry-After=1e18 (no clamp — DoS risk)", got)
+		t.Errorf("retryAfterDuration = %v; want clamped to ≤ 1h (DoS risk)", got)
 	}
 }
 
