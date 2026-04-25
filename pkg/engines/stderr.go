@@ -23,6 +23,13 @@ var credentialPatterns = regexp.MustCompile(
 	`(?i)[\w-]*(?:password|passwd|secret|token|api[_-]?key|authorization|bearer|credential|private[_-]?key)[\w-]*\s*[=:]\s*\S+`,
 )
 
+// bearerPattern matches HTTP `Authorization: Bearer <token>` form where the
+// token is whitespace-separated from the `Bearer` scheme keyword. The
+// credentialPatterns regex above stops at the first whitespace via `\S+`, so
+// the actual token after `Bearer ` would otherwise leak. Apply this BEFORE
+// credentialPatterns so the env-var matcher never sees the raw token.
+var bearerPattern = regexp.MustCompile(`(?i)\bbearer\s+\S+`)
+
 // RedactStderr returns a safe representation of subprocess stderr for
 // inclusion in an error message:
 //   - credential-looking key=value / key:value tokens are masked with
@@ -38,6 +45,7 @@ func RedactStderr(stderr string) string {
 	if s == "" {
 		return ""
 	}
+	s = bearerPattern.ReplaceAllString(s, "<redacted>")
 	s = credentialPatterns.ReplaceAllStringFunc(s, func(match string) string {
 		// Find the separator (= or :) and replace the value portion only.
 		sepIdx := strings.IndexAny(match, "=:")
@@ -47,7 +55,10 @@ func RedactStderr(stderr string) string {
 		return match[:sepIdx+1] + "<redacted>"
 	})
 	if len(s) > maxStderrInError {
-		s = s[:maxStderrInError] + " …[truncated]"
+		// Drop split-rune bytes at the truncation boundary so the result is
+		// always valid UTF-8 — multi-byte runes straddling byte 512 would
+		// otherwise leave a lone leading byte (e.g. 0xC2 from `©`).
+		s = strings.ToValidUTF8(s[:maxStderrInError], "") + " …[truncated]"
 	}
 	return s
 }
