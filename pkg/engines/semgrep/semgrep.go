@@ -93,14 +93,14 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	data, err := os.ReadFile(tmpPath)
 	if err != nil {
 		if runErr != nil {
-			return nil, fmt.Errorf("semgrep failed (stderr: %s): %w", stderr.String(), runErr)
+			return nil, fmt.Errorf("semgrep failed (stderr: %s): %w", engines.RedactStderr(stderr.String()), runErr)
 		}
 		return nil, fmt.Errorf("semgrep: read sarif output: %w", err)
 	}
 
 	if len(data) == 0 {
-		if stderr.Len() > 0 {
-			return nil, fmt.Errorf("semgrep: no output produced, stderr: %s", stderr.String())
+		if msg := engines.RedactStderr(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("semgrep: no output produced, stderr: %s", msg)
 		}
 		return nil, nil
 	}
@@ -372,16 +372,7 @@ func primitiveFromRuleID(ruleID string) string {
 
 // findBinary locates semgrep, checking engineDirs then PATH.
 func findBinary(extraDirs []string) string {
-	for _, dir := range extraDirs {
-		p := filepath.Join(dir, "semgrep")
-		if isExecutable(p) {
-			return p
-		}
-	}
-	if p, err := exec.LookPath("semgrep"); err == nil {
-		return p
-	}
-	return ""
+	return engines.FindBinary(extraDirs, "semgrep")
 }
 
 // cleanURI strips file:// scheme prefixes from SARIF artifact URIs.
@@ -402,11 +393,7 @@ func findRulesDir(extraDirs []string) string {
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir() && info.Mode()&0111 != 0
+	return engines.IsExecutable(path)
 }
 
 // --- Private SARIF input types (do NOT reuse output/sarif.go types) ---

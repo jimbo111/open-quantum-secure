@@ -5,9 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -75,8 +73,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	if err != nil {
 		// cryptoscan may exit non-zero with --fail-on; still try to parse output
 		if len(out) == 0 {
-			msg := strings.TrimSpace(stderr.String())
-			if msg != "" {
+			if msg := engines.RedactStderr(stderr.String()); msg != "" {
 				return nil, fmt.Errorf("cryptoscan failed: %w: %s", err, msg)
 			}
 			return nil, fmt.Errorf("cryptoscan failed: %w", err)
@@ -173,22 +170,9 @@ func mapPrimitive(p string) string {
 }
 
 func (e *Engine) findBinary(extraDirs []string) string {
-	for _, dir := range extraDirs {
-		p := filepath.Join(dir, "cryptoscan")
-		if isExecutable(p) {
-			return p
-		}
-	}
-	if p, err := exec.LookPath("cryptoscan"); err == nil {
-		return p
-	}
-	return ""
+	return engines.FindBinary(extraDirs, "cryptoscan")
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir() && info.Mode()&0111 != 0
+	return engines.IsExecutable(path)
 }

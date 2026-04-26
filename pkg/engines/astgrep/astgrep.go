@@ -108,8 +108,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		// ast-grep exits non-zero when findings are present (similar to grep).
 		// Only fail if output is empty.
 		if len(out) == 0 {
-			msg := strings.TrimSpace(stderr.String())
-			if msg != "" {
+			if msg := engines.RedactStderr(stderr.String()); msg != "" {
 				return nil, fmt.Errorf("astgrep failed: %w: %s", err, msg)
 			}
 			return nil, fmt.Errorf("astgrep failed: %w", err)
@@ -280,24 +279,7 @@ func primitiveFromRuleID(ruleID string) string {
 // findBinary locates ast-grep, checking engineDirs then PATH.
 // ast-grep ships as both "ast-grep" and the shorter "sg".
 func (e *Engine) findBinary(extraDirs []string) string {
-	candidates := []string{"ast-grep", "sg"}
-
-	for _, dir := range extraDirs {
-		for _, name := range candidates {
-			p := filepath.Join(dir, name)
-			if isExecutable(p) {
-				return p
-			}
-		}
-	}
-
-	for _, name := range candidates {
-		if p, err := exec.LookPath(name); err == nil {
-			return p
-		}
-	}
-
-	return ""
+	return engines.FindBinary(extraDirs, "ast-grep", "sg")
 }
 
 // findRulesDir returns the path to an external astgrep-rules directory if present.
@@ -312,9 +294,5 @@ func findRulesDir(extraDirs []string) string {
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir() && info.Mode()&0111 != 0
+	return engines.IsExecutable(path)
 }

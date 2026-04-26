@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -118,8 +116,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	}
 	if waitErr != nil {
 		// cipherscope exits 0 on success; non-zero is unexpected but we still return partial results
-		msg := strings.TrimSpace(stderr.String())
-		if msg != "" {
+		if msg := engines.RedactStderr(stderr.String()); msg != "" {
 			return result, fmt.Errorf("cipherscope exited: %w: %s", waitErr, msg)
 		}
 		return result, fmt.Errorf("cipherscope exited: %w", waitErr)
@@ -276,26 +273,9 @@ func parseKeySize(v interface{}) int {
 
 // findBinary locates the cipherscope binary.
 func (e *Engine) findBinary(extraDirs []string) string {
-	// 1. Check extra dirs (e.g. ./engines/cipherscope)
-	for _, dir := range extraDirs {
-		p := filepath.Join(dir, "cipherscope")
-		if isExecutable(p) {
-			return p
-		}
-	}
-
-	// 2. Check PATH
-	if p, err := exec.LookPath("cipherscope"); err == nil {
-		return p
-	}
-
-	return ""
+	return engines.FindBinary(extraDirs, "cipherscope")
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir() && info.Mode()&0111 != 0
+	return engines.IsExecutable(path)
 }
