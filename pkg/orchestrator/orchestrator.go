@@ -465,48 +465,15 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 		}
 	}
 
-	available := o.AvailableEngines()
-	if len(opts.EngineNames) > 0 {
-		available = filterEngines(available, opts.EngineNames)
+	fileEngines, networkEngines, err := o.selectFileAndNetworkEngines(opts)
+	if err != nil {
+		return nil, nil, metrics, err
 	}
-
-	// In diff/quick mode, restrict to Tier 1 engines only
-	if opts.Mode == engines.ModeDiff || opts.Mode == engines.ModeQuick {
-		available = filterByTier(available, engines.Tier1Pattern)
-	} else {
-		// Apply ScanType gating for Tier 4 binary and Tier 5 network engines.
-		available = applyScanTypeFilter(available, opts.ScanType)
-	}
-
-	// Include Tier5Network engines when TLS, CT, SSH targets, or file-based log paths
-	// (Zeek ssl.log / x509.log, Suricata eve.json) are explicitly provided,
-	// overriding tier/scanType filtering (even in diff/quick mode).
-	if hasNetworkTargets(opts) {
-		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
-	}
-
-	// Split file-based and network engines. Network engines (Tier5Network) run
-	// outside the incremental cache loop since they don't operate on files.
-	var fileEngines, networkEngines []engines.Engine
-	for _, e := range available {
-		if e.Tier() == engines.Tier5Network {
-			networkEngines = append(networkEngines, e)
-		} else {
-			fileEngines = append(fileEngines, e)
-		}
-	}
-
-	if len(fileEngines) == 0 && len(networkEngines) == 0 {
-		return nil, nil, metrics, fmt.Errorf("no engines available")
-	}
+	available := append(append([]engines.Engine(nil), fileEngines...), networkEngines...)
 
 	var allFindings []findings.UnifiedFinding
 
-	// -- Incremental path (file engines only) --
-	// When Incremental=true and NoCache=false, use the file hash cache to skip
-	// unchanged files. Supported in both ModeFull (all files) and ModeDiff
-	// (only git-changed files). The merged findings flow through the same
-	// post-processing stages below.
+	// -- File engines: incremental cache path or parallel full-scan path --
 	if len(fileEngines) > 0 && opts.Incremental && !opts.NoCache && (opts.Mode == engines.ModeFull || opts.Mode == engines.ModeDiff) {
 		var err error
 		allFindings, err = o.runIncremental(ctx, opts, fileEngines, pkgScannerVersion.Load().(string))
@@ -515,172 +482,26 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 			return nil, nil, metrics, err
 		}
 		metrics.Engines = []EngineMetrics{{Name: "incremental-cache", Duration: time.Since(totalStart), Findings: len(allFindings)}}
-	} else {
-		// -- Normal full-scan path --
-		// Run each engine in its own goroutine. Collect per-engine results into a
-		// slice indexed by position so that final merge preserves engine order,
-		// giving deterministic output regardless of goroutine scheduling.
-		type engineResult struct {
-			results []findings.UnifiedFinding
-			err     error
-			metrics EngineMetrics
-		}
-		perEngine := make([]engineResult, len(fileEngines))
-
-		var wg sync.WaitGroup
-		var mu sync.Mutex
-		var errs []error
-
-		for i, eng := range fileEngines {
-			i, eng := i, eng // capture loop vars
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				engStart := time.Now()
-				defer func() {
-					if r := recover(); r != nil {
-						panicErr := fmt.Errorf("%s: panic: %v\n%s", eng.Name(), r, debug.Stack())
-						mu.Lock()
-						errs = append(errs, panicErr)
-						mu.Unlock()
-						perEngine[i].metrics = EngineMetrics{
-							Name:     eng.Name(),
-							Duration: time.Since(engStart),
-							Error:    panicErr.Error(),
-						}
-					}
-				}()
-				res, err := eng.Scan(ctx, opts)
-				dur := time.Since(engStart)
-				em := EngineMetrics{
-					Name:     eng.Name(),
-					Duration: dur,
-					Findings: len(res),
-				}
-				if err != nil {
-					em.Error = err.Error()
-				}
-				// Store results per-engine (index is unique per goroutine — no lock needed).
-				perEngine[i] = engineResult{results: res, err: err, metrics: em}
-				if err != nil {
-					mu.Lock()
-					errs = append(errs, fmt.Errorf("%s: %w", eng.Name(), err))
-					mu.Unlock()
-				}
-			}()
-		}
-		wg.Wait()
-
-		// Collect engine metrics in order.
-		metrics.Engines = make([]EngineMetrics, len(fileEngines))
-		for i := range perEngine {
-			metrics.Engines[i] = perEngine[i].metrics
-		}
-
-		// If the context was cancelled (timeout or explicit cancel), report that
-		// instead of a misleading "all engines failed" error.
-		if ctx.Err() != nil {
+	} else if len(fileEngines) > 0 {
+		ff, em, err := runFileEnginesParallel(ctx, fileEngines, opts)
+		metrics.Engines = em
+		if err != nil {
 			metrics.TotalDuration = time.Since(totalStart)
-			return nil, nil, metrics, fmt.Errorf("scan aborted: %w", ctx.Err())
+			return nil, nil, metrics, err
 		}
-
-		// Merge in engine order to keep output deterministic. Clone each finding
-		// so subsequent in-place pipeline stages (normalizeFindings, classify,
-		// migration snippets) don't mutate engine-owned state — concurrent Scan
-		// calls on the same Orchestrator would otherwise race on Algorithm.Name.
-		for _, er := range perEngine {
-			for i := range er.results {
-				allFindings = append(allFindings, er.results[i].Clone())
-			}
-		}
-
-		if len(errs) > 0 && len(allFindings) == 0 {
-			metrics.TotalDuration = time.Since(totalStart)
-			return nil, nil, metrics, fmt.Errorf("all engines failed: %v", errs)
-		}
-
-		// Warn about partial engine failures (some engines failed but others succeeded)
-		if len(errs) > 0 {
-			for _, e := range errs {
-				fmt.Fprintf(os.Stderr, "WARNING: engine error (partial results): %s\n", e)
-			}
-		}
+		allFindings = ff
 	}
 
 	// -- Network engines (Tier5Network) run outside the file-based pipeline --
 	// They do not participate in incremental caching or file-based filtering.
-	//
-	// Ordering guarantee: ct-lookup runs after all other network engines so that
-	// when CTLookupFromECH is true, ECH-enabled findings from tls-probe are
-	// available for hostname extraction before ct-lookup is invoked.
+	// ct-lookup runs in a second pass so that when CTLookupFromECH is true,
+	// ECH-enabled findings from tls-probe (etc.) are available for hostname
+	// extraction.
 	var networkErrs []error
-
-	// ctlookupOpts is a copy of opts that may be enriched with ECH hostnames
-	// after tls-probe (and any other engine) has run.
-	ctlookupOpts := opts
-
-	// Pass 1: all Tier5Network engines except ct-lookup.
-	for _, eng := range networkEngines {
-		if eng.Name() == "ct-lookup" {
-			continue
-		}
-		if ctx.Err() != nil {
-			break
-		}
-		engStart := time.Now()
-		res, err := scanNetworkEngineWithRecover(ctx, eng, opts)
-		dur := time.Since(engStart)
-		em := EngineMetrics{Name: eng.Name(), Duration: dur, Findings: len(res)}
-		if err != nil {
-			em.Error = err.Error()
-			fmt.Fprintf(os.Stderr, "WARNING: %s: %v\n", eng.Name(), err)
-			networkErrs = append(networkErrs, fmt.Errorf("%s: %w", eng.Name(), err))
-		}
-		metrics.Engines = append(metrics.Engines, em)
-		for i := range res {
-			allFindings = append(allFindings, res[i].Clone())
-		}
-	}
-
-	// If CTLookupFromECH, extract ECH-enabled hostnames from pass-1 findings and
-	// add them to ctlookupOpts so ct-lookup can resolve what ECH hid.
-	if opts.CTLookupFromECH {
-		echHosts := echHostnamesFromFindings(allFindings)
-		// Copy to avoid mutating caller's backing array via append.
-		ctlookupOpts.CTLookupTargets = append([]string(nil), opts.CTLookupTargets...)
-		seen := make(map[string]bool, len(ctlookupOpts.CTLookupTargets))
-		for _, h := range ctlookupOpts.CTLookupTargets {
-			seen[h] = true
-		}
-		for _, h := range echHosts {
-			if !seen[h] {
-				ctlookupOpts.CTLookupTargets = append(ctlookupOpts.CTLookupTargets, h)
-				seen[h] = true
-			}
-		}
-	}
-
-	// Pass 2: ct-lookup engine with (potentially ECH-enriched) opts.
-	for _, eng := range networkEngines {
-		if eng.Name() != "ct-lookup" {
-			continue
-		}
-		if ctx.Err() != nil {
-			break
-		}
-		engStart := time.Now()
-		res, err := scanNetworkEngineWithRecover(ctx, eng, ctlookupOpts)
-		dur := time.Since(engStart)
-		em := EngineMetrics{Name: eng.Name(), Duration: dur, Findings: len(res)}
-		if err != nil {
-			em.Error = err.Error()
-			fmt.Fprintf(os.Stderr, "WARNING: %s: %v\n", eng.Name(), err)
-			networkErrs = append(networkErrs, fmt.Errorf("%s: %w", eng.Name(), err))
-		}
-		metrics.Engines = append(metrics.Engines, em)
-		for i := range res {
-			allFindings = append(allFindings, res[i].Clone())
-		}
+	if len(networkEngines) > 0 {
+		var netMetrics []EngineMetrics
+		allFindings, netMetrics, networkErrs = runNetworkEnginesTwoPass(ctx, networkEngines, opts, allFindings)
+		metrics.Engines = append(metrics.Engines, netMetrics...)
 	}
 	// Propagate network engine errors when all network engines failed and
 	// produced no findings (prevents silent pass in CI when TLS targets
