@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
@@ -167,26 +166,9 @@ func primitiveFromAssetType(assetType string) string {
 
 // findBinary locates the cbomkit-theia binary.
 func (e *Engine) findBinary(extraDirs []string) string {
-	// 1. Check extra dirs (e.g. ./engines/cbomkit-theia)
-	for _, dir := range extraDirs {
-		p := filepath.Join(dir, "cbomkit-theia")
-		if isExecutable(p) {
-			return p
-		}
-	}
-
-	// 2. Check PATH
-	if p, err := exec.LookPath("cbomkit-theia"); err == nil {
-		return p
-	}
-
-	return ""
+	return engines.FindBinary(extraDirs, "cbomkit-theia")
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir() && info.Mode()&0111 != 0
+	return engines.IsExecutable(path)
 }

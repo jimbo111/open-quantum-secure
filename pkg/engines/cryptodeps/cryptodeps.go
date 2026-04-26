@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
@@ -199,24 +197,9 @@ func reachabilityFrom(r *bool) findings.Reachability {
 
 // findBinary locates the cryptodeps binary.
 func (e *Engine) findBinary(extraDirs []string) string {
-	for _, dir := range extraDirs {
-		p := filepath.Join(dir, "cryptodeps")
-		if isExecutable(p) {
-			return p
-		}
-	}
-
-	if p, err := exec.LookPath("cryptodeps"); err == nil {
-		return p
-	}
-
-	return ""
+	return engines.FindBinary(extraDirs, "cryptodeps")
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir() && info.Mode()&0111 != 0
+	return engines.IsExecutable(path)
 }

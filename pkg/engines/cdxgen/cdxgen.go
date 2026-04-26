@@ -204,24 +204,9 @@ func manifestFile(targetPath, purl string) string {
 
 // findBinary locates the cdxgen binary.
 func (e *Engine) findBinary(extraDirs []string) string {
-	for _, dir := range extraDirs {
-		p := filepath.Join(dir, "cdxgen")
-		if isExecutable(p) {
-			return p
-		}
-	}
-
-	if p, err := exec.LookPath("cdxgen"); err == nil {
-		return p
-	}
-
-	return ""
+	return engines.FindBinary(extraDirs, "cdxgen")
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir() && info.Mode()&0111 != 0
+	return engines.IsExecutable(path)
 }

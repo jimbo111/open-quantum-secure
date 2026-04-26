@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -187,24 +186,9 @@ func purlNamespace(purl string) string {
 
 // findBinary locates the syft binary.
 func (e *Engine) findBinary(extraDirs []string) string {
-	for _, dir := range extraDirs {
-		p := filepath.Join(dir, "syft")
-		if isExecutable(p) {
-			return p
-		}
-	}
-
-	if p, err := exec.LookPath("syft"); err == nil {
-		return p
-	}
-
-	return ""
+	return engines.FindBinary(extraDirs, "syft")
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir() && info.Mode()&0111 != 0
+	return engines.IsExecutable(path)
 }
