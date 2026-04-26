@@ -78,9 +78,7 @@ func (o *Orchestrator) EffectiveEngines(opts engines.ScanOptions) []engines.Engi
 	// Include Tier5Network engines when TLS, CT, SSH targets, or file-based log paths
 	// (Zeek ssl.log / x509.log, Suricata eve.json) are explicitly provided,
 	// even if they were excluded by tier/scanType filtering above.
-	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH ||
-		len(opts.SSHTargets) > 0 || opts.ZeekSSLPath != "" || opts.ZeekX509Path != "" ||
-		opts.SuricataEvePath != "" {
+	if hasNetworkTargets(opts) {
 		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
 	}
 	return available
@@ -113,6 +111,21 @@ func appendNetworkEnginesIfAbsent(dst, all []engines.Engine) []engines.Engine {
 		}
 	}
 	return dst
+}
+
+// hasNetworkTargets reports whether ScanOptions specifies any input that a
+// Tier-5 network engine would consume. Used to force-include network engines
+// even when the tier/scanType filters would otherwise exclude them. Single
+// source of truth — adding a new network input requires updating only this
+// function.
+func hasNetworkTargets(opts engines.ScanOptions) bool {
+	return len(opts.TLSTargets) > 0 ||
+		len(opts.CTLookupTargets) > 0 ||
+		opts.CTLookupFromECH ||
+		len(opts.SSHTargets) > 0 ||
+		opts.ZeekSSLPath != "" ||
+		opts.ZeekX509Path != "" ||
+		opts.SuricataEvePath != ""
 }
 
 // Scan runs available engines, deduplicates, and boosts confidence.
@@ -468,9 +481,7 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 	// Include Tier5Network engines when TLS, CT, SSH targets, or file-based log paths
 	// (Zeek ssl.log / x509.log, Suricata eve.json) are explicitly provided,
 	// overriding tier/scanType filtering (even in diff/quick mode).
-	if len(opts.TLSTargets) > 0 || len(opts.CTLookupTargets) > 0 || opts.CTLookupFromECH ||
-		len(opts.SSHTargets) > 0 || opts.ZeekSSLPath != "" || opts.ZeekX509Path != "" ||
-		opts.SuricataEvePath != "" {
+	if hasNetworkTargets(opts) {
 		available = appendNetworkEnginesIfAbsent(available, o.AvailableEngines())
 	}
 
