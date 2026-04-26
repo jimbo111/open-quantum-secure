@@ -1254,11 +1254,8 @@ func validateSuricataEvePath(path string) error {
 // ephemeral Ed25519 key pair and the SignedCBOM envelope is written instead of raw CBOM.
 func writeOutput(_ *cobra.Command, format, outputFile string, scanResult output.ScanResult, signCBOM bool) error {
 	// Validate format before creating the file to avoid truncating existing output.
-	switch format {
-	case "json", "table", "sarif", "cbom", "cyclonedx", "html", "csv":
-		// valid
-	default:
-		return fmt.Errorf("unknown format: %s (use 'json', 'table', 'sarif', 'cbom', 'html', or 'csv')", format)
+	if _, ok := output.LookupWriter(format); !ok {
+		return fmt.Errorf("unknown format: %s (supported: %v)", format, output.SupportedFormats())
 	}
 
 	var w io.Writer = os.Stdout
@@ -1273,23 +1270,10 @@ func writeOutput(_ *cobra.Command, format, outputFile string, scanResult output.
 	}
 
 	var writeErr error
-	switch format {
-	case "json":
-		writeErr = output.WriteJSON(w, scanResult)
-	case "table":
-		writeErr = output.WriteTable(w, scanResult)
-	case "sarif":
-		writeErr = output.WriteSARIF(w, scanResult)
-	case "cbom", "cyclonedx":
-		if signCBOM {
-			writeErr = writeSignedCBOM(w, scanResult)
-		} else {
-			writeErr = output.WriteCBOM(w, scanResult)
-		}
-	case "html":
-		writeErr = output.WriteHTML(w, scanResult)
-	case "csv":
-		writeErr = output.WriteCSV(w, scanResult)
+	if signCBOM && (format == "cbom" || format == "cyclonedx") {
+		writeErr = writeSignedCBOM(w, scanResult)
+	} else {
+		writeErr = output.WriteFormat(format, w, scanResult)
 	}
 
 	if writeErr != nil {
