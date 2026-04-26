@@ -396,14 +396,8 @@ Example with data lifetime adjustment for healthcare:
 			if targetPath == "" {
 				return fmt.Errorf("--path is required")
 			}
-			if dataLifetimeYears < 0 {
-				return fmt.Errorf("--data-lifetime-years must be a positive integer (got %d); set a value > 0 reflecting actual data retention (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default", dataLifetimeYears)
-			}
-			if cmd.Flags().Changed("data-lifetime-years") && dataLifetimeYears == 0 {
-				return fmt.Errorf("--data-lifetime-years 0 is not valid: no data has zero sensitivity in practice; set a positive value (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default")
-			}
-			if tlsDetectPref && !tlsEnumGroups && !tlsDeepProbe {
-				return fmt.Errorf("--detect-server-preference requires --enumerate-groups or --deep-probe to build the accepted-group list first")
+			if err := validateLifetimeAndProbeFlags(cmd, dataLifetimeYears, tlsDetectPref, tlsEnumGroups, tlsDeepProbe); err != nil {
+				return err
 			}
 
 			absPath, err := filepath.Abs(targetPath)
@@ -503,30 +497,8 @@ Example with data lifetime adjustment for healthcare:
 					hndlShelfLife, surplus, level)
 			}
 
-			// Validate --ct-lookup-targets before proceeding.
-			for _, h := range ctLookupTargets {
-				if err := ctlookup.ValidateHostname(h); err != nil {
-					return fmt.Errorf("invalid --ct-lookup-targets value %q: %w", h, err)
-				}
-			}
-
-			// Validate --ssh-targets: must be host:port with valid hostname/IP syntax.
-			for _, t := range sshTargets {
-				if err := validateSSHTarget(t); err != nil {
-					return fmt.Errorf("invalid --ssh-targets value %q: %w", t, err)
-				}
-			}
-
-			// Validate --zeek-*-log paths (Sprint 5 A3).
-			if err := validateZeekLogPath(zeekSSLPath); err != nil {
-				return fmt.Errorf("invalid --zeek-ssl-log: %w", err)
-			}
-			if err := validateZeekLogPath(zeekX509Path); err != nil {
-				return fmt.Errorf("invalid --zeek-x509-log: %w", err)
-			}
-			// Validate --suricata-eve path (Sprint 6 null-byte guard).
-			if err := validateSuricataEvePath(suricataEvePath); err != nil {
-				return fmt.Errorf("invalid --suricata-eve: %w", err)
+			if err := validateNetworkInputs(ctLookupTargets, sshTargets, zeekSSLPath, zeekX509Path, suricataEvePath); err != nil {
+				return err
 			}
 
 			orch := buildOrchestrator()
@@ -590,18 +562,7 @@ Example with data lifetime adjustment for healthcare:
 			if len(selected) == 0 {
 				return fmt.Errorf("no scanner engines found — run 'oqs-scanner engines install --all' or ensure binaries are in PATH")
 			}
-			// Warn if only embedded engines are available (no source code scanning).
-			hasSourceEngine := false
-			for _, e := range selected {
-				if e.Name() != "config-scanner" && e.Name() != "binary-scanner" {
-					hasSourceEngine = true
-					break
-				}
-			}
-			if !hasSourceEngine {
-				fmt.Fprintf(os.Stderr, "WARNING: No source code engines available — only config and binary files will be scanned.\n")
-				fmt.Fprintf(os.Stderr, "  Install engines: oqs-scanner engines install --all\n\n")
-			}
+			warnIfNoSourceEngine(selected)
 
 			fmt.Fprintf(os.Stderr, "Scanning %s with %d engine(s)...\n", absPath, len(selected))
 			for _, e := range selected {
@@ -852,17 +813,11 @@ Example:
 			if targetPath == "" {
 				return fmt.Errorf("--path is required")
 			}
-			if dataLifetimeYears < 0 {
-				return fmt.Errorf("--data-lifetime-years must be a positive integer (got %d); set a value > 0 reflecting actual data retention (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default", dataLifetimeYears)
-			}
-			if cmd.Flags().Changed("data-lifetime-years") && dataLifetimeYears == 0 {
-				return fmt.Errorf("--data-lifetime-years 0 is not valid: no data has zero sensitivity in practice; set a positive value (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default")
+			if err := validateLifetimeAndProbeFlags(cmd, dataLifetimeYears, tlsDetectPref, tlsEnumGroups, tlsDeepProbe); err != nil {
+				return err
 			}
 			if diffBase == "" {
 				return fmt.Errorf("--base is required (e.g. main, origin/main, a commit SHA)")
-			}
-			if tlsDetectPref && !tlsEnumGroups && !tlsDeepProbe {
-				return fmt.Errorf("--detect-server-preference requires --enumerate-groups or --deep-probe to build the accepted-group list first")
 			}
 
 			absPath, err := filepath.Abs(targetPath)
@@ -962,30 +917,8 @@ Example:
 				return fmt.Errorf("--deep-probe requires --tls-targets (no TLS targets provided)")
 			}
 
-			// Validate --ct-lookup-targets before proceeding.
-			for _, h := range ctLookupTargets {
-				if err := ctlookup.ValidateHostname(h); err != nil {
-					return fmt.Errorf("invalid --ct-lookup-targets value %q: %w", h, err)
-				}
-			}
-
-			// Validate --ssh-targets: must be host:port with valid hostname/IP syntax.
-			for _, t := range sshTargets {
-				if err := validateSSHTarget(t); err != nil {
-					return fmt.Errorf("invalid --ssh-targets value %q: %w", t, err)
-				}
-			}
-
-			// Validate --zeek-*-log paths (Sprint 5 A3).
-			if err := validateZeekLogPath(zeekSSLPath); err != nil {
-				return fmt.Errorf("invalid --zeek-ssl-log: %w", err)
-			}
-			if err := validateZeekLogPath(zeekX509Path); err != nil {
-				return fmt.Errorf("invalid --zeek-x509-log: %w", err)
-			}
-			// Validate --suricata-eve path (Sprint 6 null-byte guard).
-			if err := validateSuricataEvePath(suricataEvePath); err != nil {
-				return fmt.Errorf("invalid --suricata-eve: %w", err)
+			if err := validateNetworkInputs(ctLookupTargets, sshTargets, zeekSSLPath, zeekX509Path, suricataEvePath); err != nil {
+				return err
 			}
 
 			opts := engines.ScanOptions{
@@ -1026,17 +959,7 @@ Example:
 				return fmt.Errorf("no scanner engines found — run 'oqs-scanner engines install --all' or ensure binaries are in PATH")
 			}
 
-			hasSourceEngine := false
-			for _, e := range selected {
-				if e.Name() != "config-scanner" && e.Name() != "binary-scanner" {
-					hasSourceEngine = true
-					break
-				}
-			}
-			if !hasSourceEngine {
-				fmt.Fprintf(os.Stderr, "WARNING: No source code engines available — only config and binary files will be scanned.\n")
-				fmt.Fprintf(os.Stderr, "  Install engines: oqs-scanner engines install --all\n\n")
-			}
+			warnIfNoSourceEngine(selected)
 
 			fmt.Fprintf(os.Stderr, "Running %d Tier 1 engine(s) on changed files...\n", len(selected))
 

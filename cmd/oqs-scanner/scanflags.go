@@ -1,6 +1,74 @@
 package main
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+
+	"github.com/jimbo111/open-quantum-secure/pkg/engines"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/ctlookup"
+)
+
+// validateLifetimeAndProbeFlags runs the shared validation prologue that
+// scanCmd and diffCmd both perform on data-lifetime + TLS probe flags.
+// dataLifetimeYears < 0 is rejected. An explicit --data-lifetime-years 0
+// (vs an unset flag) is also rejected — 0 has no defensible interpretation.
+// --detect-server-preference requires --enumerate-groups or --deep-probe so
+// there is an accepted-group list to test ordering against.
+func validateLifetimeAndProbeFlags(cmd *cobra.Command, dataLifetimeYears int, tlsDetectPref, tlsEnumGroups, tlsDeepProbe bool) error {
+	if dataLifetimeYears < 0 {
+		return fmt.Errorf("--data-lifetime-years must be a positive integer (got %d); set a value > 0 reflecting actual data retention (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default", dataLifetimeYears)
+	}
+	if cmd.Flags().Changed("data-lifetime-years") && dataLifetimeYears == 0 {
+		return fmt.Errorf("--data-lifetime-years 0 is not valid: no data has zero sensitivity in practice; set a positive value (e.g. --data-lifetime-years 10), or omit the flag to use --sector preset or the 10-year default")
+	}
+	if tlsDetectPref && !tlsEnumGroups && !tlsDeepProbe {
+		return fmt.Errorf("--detect-server-preference requires --enumerate-groups or --deep-probe to build the accepted-group list first")
+	}
+	return nil
+}
+
+// validateNetworkInputs runs the shared CT-lookup / SSH / Zeek / Suricata
+// input validation. Each input has its own validator (ValidateHostname,
+// validateSSHTarget, validateZeekLogPath, validateSuricataEvePath); this
+// helper is the canonical sequencing of those checks shared by scanCmd and
+// diffCmd.
+func validateNetworkInputs(ctLookupTargets, sshTargets []string, zeekSSLPath, zeekX509Path, suricataEvePath string) error {
+	for _, h := range ctLookupTargets {
+		if err := ctlookup.ValidateHostname(h); err != nil {
+			return fmt.Errorf("invalid --ct-lookup-targets value %q: %w", h, err)
+		}
+	}
+	for _, t := range sshTargets {
+		if err := validateSSHTarget(t); err != nil {
+			return fmt.Errorf("invalid --ssh-targets value %q: %w", t, err)
+		}
+	}
+	if err := validateZeekLogPath(zeekSSLPath); err != nil {
+		return fmt.Errorf("invalid --zeek-ssl-log: %w", err)
+	}
+	if err := validateZeekLogPath(zeekX509Path); err != nil {
+		return fmt.Errorf("invalid --zeek-x509-log: %w", err)
+	}
+	if err := validateSuricataEvePath(suricataEvePath); err != nil {
+		return fmt.Errorf("invalid --suricata-eve: %w", err)
+	}
+	return nil
+}
+
+// warnIfNoSourceEngine prints a stderr warning when only embedded engines
+// (config-scanner, binary-scanner) are available — without a source-code
+// engine the scan will miss most application-level crypto.
+func warnIfNoSourceEngine(selected []engines.Engine) {
+	for _, e := range selected {
+		if e.Name() != "config-scanner" && e.Name() != "binary-scanner" {
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "WARNING: No source code engines available — only config and binary files will be scanned.\n")
+	fmt.Fprintf(os.Stderr, "  Install engines: oqs-scanner engines install --all\n\n")
+}
 
 // networkProbeFlagVars holds pointers to the variables bound by
 // addNetworkProbeFlags. Both scanCmd and diffCmd declare these same
