@@ -191,33 +191,23 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 		}
 	}
 
-	// Add properties — sourceEngine/confidence/reachable always emitted;
-	// quantumRisk/severity/recommendation only when non-empty.
+	// Always-emitted properties.
 	props := map[string]any{
 		"sourceEngine": f.SourceEngine,
 		"confidence":   string(f.Confidence),
 		"reachable":    string(f.Reachable),
 	}
-	if f.QuantumRisk != "" {
-		props["quantumRisk"] = string(f.QuantumRisk)
-	}
-	if f.Severity != "" {
-		props["severity"] = string(f.Severity)
-	}
-	if f.Recommendation != "" {
-		props["recommendation"] = f.Recommendation
-	}
-	if f.HNDLRisk != "" {
-		props["hndlRisk"] = f.HNDLRisk
-	}
+	// Conditional annotations shared with CBOM. See pkg/output/annotations.go.
+	emitFindingAnnotations(f, func(a findingAnnotation) {
+		props[a.Name] = a.Value
+	})
+	// SARIF-specific annotations: artifactType, sourceType, target*,
+	// migrationSnippet — not emitted by the shared helper.
 	if f.Location.ArtifactType != "" {
 		props["artifactType"] = f.Location.ArtifactType
 	}
 	if f.SourceEngine == "config-scanner" {
 		props["sourceType"] = "config"
-	}
-	if f.MigrationEffort != "" {
-		props["migrationEffort"] = f.MigrationEffort
 	}
 	if f.TargetAlgorithm != "" {
 		props["targetAlgorithm"] = f.TargetAlgorithm
@@ -232,43 +222,6 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 			"after":       f.MigrationSnippet.After,
 			"explanation": f.MigrationSnippet.Explanation,
 		}
-	}
-	if f.NegotiatedGroupName != "" {
-		props["negotiatedGroupName"] = f.NegotiatedGroupName
-	}
-	if f.PQCPresent {
-		props["pqcPresent"] = true
-	}
-	if f.PQCMaturity != "" {
-		props["pqcMaturity"] = f.PQCMaturity
-	}
-	if f.PartialInventory {
-		props["partialInventory"] = true
-		if f.PartialInventoryReason != "" {
-			props["partialInventoryReason"] = f.PartialInventoryReason
-		}
-	}
-	if f.HandshakeVolumeClass != "" {
-		props["handshakeVolumeClass"] = f.HandshakeVolumeClass
-	}
-	if f.HandshakeBytes > 0 {
-		props["handshakeBytes"] = f.HandshakeBytes
-	}
-	// Sprint 8 group + sig-alg enumeration fields.
-	if len(f.SupportedGroups) > 0 {
-		props["supportedGroups"] = f.SupportedGroups
-	}
-	if len(f.SupportedSigAlgs) > 0 {
-		props["supportedSigAlgs"] = f.SupportedSigAlgs
-	}
-	if f.ServerPreferredGroup != 0 {
-		props["serverPreferredGroup"] = f.ServerPreferredGroup
-	}
-	if f.ServerPreferenceMode != "" {
-		props["serverPreferenceMode"] = f.ServerPreferenceMode
-	}
-	if f.EnumerationMode != "" {
-		props["enumerationMode"] = f.EnumerationMode
 	}
 	result.Properties = props
 

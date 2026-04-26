@@ -308,21 +308,15 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 	props = append(props, cdxProperty{Name: "oqs:source", Value: strings.Join(sources, "+")})
 	props = append(props, cdxProperty{Name: "oqs:reachable", Value: string(f.Reachable)})
 
-	if f.QuantumRisk != "" {
-		props = append(props, cdxProperty{Name: "oqs:policyVerdict", Value: string(f.QuantumRisk)})
-	}
-	if f.Severity != "" {
-		props = append(props, cdxProperty{Name: "oqs:severity", Value: string(f.Severity)})
-	}
-	if f.Recommendation != "" {
-		props = append(props, cdxProperty{Name: "oqs:recommendation", Value: f.Recommendation})
-	}
-	if f.HNDLRisk != "" {
-		props = append(props, cdxProperty{Name: "oqs:hndlRisk", Value: f.HNDLRisk})
-	}
-	if f.MigrationEffort != "" {
-		props = append(props, cdxProperty{Name: "oqs:migrationEffort", Value: f.MigrationEffort})
-	}
+	// Conditional annotations shared with SARIF. See pkg/output/annotations.go.
+	emitFindingAnnotations(f, func(a findingAnnotation) {
+		props = append(props, cdxPropertyFromAnnotation(a))
+	})
+
+	// CBOM-specific annotations: artifactType + detectionMethod, sourceType
+	// (config-scanner OR tls-probe), DataFlow* — not emitted by the shared
+	// helper because SARIF either omits them or surfaces them via different
+	// SARIF mechanisms (codeFlows for DataFlowPath).
 	if f.Location.ArtifactType != "" {
 		props = append(props, cdxProperty{Name: "oqs:artifactType", Value: f.Location.ArtifactType})
 		if f.SourceEngine == "tls-probe" {
@@ -336,49 +330,6 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 	}
 	if f.SourceEngine == "tls-probe" {
 		props = append(props, cdxProperty{Name: "oqs:sourceType", Value: "tls-endpoint"})
-	}
-	if f.NegotiatedGroupName != "" {
-		props = append(props, cdxProperty{Name: "oqs:negotiatedGroupName", Value: f.NegotiatedGroupName})
-	}
-	if f.PQCPresent {
-		props = append(props, cdxProperty{Name: "oqs:pqcPresent", Value: "true"})
-	}
-	if f.PQCMaturity != "" {
-		props = append(props, cdxProperty{Name: "oqs:pqcMaturity", Value: f.PQCMaturity})
-	}
-	if f.PartialInventory {
-		props = append(props, cdxProperty{Name: "oqs:partialInventory", Value: "true"})
-		if f.PartialInventoryReason != "" {
-			props = append(props, cdxProperty{Name: "oqs:partialInventoryReason", Value: f.PartialInventoryReason})
-		}
-	}
-	if f.HandshakeVolumeClass != "" {
-		props = append(props, cdxProperty{Name: "oqs:handshakeVolumeClass", Value: f.HandshakeVolumeClass})
-	}
-	if f.HandshakeBytes > 0 {
-		props = append(props, cdxProperty{Name: "oqs:handshakeBytes", Value: fmt.Sprintf("%d", f.HandshakeBytes)})
-	}
-	// Sprint 8 group + sig-alg enumeration properties.
-	if len(f.SupportedGroups) > 0 {
-		gJSON, err := json.Marshal(f.SupportedGroups)
-		if err == nil {
-			props = append(props, cdxProperty{Name: "oqs:supportedGroups", Value: string(gJSON)})
-		}
-	}
-	if len(f.SupportedSigAlgs) > 0 {
-		sJSON, err := json.Marshal(f.SupportedSigAlgs)
-		if err == nil {
-			props = append(props, cdxProperty{Name: "oqs:supportedSigAlgs", Value: string(sJSON)})
-		}
-	}
-	if f.ServerPreferredGroup != 0 {
-		props = append(props, cdxProperty{Name: "oqs:serverPreferredGroup", Value: fmt.Sprintf("0x%04x", f.ServerPreferredGroup)})
-	}
-	if f.ServerPreferenceMode != "" {
-		props = append(props, cdxProperty{Name: "oqs:serverPreferenceMode", Value: f.ServerPreferenceMode})
-	}
-	if f.EnumerationMode != "" {
-		props = append(props, cdxProperty{Name: "oqs:enumerationMode", Value: f.EnumerationMode})
 	}
 
 	if len(f.DataFlowPath) > 0 {
