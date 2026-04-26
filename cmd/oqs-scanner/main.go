@@ -764,34 +764,28 @@ Industry guidelines: medical=30, state=50, infra=20, finance=7, code=5, generic=
 Values >10 amplify QRS penalties, <5 reduce them. Must be > 0 if explicitly set.
 Overrides --sector when both are provided.`)
 
-	// TLS probe flags
-	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
-	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
-	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
-	cmd.Flags().BoolVar(&tlsDeepProbe, "deep-probe", false, "After TLS handshake, probe PQC group codepoints via raw ClientHellos (Sprint 7; requires --tls-targets)")
-	cmd.Flags().BoolVar(&tlsEnumGroups, "enumerate-groups", false, "Probe all 13 TLS SupportedGroup codepoints individually to build a full acceptance list (Sprint 8; requires --tls-targets; implies --deep-probe level of detail)")
-	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
-	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets and --enumerate-groups or --deep-probe)")
-	cmd.Flags().IntVar(&tlsMaxProbes, "max-probes-per-target", 0, "Max TCP connections per TLS target across all probe passes (0 = default 30; set higher to allow exhaustive enumeration)")
-	cmd.Flags().BoolVar(&skipTLS12Fallback, "skip-tls12-fallback", false, "Skip the TLS 1.2 fallback probe for PQC-capable targets (Sprint 9; by default the probe runs to detect downgrade vulnerability)")
-	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable detailed progress logging to stderr (enum pass results, etc.)")
-
-	// CT log lookup flags (Sprint 3)
-	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
-	cmd.Flags().BoolVar(&ctLookupFromECH, "ct-lookup-from-ech", false, "Auto-query CT logs for ECH-enabled findings detected by the TLS probe")
-	cmd.Flags().BoolVar(&noNetwork, "no-network", false, "Disable all outbound network calls (TLS probe + CT lookup)")
-	cmd.Flags().BoolVar(&noNetwork, "offline", false, "Disable all outbound network calls (alias for --no-network)")
-
-	// SSH probe flags (Sprint 4)
-	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
-	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
-
-	// Zeek log ingestion flags (Sprint 5)
-	cmd.Flags().StringVar(&zeekSSLPath, "zeek-ssl-log", "", "Path to Zeek ssl.log (TSV, JSON, or .gz) for passive TLS PQC inventory")
-	cmd.Flags().StringVar(&zeekX509Path, "zeek-x509-log", "", "Path to Zeek x509.log (TSV, JSON, or .gz) for passive certificate PQC inventory")
-
-	// Suricata log ingestion flags (Sprint 6)
-	cmd.Flags().StringVar(&suricataEvePath, "suricata-eve", "", "Path to Suricata eve.json (plain or .gz) for passive TLS PQC inventory")
+	// Network engine probe flags (TLS + CT + SSH + Zeek + Suricata).
+	// See cmd/oqs-scanner/scanflags.go for the canonical definitions.
+	addNetworkProbeFlags(cmd, networkProbeFlagVars{
+		TLSTargets:        &tlsTargets,
+		TLSInsecure:       &tlsInsecure,
+		TLSStrict:         &tlsStrict,
+		TLSDeepProbe:      &tlsDeepProbe,
+		TLSEnumGroups:     &tlsEnumGroups,
+		TLSEnumSigAlgs:    &tlsEnumSigAlgs,
+		TLSDetectPref:     &tlsDetectPref,
+		TLSMaxProbes:      &tlsMaxProbes,
+		SkipTLS12Fallback: &skipTLS12Fallback,
+		Verbose:           &verbose,
+		CTLookupTargets:   &ctLookupTargets,
+		CTLookupFromECH:   &ctLookupFromECH,
+		NoNetwork:         &noNetwork,
+		SSHTargets:        &sshTargets,
+		SSHStrict:         &sshStrict,
+		ZeekSSLPath:       &zeekSSLPath,
+		ZeekX509Path:      &zeekX509Path,
+		SuricataEvePath:   &suricataEvePath,
+	})
 
 	// HNDL Mosca sector preset flag
 	cmd.Flags().StringVar(&sector, "sector", "",
@@ -1169,34 +1163,28 @@ Industry guidelines: healthcare/medical=30, government/classified=25,
 financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 0 = disabled (default). Values >10 amplify penalties, <5 reduce them.`)
 
-	// TLS probe flags (same as scan command)
-	cmd.Flags().StringSliceVar(&tlsTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
-	cmd.Flags().BoolVar(&tlsInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
-	cmd.Flags().BoolVar(&tlsStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
-	cmd.Flags().BoolVar(&tlsDeepProbe, "deep-probe", false, "After TLS handshake, probe PQC group codepoints via raw ClientHellos (Sprint 7; requires --tls-targets)")
-	cmd.Flags().BoolVar(&tlsEnumGroups, "enumerate-groups", false, "Probe all 13 TLS SupportedGroup codepoints individually to build a full acceptance list (Sprint 8; requires --tls-targets)")
-	cmd.Flags().BoolVar(&tlsEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")
-	cmd.Flags().BoolVar(&tlsDetectPref, "detect-server-preference", false, "Offer all accepted groups simultaneously to detect the server's preferred group (Sprint 8; requires --tls-targets)")
-	cmd.Flags().IntVar(&tlsMaxProbes, "max-probes-per-target", 0, "Max TCP connections per TLS target across all probe passes (0 = default 30; set higher to allow exhaustive enumeration)")
-	cmd.Flags().BoolVar(&skipTLS12Fallback, "skip-tls12-fallback", false, "Skip the TLS 1.2 fallback probe for PQC-capable targets (Sprint 9; by default the probe runs to detect downgrade vulnerability)")
-	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable detailed progress logging to stderr (enum pass results, etc.)")
-
-	// CT log lookup flags (Sprint 3)
-	cmd.Flags().StringSliceVar(&ctLookupTargets, "ct-lookup-targets", nil, "Hostnames to query CT logs for cert algorithm discovery (comma-separated)")
-	cmd.Flags().BoolVar(&ctLookupFromECH, "ct-lookup-from-ech", false, "Auto-query CT logs for ECH-enabled findings detected by the TLS probe")
-	cmd.Flags().BoolVar(&noNetwork, "no-network", false, "Disable all outbound network calls (TLS probe + CT lookup)")
-	cmd.Flags().BoolVar(&noNetwork, "offline", false, "Disable all outbound network calls (alias for --no-network)")
-
-	// SSH probe flags (Sprint 4)
-	cmd.Flags().StringSliceVar(&sshTargets, "ssh-targets", nil, "SSH endpoints to probe for quantum-vulnerable KEX methods (comma-separated host:port)")
-	cmd.Flags().BoolVar(&sshStrict, "ssh-strict", false, "Deny SSH probe connections to private/loopback IPs (SSRF guard; analogous to --tls-strict)")
-
-	// Zeek log ingestion flags (Sprint 5)
-	cmd.Flags().StringVar(&zeekSSLPath, "zeek-ssl-log", "", "Path to Zeek ssl.log (TSV, JSON, or .gz) for passive TLS PQC inventory")
-	cmd.Flags().StringVar(&zeekX509Path, "zeek-x509-log", "", "Path to Zeek x509.log (TSV, JSON, or .gz) for passive certificate PQC inventory")
-
-	// Suricata log ingestion flags (Sprint 6)
-	cmd.Flags().StringVar(&suricataEvePath, "suricata-eve", "", "Path to Suricata eve.json (plain or .gz) for passive TLS PQC inventory")
+	// Network engine probe flags (TLS + CT + SSH + Zeek + Suricata).
+	// See cmd/oqs-scanner/scanflags.go for the canonical definitions.
+	addNetworkProbeFlags(cmd, networkProbeFlagVars{
+		TLSTargets:        &tlsTargets,
+		TLSInsecure:       &tlsInsecure,
+		TLSStrict:         &tlsStrict,
+		TLSDeepProbe:      &tlsDeepProbe,
+		TLSEnumGroups:     &tlsEnumGroups,
+		TLSEnumSigAlgs:    &tlsEnumSigAlgs,
+		TLSDetectPref:     &tlsDetectPref,
+		TLSMaxProbes:      &tlsMaxProbes,
+		SkipTLS12Fallback: &skipTLS12Fallback,
+		Verbose:           &verbose,
+		CTLookupTargets:   &ctLookupTargets,
+		CTLookupFromECH:   &ctLookupFromECH,
+		NoNetwork:         &noNetwork,
+		SSHTargets:        &sshTargets,
+		SSHStrict:         &sshStrict,
+		ZeekSSLPath:       &zeekSSLPath,
+		ZeekX509Path:      &zeekX509Path,
+		SuricataEvePath:   &suricataEvePath,
+	})
 
 	return cmd
 }
