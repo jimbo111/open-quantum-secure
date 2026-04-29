@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 )
@@ -700,25 +701,35 @@ func TestF9_Table_LongAndWideNames(t *testing.T) {
 	}
 }
 
-// TestF9b_Table_TruncateMultibyte is a regression for the `truncate` helper —
-// it slices on byte boundaries, which splits multibyte UTF-8 runes in half.
-// A finding whose algorithm name is near-but-over the column cap containing
-// multibyte characters will emit invalid UTF-8. This is a cosmetic (low)
-// issue that the audit report records.
+// TestF9b_Table_TruncateMultibyte exercises the `truncate` helper's handling
+// of multibyte UTF-8 sequences at the truncation boundary. Earlier versions
+// sliced on byte boundaries, which split multi-byte runes and emitted invalid
+// UTF-8 in the table writer. truncate is now rune-aware (uses utf8.RuneCount
+// + a []rune slice), so any input must yield valid UTF-8 regardless of the
+// byte-boundary alignment.
 func TestF9b_Table_TruncateMultibyte(t *testing.T) {
-	// nameW in table.go = 28. Build a string > 28 bytes where byte 28 lands
-	// inside a multibyte rune.
-	// "x" x 27 = 27 bytes, then a 3-byte char => byte 28 is middle of rune.
-	s := strings.Repeat("x", 27) + "中word"
-	got := truncate(s, 28)
-	// The ellipsis path takes maxLen-1 = 27 bytes and appends "…" (3 bytes),
-	// so truncate(s, 28) = first 27 "x" + "…" which is valid UTF-8 here —
-	// but a shifted repeat triggers the bad case.
-	s2 := strings.Repeat("x", 28) + "中word" // 28 x's then multibyte
-	got2 := truncate(s2, 29)                 // maxLen-1=28 → cuts first "x" + first byte of 中
-	_ = got
-	if !isValidUTF8(got2) {
-		t.Logf("DOCUMENTED: truncate() cuts on byte boundary and can produce invalid UTF-8 (%q) — cosmetic", got2)
+	cases := []struct {
+		name string
+		s    string
+		max  int
+	}{
+		{"27x_then_multibyte_at_28", strings.Repeat("x", 27) + "中word", 28},
+		{"28x_then_multibyte_at_29", strings.Repeat("x", 28) + "中word", 29},
+		{"all_korean", strings.Repeat("한", 50), 28},
+		{"emoji_boundary", strings.Repeat("a", 27) + "🚀tail", 29},
+		{"single_rune_max", "한", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncate(tc.s, tc.max)
+			if !isValidUTF8(got) {
+				t.Fatalf("truncate(%q, %d) = %q — invalid UTF-8 / replacement char emitted", tc.s, tc.max, got)
+			}
+			// Visible width must be at most maxLen runes.
+			if rc := utf8.RuneCountInString(got); rc > tc.max {
+				t.Errorf("truncate(%q, %d) returned %d runes, want ≤ %d", tc.s, tc.max, rc, tc.max)
+			}
+		})
 	}
 }
 

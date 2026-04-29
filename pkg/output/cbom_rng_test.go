@@ -5,23 +5,26 @@ import (
 )
 
 // TestMapToCDXPrimitive_RNG verifies that the "rng" primitive family maps to
-// "other" in CycloneDX 1.7 output. CycloneDX 1.7 has no native "rng" primitive
-// in its taxonomy, so all rng/prng/csprng/random variants fall back to "other".
+// the CycloneDX 1.7 dedicated "drbg" primitive. Earlier versions of this code
+// returned "other" because the prior CycloneDX revision had no RNG-specific
+// value, but CycloneDX 1.7 added "drbg" to algorithmProperties.primitive's
+// enum. Strict schema validators reject "other" when "drbg" is appropriate.
 func TestMapToCDXPrimitive_RNG(t *testing.T) {
 	cases := []struct {
 		input string
 		want  string
 	}{
-		// All RNG aliases must map to "other"
-		{"rng", "other"},
-		{"RNG", "other"},
-		{"prng", "other"},
-		{"PRNG", "other"},
-		{"csprng", "other"},
-		{"CSPRNG", "other"},
-		{"random", "other"},
-		{"RANDOM", "other"},
-		// Existing mappings must remain unaffected
+		// All RNG aliases must map to "drbg" (CycloneDX 1.7 enum value).
+		{"rng", "drbg"},
+		{"RNG", "drbg"},
+		{"prng", "drbg"},
+		{"PRNG", "drbg"},
+		{"csprng", "drbg"},
+		{"CSPRNG", "drbg"},
+		{"random", "drbg"},
+		{"RANDOM", "drbg"},
+		{"drbg", "drbg"}, // explicit drbg passes through.
+		// Existing mappings must remain unaffected.
 		{"hash", "hash"},
 		{"kem", "kem"},
 		{"symmetric", "block-cipher"},

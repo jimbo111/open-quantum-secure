@@ -289,14 +289,14 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 	algProps := &cdxAlgorithmProps{
 		Primitive:            mapToCDXPrimitive(alg.Primitive),
 		AlgorithmFamily:      extractFamily(alg.Name),
-		ExecutionEnvironment: "software",
+		ExecutionEnvironment: "software-plain-ram",
 	}
 
 	if alg.KeySize > 0 {
 		algProps.ParameterSetIdentifier = fmt.Sprintf("%d", alg.KeySize)
 	}
 	if alg.Mode != "" {
-		algProps.Mode = strings.ToLower(alg.Mode)
+		algProps.Mode = mapToCDXMode(alg.Mode)
 	}
 	if alg.Curve != "" {
 		algProps.Curve = alg.Curve
@@ -374,6 +374,14 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 }
 
 // buildDependencyComponent creates a CycloneDX component for a library dependency.
+//
+// Per CycloneDX 1.7 §cryptoProperties, assetType is restricted to the enum
+// {algorithm, certificate, protocol, related-crypto-material}. A dependency
+// is a library — not a cryptographic asset — so we emit it as
+// component.type "library" (a top-level component-type enum value) and omit
+// cryptoProperties entirely. The library's relationship to crypto algorithms
+// is preserved via the dependency graph (buildCBOMDependencies) and the
+// "oqs:source"/"oqs:policyVerdict"/etc. component-level properties below.
 func buildDependencyComponent(f findings.UnifiedFinding, scanTarget string) cdxComponent {
 	dep := f.Dependency
 	bomRef := generateBOMRef("lib", dep.Library, 0, "")
@@ -407,12 +415,9 @@ func buildDependencyComponent(f findings.UnifiedFinding, scanTarget string) cdxC
 	}
 
 	return cdxComponent{
-		Type:   "cryptographic-asset",
+		Type:   "library",
 		BOMRef: bomRef,
 		Name:   dep.Library,
-		CryptoProperties: &cdxCryptoProps{
-			AssetType: "library",
-		},
 		Evidence: &cdxEvidence{
 			Occurrences: []cdxOccurrence{occ},
 		},
@@ -468,7 +473,14 @@ func algorithmGroupKey(f findings.UnifiedFinding) string {
 	return fmt.Sprintf("%s|%d|%s|%s", a.Name, a.KeySize, a.Mode, a.Curve)
 }
 
-// mapToCDXPrimitive maps our primitive names to CycloneDX 1.7 primitive taxonomy.
+// mapToCDXPrimitive maps our primitive names to the CycloneDX 1.7
+// algorithmProperties.primitive enum. The schema strictly enforces the enum
+// (additionalProperties: false → unrecognised values fail validation), so
+// any value we don't recognise falls back to "unknown".
+//
+// CycloneDX 1.7 enum (per bom-1.7.schema.json):
+//   drbg, mac, block-cipher, stream-cipher, signature, hash, pke, xof, kdf,
+//   key-agree, kem, ae, combiner, key-wrap, other, unknown.
 func mapToCDXPrimitive(primitive string) string {
 	switch strings.ToLower(primitive) {
 	case "symmetric", "block-cipher":
@@ -493,11 +505,44 @@ func mapToCDXPrimitive(primitive string) string {
 		return "kem"
 	case "xof":
 		return "xof"
-	case "rng", "random", "prng", "csprng":
-		return "other"
+	case "rng", "random", "prng", "csprng", "drbg":
+		// CycloneDX 1.7 has a dedicated "drbg" primitive; older mappings used
+		// "other" but drbg is the schema-correct value for deterministic RNGs.
+		return "drbg"
+	case "key-wrap", "kw":
+		return "key-wrap"
+	case "combiner":
+		return "combiner"
+	case "":
+		return "unknown"
 	default:
-		return primitive
+		return "unknown"
 	}
+}
+
+// cdxModeEnum is the CycloneDX 1.7 algorithmProperties.mode enum. Anything
+// outside this set fails schema validation, so unrecognised modes coming
+// from an engine fall back to "other".
+var cdxModeEnum = map[string]struct{}{
+	"cbc":     {},
+	"ecb":     {},
+	"ccm":     {},
+	"gcm":     {},
+	"cfb":     {},
+	"ofb":     {},
+	"ctr":     {},
+	"other":   {},
+	"unknown": {},
+}
+
+// mapToCDXMode normalises a mode-of-operation string to the CycloneDX 1.7
+// algorithmProperties.mode enum. Unknown values map to "other".
+func mapToCDXMode(mode string) string {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	if _, ok := cdxModeEnum[m]; ok {
+		return m
+	}
+	return "other"
 }
 
 // extractFamily returns the algorithm family from a full algorithm name.

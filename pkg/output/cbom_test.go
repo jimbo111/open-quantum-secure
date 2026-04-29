@@ -225,8 +225,11 @@ func TestWriteCBOM_AlgorithmFindings(t *testing.T) {
 	if algProps.Mode != "gcm" {
 		t.Errorf("mode = %q, want gcm (lowercased)", algProps.Mode)
 	}
-	if algProps.ExecutionEnvironment != "software" {
-		t.Errorf("executionEnvironment = %q, want software", algProps.ExecutionEnvironment)
+	// CycloneDX 1.7 algorithmProperties.executionEnvironment enum requires one
+	// of: software-plain-ram | software-encrypted-ram | software-tee | hardware
+	// | other | unknown. The bare value "software" is not valid.
+	if algProps.ExecutionEnvironment != "software-plain-ram" {
+		t.Errorf("executionEnvironment = %q, want software-plain-ram", algProps.ExecutionEnvironment)
 	}
 
 	// Evidence must have occurrences
@@ -304,18 +307,16 @@ func TestWriteCBOM_DependencyFindings(t *testing.T) {
 	if tlsComp == nil {
 		t.Fatalf("crypto/tls component not found; components: %v", componentNames(bom.Components))
 	}
-	if tlsComp.Type != "cryptographic-asset" {
-		t.Errorf("dep component type = %q, want cryptographic-asset", tlsComp.Type)
+	// Library dependencies use the top-level component.type "library"
+	// (CycloneDX 1.7 component.type enum). They are NOT cryptographic-asset
+	// components — assetType's enum is restricted to algorithm/certificate/
+	// protocol/related-crypto-material, so "library" is not a valid assetType.
+	if tlsComp.Type != "library" {
+		t.Errorf("dep component type = %q, want library", tlsComp.Type)
 	}
-	if tlsComp.CryptoProperties == nil {
-		t.Fatal("dep component cryptoProperties is nil")
-	}
-	if tlsComp.CryptoProperties.AssetType != "library" {
-		t.Errorf("dep assetType = %q, want library", tlsComp.CryptoProperties.AssetType)
-	}
-	// AlgorithmProperties should NOT be set for library assets
-	if tlsComp.CryptoProperties.AlgorithmProperties != nil {
-		t.Error("dep component should not have algorithmProperties")
+	if tlsComp.CryptoProperties != nil {
+		t.Errorf("library component must not have cryptoProperties; got assetType=%q",
+			tlsComp.CryptoProperties.AssetType)
 	}
 
 	// Evidence with occurrence
@@ -374,17 +375,19 @@ func TestWriteCBOM_MixedFindings(t *testing.T) {
 		t.Errorf("components len = %d, want 3", len(bom.Components))
 	}
 
-	// Algorithm components appear before dependency components in output
+	// Algorithm components appear before dependency components in output.
+	// Algorithm components are component.type "cryptographic-asset" with
+	// cryptoProperties.assetType "algorithm"; dependency components are
+	// component.type "library" with no cryptoProperties (CycloneDX 1.7).
 	algCount := 0
 	libCount := 0
 	for _, c := range bom.Components {
-		if c.CryptoProperties != nil {
-			switch c.CryptoProperties.AssetType {
-			case "algorithm":
-				algCount++
-			case "library":
-				libCount++
-			}
+		if c.Type == "library" {
+			libCount++
+			continue
+		}
+		if c.CryptoProperties != nil && c.CryptoProperties.AssetType == "algorithm" {
+			algCount++
 		}
 	}
 	if algCount != 2 {
@@ -650,9 +653,13 @@ func TestMapToCDXPrimitive_AllMappings(t *testing.T) {
 		// xof
 		{"xof", "xof"},
 		{"XOF", "xof"},
-		// unknown/passthrough
-		{"custom-primitive", "custom-primitive"},
-		{"", ""},
+		// CycloneDX 1.7 enforces a strict primitive enum (additionalProperties:
+		// false on cryptoProperties.algorithmProperties). Anything outside the
+		// enum fails schema validation, so unrecognised inputs MUST normalise
+		// to "unknown" — the schema-defined fallback for unidentified
+		// primitives — rather than passing through.
+		{"custom-primitive", "unknown"},
+		{"", "unknown"},
 	}
 
 	for _, tt := range tests {
@@ -1299,14 +1306,16 @@ func TestWriteCBOM_LibraryHasNoAlgorithmProperties(t *testing.T) {
 	}
 
 	comp := bom.Components[0]
-	if comp.CryptoProperties == nil {
-		t.Fatal("library component cryptoProperties is nil")
+	// Library dependencies are component.type "library" per CycloneDX 1.7
+	// (top-level component-type enum). cryptoProperties applies only to
+	// cryptographic-asset components (algorithm/certificate/protocol/
+	// related-crypto-material), so a library has none.
+	if comp.Type != "library" {
+		t.Errorf("component.type = %q, want library", comp.Type)
 	}
-	if comp.CryptoProperties.AssetType != "library" {
-		t.Errorf("assetType = %q, want library", comp.CryptoProperties.AssetType)
-	}
-	if comp.CryptoProperties.AlgorithmProperties != nil {
-		t.Error("library component must not have algorithmProperties")
+	if comp.CryptoProperties != nil {
+		t.Errorf("library component must not have cryptoProperties; got assetType=%q",
+			comp.CryptoProperties.AssetType)
 	}
 }
 
@@ -1413,7 +1422,10 @@ func TestCBOM_DependencyComponent_FullPropertyParity(t *testing.T) {
 
 	var depComp *cdxComponent
 	for i := range bom.Components {
-		if bom.Components[i].CryptoProperties != nil && bom.Components[i].CryptoProperties.AssetType == "library" {
+		// CycloneDX 1.7: dependency findings are component.type "library"
+		// (no cryptoProperties). cryptoProperties.assetType is restricted to
+		// algorithm/certificate/protocol/related-crypto-material.
+		if bom.Components[i].Type == "library" {
 			depComp = &bom.Components[i]
 			break
 		}

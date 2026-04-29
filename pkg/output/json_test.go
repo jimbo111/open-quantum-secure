@@ -113,6 +113,33 @@ func TestBuildResult_NilFindingsProducesEmptyArray(t *testing.T) {
 	}
 }
 
+// TestBuildResult_NilEnginesProducesEmptyArray is the engines analogue of
+// the nil-findings regression: when no engines are passed, the JSON must emit
+// "engines": [] instead of "engines": null. The ScanResult.Engines field has
+// no omitempty tag, so the field is always present — we only need its value
+// to be a (possibly empty) JSON array, not null. Consumers that type-check
+// the field as `string[]` will choke on null.
+func TestBuildResult_NilEnginesProducesEmptyArray(t *testing.T) {
+	result := BuildResult("0.1.0", "/test", nil, nil)
+
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, result); err != nil {
+		t.Fatalf("WriteJSON error: %v", err)
+	}
+
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	enginesRaw, ok := parsed["engines"]
+	if !ok {
+		t.Fatal("missing 'engines' key in JSON output")
+	}
+	if string(enginesRaw) != "[]" {
+		t.Errorf("engines = %s, want []", string(enginesRaw))
+	}
+}
+
 func TestBuildResult_WithImpactResult_FieldPresent(t *testing.T) {
 	impactResult := &impact.Result{
 		ImpactZones: []impact.ImpactZone{

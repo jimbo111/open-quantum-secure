@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
 
 var useColor = os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
@@ -223,11 +224,24 @@ func WriteTable(w io.Writer, result ScanResult) error {
 	return nil
 }
 
+// truncate clips s so the visible width is at most maxLen runes, appending
+// an ellipsis when truncation occurs. Width is measured in runes — not bytes
+// — so multi-byte input (Korean filenames, accented identifiers) is never
+// cut mid-rune. A naive byte slice was producing invalid UTF-8 in the table
+// output for non-ASCII paths.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-1] + "…"
+	// Reserve one rune for the ellipsis.
+	runes := []rune(s)
+	if maxLen == 1 {
+		return "…"
+	}
+	return string(runes[:maxLen-1]) + "…"
 }
 
 func riskBadge(risk string) string {
@@ -259,13 +273,16 @@ func effortBadge(effort string) string {
 	return ""
 }
 
+// shortenPath returns a short rendering of path that fits within maxLen runes.
+// Width is measured in runes (not bytes) so non-ASCII filenames render
+// correctly and never split a multi-byte UTF-8 sequence.
 func shortenPath(path string, maxLen int) string {
-	if len(path) <= maxLen {
+	if utf8.RuneCountInString(path) <= maxLen {
 		return path
 	}
-	// Show just filename or last two components
+	// Show just filename or last two components.
 	short := filepath.Join("…", filepath.Base(filepath.Dir(path)), filepath.Base(path))
-	if len(short) > maxLen {
+	if utf8.RuneCountInString(short) > maxLen {
 		short = filepath.Base(path)
 	}
 	return truncate(short, maxLen)

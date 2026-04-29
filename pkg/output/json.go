@@ -62,6 +62,13 @@ func BuildResult(version, target string, engineNames []string, f []findings.Unif
 	if f == nil {
 		f = []findings.UnifiedFinding{}
 	}
+	// Normalise engineNames so JSON emits "engines": [] instead of "engines": null
+	// when no engines ran. Consumers that type-check the field as an array would
+	// otherwise reject the payload (the JSON struct tag is `engines` without
+	// omitempty, so the field is always present — only its value needs guarding).
+	if engineNames == nil {
+		engineNames = []string{}
+	}
 	algCount := 0
 	depCount := 0
 	corrCount := 0
