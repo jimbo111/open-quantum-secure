@@ -11,6 +11,14 @@ package cdxgen
 //  2. Explicit "no output" error on exit=0 with empty output (regression guard).
 //  3. Non-zero exit with valid output is tolerated (regression guard).
 //  4. Stderr with embedded secret is redacted (regression guard).
+//
+// These tests deliberately do NOT call t.Parallel(): each writes a fake binary
+// via os.WriteFile then exec's it, and on Linux a concurrent goroutine forking
+// between the WriteFile open() and close() can leak the write fd into the
+// child, causing the kernel to refuse our exec with ETXTBSY ("text file busy").
+// O_CLOEXEC does not help — the leak window is between fork() and execve() in
+// the racing child. Serializing within this package closes the window without
+// affecting parallelism across packages. See golang/go#22315.
 
 import (
 	"context"
@@ -33,7 +41,6 @@ func TestSophisticated_CdxgenWaitDelay_PipeHangBoundedByCancellation(t *testing.
 	if runtime.GOOS == "windows" {
 		t.Skip("pipe-hang test relies on POSIX fork/exec semantics")
 	}
-	t.Parallel()
 
 	// The script forks a grand-child that inherits the stderr pipe and sleeps.
 	// Without WaitDelay, cmd.Wait() would block until the grand-child exits.
@@ -73,7 +80,6 @@ func TestSophisticated_CdxgenExitZeroEmptyOutputIsExplicitError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
 	}
-	t.Parallel()
 	// Script exits 0 but never writes to the output file.
 	bin := writeFakeBin(t, "cdxgen", `exit 0`)
 	e := &Engine{binaryPath: bin}
@@ -96,7 +102,6 @@ func TestSophisticated_CdxgenNonZeroExitWithValidOutputTolerated(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
 	}
-	t.Parallel()
 	body := `
 target=""
 while [ $# -gt 0 ]; do
@@ -130,7 +135,6 @@ func TestSophisticated_CdxgenStderrSecretRedactedOnNonZeroExitNoOutput(t *testin
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
 	}
-	t.Parallel()
 	secret := "super-secret-value-9999"
 	body := `echo "STRIPE_SECRET_KEY=` + secret + `" 1>&2
 exit 3`
@@ -159,7 +163,6 @@ func TestSophisticated_CdxgenStderrFloodBoundedTo512(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows")
 	}
-	t.Parallel()
 	// Print 10 000 chars of 'x' to stderr, exit non-zero, write no output.
 	body := `python3 -c "import sys; sys.stderr.write('x'*10000)" 2>&2 || printf '%10000s' '' 1>&2
 exit 1`
