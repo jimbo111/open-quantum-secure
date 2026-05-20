@@ -304,33 +304,10 @@ func TestEngineMetadata(t *testing.T) {
 	}
 }
 
-func TestEmbeddedRulesExtract(t *testing.T) {
-	dir, cleanup, err := extractEmbeddedRules()
-	if err != nil {
-		t.Fatalf("extractEmbeddedRules: %v", err)
-	}
-	defer cleanup()
-
-	if dir == "" {
-		t.Fatal("extractEmbeddedRules returned empty dir")
-	}
-
-	// Expect at least one .yml file in the temp dir.
-	entries, err := readDir(dir)
-	if err != nil {
-		t.Fatalf("read temp dir: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Error("extractEmbeddedRules: no rule files written")
-	}
-	for _, name := range entries {
-		if !hasYMLSuffix(name) {
-			t.Errorf("unexpected file in rules dir: %s", name)
-		}
-	}
-}
-
 // readDir lists file names in a directory using os.ReadDir.
+// Retained for use by other tests; the legacy TestEmbeddedRulesExtract
+// covered the dir-extract path, but extractEmbeddedRules was replaced with
+// concatEmbeddedRules → see rules_transform_test.go for the new coverage.
 func readDir(path string) ([]string, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {

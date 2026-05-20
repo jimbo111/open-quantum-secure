@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -96,9 +97,16 @@ func downloadOne(ctx context.Context, info EngineInfo, entry ManifestEngine, opt
 		return result
 	}
 
-	// Skip if already exists and not forced.
+	// Skip if already exists and not forced. Also skip if the binary is on PATH
+	// (e.g. installed via brew/apt/pip) — Engine.Available() would resolve it via
+	// FindBinary, so a download attempt to releases.oqs.dev would just fail with
+	// a network error for an engine the scanner already considers usable.
 	if !opts.Force {
 		if _, err := os.Lstat(destPath); err == nil {
+			result.Skipped = true
+			return result
+		}
+		if _, err := exec.LookPath(binaryName); err == nil {
 			result.Skipped = true
 			return result
 		}

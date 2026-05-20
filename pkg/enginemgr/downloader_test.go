@@ -163,6 +163,44 @@ func TestDownloadOne_AlreadyExists_Skip(t *testing.T) {
 	}
 }
 
+// TestDownloadOne_OnPath_Skip covers the case where the binary is already
+// installed via a system package manager (brew/apt/pip) and exposed on PATH
+// — the download must be skipped because Engine.Available() will resolve to
+// that PATH binary anyway, so attempting to fetch from releases.oqs.dev would
+// just produce a confusing network error for a working engine.
+func TestDownloadOne_OnPath_Skip(t *testing.T) {
+	dir := t.TempDir()
+	// Create a dummy "binary" in a tempdir we prepend to PATH. Don't put it in
+	// InstallDir — that would trigger the existing destPath skip and we want
+	// to exercise the new exec.LookPath branch specifically.
+	pathDir := t.TempDir()
+	binName := "fake-engine-on-path"
+	binPath := filepath.Join(pathDir, binName)
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write fake bin: %v", err)
+	}
+	t.Setenv("PATH", pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	info := EngineInfo{Name: binName, BinaryName: binName}
+	entry := ManifestEngine{
+		Version:           "1.0.0",
+		DownloadSupported: true,
+		Platforms: map[string]ManifestPlatform{
+			PlatformKey(): {URL: "https://should-not-be-called.example.com/", SHA256: "abc"},
+		},
+	}
+
+	result := downloadOne(context.Background(), info, entry, DownloadOptions{
+		InstallDir: dir,
+	})
+	if result.Err != nil {
+		t.Fatalf("downloadOne: %v", result.Err)
+	}
+	if !result.Skipped {
+		t.Error("expected Skipped=true when binary is on PATH")
+	}
+}
+
 func TestDownloadOne_Force_Reinstall(t *testing.T) {
 	body := []byte("new-binary-content")
 	hash := sha256.Sum256(body)
@@ -406,6 +444,11 @@ func TestDownloadOne_BinaryOverride(t *testing.T) {
 		w.Write(body)
 	}))
 	defer ts.Close()
+
+	// Empty PATH so the new "skip if binary already on PATH" check doesn't
+	// short-circuit the download when a real ast-grep happens to be installed
+	// on the host running the test (e.g. via brew).
+	t.Setenv("PATH", "")
 
 	dir := t.TempDir()
 	info := EngineInfo{Name: "astgrep", BinaryName: "ast-grep-original"}

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 )
@@ -55,7 +57,10 @@ type Engine struct {
 	rulesDir   string // external rules dir, empty = use embedded
 }
 
-// New creates an ast-grep engine, searching for the binary and rules in known locations.
+// New creates an ast-grep engine, searching for the binary and rules in known
+// locations. ast-grep's `-r` flag accepts a single file (not a directory), so
+// rules from the embedded set or an external rules dir are flattened into one
+// multi-doc YAML file before invocation. See resolveRulesFile.
 func New(engineDirs ...string) *Engine {
 	e := &Engine{}
 	e.binaryPath = e.findBinary(engineDirs)
@@ -80,7 +85,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		return nil, fmt.Errorf("ast-grep binary not found")
 	}
 
-	rulesDir, tmpCleanup, err := e.resolveRulesDir()
+	rulesFile, tmpCleanup, err := e.resolveRulesFile()
 	if err != nil {
 		return nil, fmt.Errorf("astgrep rules: %w", err)
 	}
@@ -89,8 +94,8 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	}
 
 	args := []string{"scan", opts.TargetPath, "--json"}
-	if rulesDir != "" {
-		args = append(args, "--rule", rulesDir)
+	if rulesFile != "" {
+		args = append(args, "--rule", rulesFile)
 	}
 
 	var stderr bytes.Buffer
@@ -132,50 +137,129 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	return result, nil
 }
 
-// resolveRulesDir returns the directory of YAML rules to pass to ast-grep.
-// If an external rules dir was found at construction time, it is used directly.
-// Otherwise the embedded rules are extracted to a temp directory.
-// The second return value is a cleanup function (may be nil).
-func (e *Engine) resolveRulesDir() (string, func(), error) {
+// resolveRulesFile returns the path to a single multi-doc YAML file that
+// ast-grep can consume via `-r`. ast-grep's `-r/--rule` accepts one rule file,
+// not a directory; passing a dir surfaces as `Is a directory (os error 21)`.
+//
+// Embedded rules use a `rules: [...]` wrapper format (one file groups many
+// rules); ast-grep instead expects one rule per YAML document. We flatten the
+// wrapper into multi-doc YAML so a single `-r tmpfile` call covers them all.
+//
+// External rule dirs (found via findRulesDir) are assumed to already use the
+// ast-grep-native one-rule-per-file format; we still concatenate them into a
+// multi-doc file so the caller has one clean argument.
+//
+// The second return value is a cleanup function (always non-nil for the embed
+// path; nil-safe at the call site).
+func (e *Engine) resolveRulesFile() (string, func(), error) {
 	if e.rulesDir != "" {
-		return e.rulesDir, nil, nil
+		return concatExternalRules(e.rulesDir)
 	}
-	return extractEmbeddedRules()
+	return concatEmbeddedRules()
 }
 
-// extractEmbeddedRules writes the embedded YAML files to a temp directory
-// and returns its path along with a cleanup function.
-func extractEmbeddedRules() (string, func(), error) {
-	tmp, err := os.MkdirTemp("", "oqs-astgrep-rules-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("create temp rules dir: %w", err)
-	}
-
-	cleanup := func() { os.RemoveAll(tmp) }
-
+// concatEmbeddedRules parses each embedded `rules:`-array YAML, flattens its
+// rules into individual docs, joins them with `---` separators, and writes the
+// result to a single temp file.
+func concatEmbeddedRules() (string, func(), error) {
 	entries, err := fs.ReadDir(embeddedRules, "rules")
 	if err != nil {
-		cleanup()
 		return "", nil, fmt.Errorf("read embedded rules: %w", err)
 	}
 
+	var docs [][]byte
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yml") {
 			continue
 		}
 		data, err := embeddedRules.ReadFile("rules/" + entry.Name())
 		if err != nil {
-			cleanup()
 			return "", nil, fmt.Errorf("read embedded rule %s: %w", entry.Name(), err)
 		}
-		dst := filepath.Join(tmp, entry.Name())
-		if err := os.WriteFile(dst, data, 0644); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("write rule %s: %w", entry.Name(), err)
+		flat, err := flattenRulesArray(data)
+		if err != nil {
+			return "", nil, fmt.Errorf("flatten %s: %w", entry.Name(), err)
 		}
+		docs = append(docs, flat...)
+	}
+	return writeRulesTempFile(docs)
+}
+
+// concatExternalRules reads every .yml file in dir and joins them as multi-doc
+// YAML. Files using the wrapper `rules:` format are flattened; bare single-rule
+// files are passed through unchanged.
+func concatExternalRules(dir string) (string, func(), error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", nil, fmt.Errorf("read external rules dir: %w", err)
 	}
 
-	return tmp, cleanup, nil
+	var docs [][]byte
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return "", nil, fmt.Errorf("read external rule %s: %w", entry.Name(), err)
+		}
+		flat, err := flattenRulesArray(data)
+		if err != nil {
+			return "", nil, fmt.Errorf("flatten %s: %w", entry.Name(), err)
+		}
+		docs = append(docs, flat...)
+	}
+	return writeRulesTempFile(docs)
+}
+
+// flattenRulesArray returns one YAML doc per rule. If the input has a top-level
+// `rules:` array, each entry is marshaled into its own doc; otherwise the input
+// is returned as a single-doc slice (already in ast-grep-native format).
+func flattenRulesArray(data []byte) ([][]byte, error) {
+	var wrapper struct {
+		Rules []yaml.Node `yaml:"rules"`
+	}
+	if err := yaml.Unmarshal(data, &wrapper); err != nil {
+		return nil, err
+	}
+	if len(wrapper.Rules) == 0 {
+		// Not a wrapper file — pass through as a single doc.
+		return [][]byte{data}, nil
+	}
+	docs := make([][]byte, 0, len(wrapper.Rules))
+	for i := range wrapper.Rules {
+		buf, err := yaml.Marshal(&wrapper.Rules[i])
+		if err != nil {
+			return nil, fmt.Errorf("marshal rule index %d: %w", i, err)
+		}
+		docs = append(docs, buf)
+	}
+	return docs, nil
+}
+
+// writeRulesTempFile joins docs with `---\n` separators and writes them to a
+// temp file. Caller must invoke the returned cleanup func (deferred).
+func writeRulesTempFile(docs [][]byte) (string, func(), error) {
+	if len(docs) == 0 {
+		return "", nil, fmt.Errorf("no rules found")
+	}
+	tmp, err := os.CreateTemp("", "oqs-astgrep-rules-*.yml")
+	if err != nil {
+		return "", nil, fmt.Errorf("create temp rules file: %w", err)
+	}
+	cleanup := func() { os.Remove(tmp.Name()) }
+
+	multidoc := bytes.Join(docs, []byte("---\n"))
+	if _, err := tmp.Write(multidoc); err != nil {
+		tmp.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("write rules: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("close rules: %w", err)
+	}
+	return tmp.Name(), cleanup, nil
 }
 
 // normalize converts an ast-grep match into a UnifiedFinding.

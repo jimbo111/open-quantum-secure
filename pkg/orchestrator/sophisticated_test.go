@@ -433,6 +433,33 @@ func TestScanPipeline_AllEnginesFail_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestScanPipeline_PartialFailure_ZeroFindings_NoError covers the case where
+// one engine errors but at least one other engine completed successfully with
+// zero findings (e.g. clean directory with non-source content). The previous
+// gate `len(errs)>0 && len(findings)==0` rolled this up as "all engines failed"
+// and dropped the report; the gate must instead require *every* engine to fail.
+func TestScanPipeline_PartialFailure_ZeroFindings_NoError(t *testing.T) {
+	bad := &stubEngine{
+		name: "bad-engine",
+		tier: engines.Tier1Pattern,
+		err:  fmt.Errorf("subprocess failed"),
+	}
+	clean := &stubEngine{
+		name: "clean-engine",
+		tier: engines.Tier1Pattern,
+		// No results, no error — engine ran fine, found nothing.
+	}
+
+	o := New(bad, clean)
+	res, err := o.Scan(context.Background(), engines.ScanOptions{TargetPath: t.TempDir()})
+	if err != nil {
+		t.Fatalf("partial failure with surviving engine must not bubble up as scan error; got %v", err)
+	}
+	if len(res) != 0 {
+		t.Errorf("expected 0 findings, got %d", len(res))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 14. Confidence boost chain: low → medium-low → medium → medium-high → high
 // ---------------------------------------------------------------------------

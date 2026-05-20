@@ -91,7 +91,7 @@ func runFileEnginesParallel(ctx context.Context, fileEngines []engines.Engine, o
 		}
 	}
 
-	if len(errs) > 0 && len(allFindings) == 0 {
+	if len(errs) == len(fileEngines) {
 		return nil, engineMetrics, fmt.Errorf("all engines failed: %v", errs)
 	}
 	if len(errs) > 0 {
