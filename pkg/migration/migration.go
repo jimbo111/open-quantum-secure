@@ -856,17 +856,13 @@ var keyPair = keyGen.GenerateKeyPair();`
 // ---------------------------------------------------------------------------
 
 // pqcStandard returns the FIPS standard label for a target algorithm name.
-// "ML-DSA-*" → "FIPS 204", "ML-KEM-*" → "FIPS 203", others → "".
+//
+// Delegates to fipsStandardFor so the SLH-DSA → FIPS 205 correction lands
+// in every snippet that previously called pqcStandard (swiftSnippet was the
+// last consumer; previously labelled SLH-DSA targets as "FIPS 204"). Kept
+// as a thin alias so callers don't all need to be rewritten.
 func pqcStandard(targetAlg string) string {
-	upper := strings.ToUpper(targetAlg)
-	switch {
-	case strings.HasPrefix(upper, "ML-DSA") || strings.HasPrefix(upper, "SLH-DSA"):
-		return "FIPS 204"
-	case strings.HasPrefix(upper, "ML-KEM"):
-		return "FIPS 203"
-	default:
-		return ""
-	}
+	return fipsStandardFor(targetAlg)
 }
 
 // swiftSnippet returns Apple CryptoKit migration snippets for the given family.

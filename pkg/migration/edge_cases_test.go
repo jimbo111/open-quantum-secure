@@ -804,6 +804,17 @@ func TestIsSafePQC_EdgeCases(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestPQCStandard verifies that pqcStandard returns the correct FIPS label.
+//
+// SLH-DSA was previously misreported as "FIPS 204" (the ML-DSA standard) —
+// the correct mapping per NIST publication path is:
+//
+//	FIPS 203  ML-KEM (Module-Lattice KEM, formerly Kyber)
+//	FIPS 204  ML-DSA (Module-Lattice DSA, formerly Dilithium)
+//	FIPS 205  SLH-DSA (Stateless Hash-Based DSA, formerly SPHINCS+)
+//
+// pqcStandard now delegates to fipsStandardFor which already had the
+// correct mapping; this test pins the corrected expectations so a future
+// regression in either helper trips a clear failure.
 func TestPQCStandard(t *testing.T) {
 	tests := []struct {
 		alg  string
@@ -812,7 +823,11 @@ func TestPQCStandard(t *testing.T) {
 		{"ML-DSA-44", "FIPS 204"},
 		{"ML-DSA-65", "FIPS 204"},
 		{"ML-DSA-87", "FIPS 204"},
-		{"SLH-DSA-SHA2-128f", "FIPS 204"},
+		// SLH-DSA correctly maps to FIPS 205 (was incorrectly "FIPS 204").
+		{"SLH-DSA-SHA2-128f", "FIPS 205"},
+		{"SLH-DSA-SHA2-256s", "FIPS 205"},
+		{"SLH-DSA-SHAKE-128f", "FIPS 205"},
+		{"SLHDSA-SHA2-128f", "FIPS 205"},
 		{"ML-KEM-512", "FIPS 203"},
 		{"ML-KEM-768", "FIPS 203"},
 		{"ML-KEM-1024", "FIPS 203"},
