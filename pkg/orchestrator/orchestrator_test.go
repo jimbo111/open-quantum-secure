@@ -122,6 +122,53 @@ func TestMergeAlgorithm_NilSafe(t *testing.T) {
 	mergeAlgorithm(winner2, other2) // should be a no-op
 }
 
+// TestMergeAlgorithm_ConflictingKeySize_SmallerWins exercises the regression
+// case where two engines reported different positive keysizes at the same
+// file:line:Name. Previously the winner was first-seen (arbitrary, could
+// silently downgrade AES-128 to AES-256). Now the smaller positive value
+// wins so the resulting finding stays at the more-vulnerable tier.
+func TestMergeAlgorithm_ConflictingKeySize_SmallerWins(t *testing.T) {
+	t.Run("winner larger, other smaller", func(t *testing.T) {
+		winner := &findings.UnifiedFinding{
+			Algorithm: &findings.Algorithm{Name: "AES", KeySize: 256},
+		}
+		other := &findings.UnifiedFinding{
+			Algorithm: &findings.Algorithm{Name: "AES", KeySize: 128},
+		}
+		mergeAlgorithm(winner, other)
+		if winner.Algorithm.KeySize != 128 {
+			t.Errorf("KeySize = %d, want 128 (smaller-positive-wins)", winner.Algorithm.KeySize)
+		}
+	})
+
+	t.Run("winner smaller, other larger", func(t *testing.T) {
+		winner := &findings.UnifiedFinding{
+			Algorithm: &findings.Algorithm{Name: "AES", KeySize: 128},
+		}
+		other := &findings.UnifiedFinding{
+			Algorithm: &findings.Algorithm{Name: "AES", KeySize: 256},
+		}
+		mergeAlgorithm(winner, other)
+		if winner.Algorithm.KeySize != 128 {
+			t.Errorf("KeySize = %d, want 128 (winner already at worst-case)", winner.Algorithm.KeySize)
+		}
+	})
+
+	t.Run("winner zero, other populated still fills in", func(t *testing.T) {
+		winner := &findings.UnifiedFinding{
+			Algorithm: &findings.Algorithm{Name: "RSA"},
+		}
+		other := &findings.UnifiedFinding{
+			Algorithm: &findings.Algorithm{Name: "RSA", KeySize: 2048},
+		}
+		mergeAlgorithm(winner, other)
+		if winner.Algorithm.KeySize != 2048 {
+			t.Errorf("KeySize = %d, want 2048 (asymmetric info — populated value fills the gap)",
+				winner.Algorithm.KeySize)
+		}
+	})
+}
+
 func TestClassifyFindings(t *testing.T) {
 	ff := []findings.UnifiedFinding{
 		{Algorithm: &findings.Algorithm{Name: "RSA-2048", Primitive: "signature"}},

@@ -696,7 +696,20 @@ func dedupe(all []findings.UnifiedFinding) []findings.UnifiedFinding {
 	return result
 }
 
-// mergeAlgorithm fills in missing fields from a secondary finding.
+// mergeAlgorithm fills in missing fields from a secondary finding. Conflict
+// policy:
+//
+//   - Primitive / Mode / Curve: winner wins if non-empty; otherwise take other.
+//   - KeySize: smaller-positive-wins. When both engines populate a non-zero
+//     keysize and they disagree (e.g. cipherscope says AES-128, semgrep
+//     infers AES-256), the SMALLER value wins so the resulting finding is
+//     classified at the more-vulnerable tier (worst-case for security).
+//     When only one engine populates it, the populated value wins.
+//
+// The smaller-keysize-wins rule fixes a previous silent first-seen-wins
+// behaviour where a real AES-128 vulnerability could be merged into and
+// reported as AES-256 (safe). DedupeKey() does NOT discriminate by KeySize
+// so this merge path is the sole reconciler.
 func mergeAlgorithm(winner, other *findings.UnifiedFinding) {
 	if winner.Algorithm == nil || other.Algorithm == nil {
 		return
@@ -705,7 +718,13 @@ func mergeAlgorithm(winner, other *findings.UnifiedFinding) {
 	if a.Primitive == "" && b.Primitive != "" {
 		a.Primitive = b.Primitive
 	}
-	if a.KeySize == 0 && b.KeySize > 0 {
+	switch {
+	case a.KeySize == 0 && b.KeySize > 0:
+		a.KeySize = b.KeySize
+	case a.KeySize > 0 && b.KeySize > 0 && b.KeySize < a.KeySize:
+		// Both populated and they disagree — prefer the smaller (worst-case
+		// for security: a real AES-128 stays AES-128 instead of being
+		// silently promoted to AES-256).
 		a.KeySize = b.KeySize
 	}
 	if a.Mode == "" && b.Mode != "" {

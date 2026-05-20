@@ -221,7 +221,16 @@ func (f *UnifiedFinding) DedupeKey() string {
 		fileKey = f.Location.File + "!" + f.Location.InnerPath
 	}
 
-	// For algorithms: file + line + algorithm name (ignore column — engines differ)
+	// For algorithms: file + line + algorithm name (ignore column — engines differ).
+	//
+	// KeySize/Mode/Curve are intentionally NOT in the key. Two engines that
+	// agree on Name="AES" at the same file:line are pointing at the same
+	// source-level algorithm even if one parsed `KeySize=0` and the other
+	// `KeySize=128`. Excluding KeySize preserves cross-engine corroboration
+	// for asymmetric-information cases. When engines disagree on a populated
+	// keysize (rare but possible — e.g. one engine misparses), the merge
+	// step in pkg/orchestrator picks the SMALLER positive keysize so the
+	// resulting classification stays conservative (worst-case security).
 	if f.Algorithm != nil && f.Algorithm.Name != "" {
 		return fileKey + "|" + itoa(f.Location.Line) + "|alg|" + f.Algorithm.Name
 	}
