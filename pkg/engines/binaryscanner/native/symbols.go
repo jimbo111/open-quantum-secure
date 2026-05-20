@@ -92,6 +92,79 @@ var symbolDB = map[string]knownSymbol{
 	"crypto_secretbox_easy":        {library: "libsodium", algorithm: "ChaCha20-Poly1305", primitive: "ae"},
 	"crypto_sign_ed25519":          {library: "libsodium", algorithm: "Ed25519", primitive: "signature"},
 	"crypto_box_curve25519xsalsa20poly1305": {library: "libsodium", algorithm: "Curve25519", primitive: "key-exchange"},
+
+	// --- liboqs (the canonical PQC reference implementation) ---
+	// Generic API — algorithm is chosen at runtime via OQS_KEM_new(method_name).
+	// Presence of these symbols proves PQC capability but not which algorithm is used;
+	// the per-algorithm symbols below pin specific FIPS-203/204/205 / Falcon / HQC variants.
+	"oqs_kem_new":              {library: "liboqs", algorithm: "ML-KEM", primitive: "kem"},
+	"oqs_kem_keypair":          {library: "liboqs", algorithm: "ML-KEM", primitive: "kem"},
+	"oqs_kem_encaps":           {library: "liboqs", algorithm: "ML-KEM", primitive: "kem"},
+	"oqs_kem_decaps":           {library: "liboqs", algorithm: "ML-KEM", primitive: "kem"},
+	"oqs_sig_new":              {library: "liboqs", algorithm: "ML-DSA", primitive: "signature"},
+	"oqs_sig_keypair":          {library: "liboqs", algorithm: "ML-DSA", primitive: "signature"},
+	"oqs_sig_sign":             {library: "liboqs", algorithm: "ML-DSA", primitive: "signature"},
+	"oqs_sig_verify":           {library: "liboqs", algorithm: "ML-DSA", primitive: "signature"},
+	// liboqs per-algorithm constructors (FIPS 203 ML-KEM)
+	"oqs_kem_ml_kem_512_new":   {library: "liboqs", algorithm: "ML-KEM-512", primitive: "kem"},
+	"oqs_kem_ml_kem_768_new":   {library: "liboqs", algorithm: "ML-KEM-768", primitive: "kem"},
+	"oqs_kem_ml_kem_1024_new":  {library: "liboqs", algorithm: "ML-KEM-1024", primitive: "kem"},
+	// FIPS 204 ML-DSA
+	"oqs_sig_ml_dsa_44_new":    {library: "liboqs", algorithm: "ML-DSA-44", primitive: "signature"},
+	"oqs_sig_ml_dsa_65_new":    {library: "liboqs", algorithm: "ML-DSA-65", primitive: "signature"},
+	"oqs_sig_ml_dsa_87_new":    {library: "liboqs", algorithm: "ML-DSA-87", primitive: "signature"},
+	// FIPS 205 SLH-DSA (subset; SHA2 fast / small + SHAKE)
+	"oqs_sig_slh_dsa_sha2_128s_new":  {library: "liboqs", algorithm: "SLH-DSA-SHA2-128s", primitive: "signature"},
+	"oqs_sig_slh_dsa_sha2_128f_new":  {library: "liboqs", algorithm: "SLH-DSA-SHA2-128f", primitive: "signature"},
+	"oqs_sig_slh_dsa_sha2_192s_new":  {library: "liboqs", algorithm: "SLH-DSA-SHA2-192s", primitive: "signature"},
+	"oqs_sig_slh_dsa_sha2_192f_new":  {library: "liboqs", algorithm: "SLH-DSA-SHA2-192f", primitive: "signature"},
+	"oqs_sig_slh_dsa_sha2_256s_new":  {library: "liboqs", algorithm: "SLH-DSA-SHA2-256s", primitive: "signature"},
+	"oqs_sig_slh_dsa_sha2_256f_new":  {library: "liboqs", algorithm: "SLH-DSA-SHA2-256f", primitive: "signature"},
+	"oqs_sig_slh_dsa_shake_128s_new": {library: "liboqs", algorithm: "SLH-DSA-SHAKE-128s", primitive: "signature"},
+	"oqs_sig_slh_dsa_shake_128f_new": {library: "liboqs", algorithm: "SLH-DSA-SHAKE-128f", primitive: "signature"},
+	// FIPS 206 (draft) Falcon / FN-DSA
+	"oqs_sig_falcon_512_new":   {library: "liboqs", algorithm: "Falcon-512", primitive: "signature"},
+	"oqs_sig_falcon_1024_new":  {library: "liboqs", algorithm: "Falcon-1024", primitive: "signature"},
+	// 5th NIST PQC standard — HQC (selected March 2025)
+	"oqs_kem_hqc_128_new":      {library: "liboqs", algorithm: "HQC-128", primitive: "kem"},
+	"oqs_kem_hqc_192_new":      {library: "liboqs", algorithm: "HQC-192", primitive: "kem"},
+	"oqs_kem_hqc_256_new":      {library: "liboqs", algorithm: "HQC-256", primitive: "kem"},
+	// Pre-FIPS-203 Kyber draft names (still appear in older OQS-OpenSSL provider builds)
+	"oqs_kem_kyber_512_new":    {library: "liboqs", algorithm: "Kyber-512", primitive: "kem"},
+	"oqs_kem_kyber_768_new":    {library: "liboqs", algorithm: "Kyber-768", primitive: "kem"},
+	"oqs_kem_kyber_1024_new":   {library: "liboqs", algorithm: "Kyber-1024", primitive: "kem"},
+
+	// --- OQS-OpenSSL / oqs-provider (OpenSSL 3+ PQC provider) ---
+	// Provider-style entry points; presence proves PQC provider loaded.
+	"oqs_provider_init":        {library: "oqs-provider", algorithm: "ML-KEM", primitive: "kem"},
+
+	// --- OpenSSL 3.5+ native PQC (built-in, no provider needed) ---
+	// EVP_PKEY_* generic functions appear on every OpenSSL binary; specific PQC
+	// algorithm names ("ML-KEM-768", "ML-DSA-65", "SLH-DSA-SHA2-128s") are passed
+	// as runtime strings to EVP_PKEY_CTX_new_from_name, so they are picked up by
+	// the constant/string scanner (native/constants.go) rather than the symbol DB.
+	// We still pin the OpenSSL-3.5 high-level KEM and SIGNATURE entry points so
+	// any OQS binding shows up as PQC-capable.
+	"evp_pkey_encapsulate_init": {library: "openssl", algorithm: "ML-KEM", primitive: "kem"},
+	"evp_pkey_decapsulate_init": {library: "openssl", algorithm: "ML-KEM", primitive: "kem"},
+	"evp_pkey_encapsulate":      {library: "openssl", algorithm: "ML-KEM", primitive: "kem"},
+	"evp_pkey_decapsulate":      {library: "openssl", algorithm: "ML-KEM", primitive: "kem"},
+	"evp_signature_fetch":       {library: "openssl", algorithm: "ML-DSA", primitive: "signature"},
+	"evp_kem_fetch":             {library: "openssl", algorithm: "ML-KEM", primitive: "kem"},
+
+	// --- AWS-LC PQC (BoringSSL fork shipping ML-KEM + ML-DSA since 2025) ---
+	"aws_lc_mlkem_keygen":      {library: "aws-lc", algorithm: "ML-KEM", primitive: "kem"},
+	"aws_lc_mlkem_encaps":      {library: "aws-lc", algorithm: "ML-KEM", primitive: "kem"},
+	"aws_lc_mlkem_decaps":      {library: "aws-lc", algorithm: "ML-KEM", primitive: "kem"},
+	"aws_lc_mldsa_keygen":      {library: "aws-lc", algorithm: "ML-DSA", primitive: "signature"},
+	"aws_lc_mldsa_sign":        {library: "aws-lc", algorithm: "ML-DSA", primitive: "signature"},
+	"aws_lc_mldsa_verify":      {library: "aws-lc", algorithm: "ML-DSA", primitive: "signature"},
+
+	// --- BoringSSL ML-KEM (Google, used in Chrome's X25519MLKEM768 deployment) ---
+	"ml_kem_768_keypair":       {library: "boringssl", algorithm: "ML-KEM-768", primitive: "kem"},
+	"ml_kem_768_encap":         {library: "boringssl", algorithm: "ML-KEM-768", primitive: "kem"},
+	"ml_kem_768_decap":         {library: "boringssl", algorithm: "ML-KEM-768", primitive: "kem"},
+	"ml_kem_1024_keypair":      {library: "boringssl", algorithm: "ML-KEM-1024", primitive: "kem"},
 }
 
 // normalizeSymbol converts a raw symbol name into the canonical lookup form:
