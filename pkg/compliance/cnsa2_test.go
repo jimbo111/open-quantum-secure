@@ -23,6 +23,67 @@ func depFinding(library string, qr findings.QuantumRisk, hndl string) findings.U
 	}
 }
 
+// TestIsHashFamily_LegacyHashes covers the defence-in-depth additions for
+// MD5/MD4/MD2/RIPEMD/WHIRLPOOL/HAS-160. Findings emitted by engines that
+// don't classify QuantumRisk (or set it to QRUnknown) bypass the early
+// QRDeprecated rule in Evaluate; the hash-family fallback now catches
+// them via the cnsa2-hash-unapproved rule.
+func TestIsHashFamily_LegacyHashes(t *testing.T) {
+	legacy := []string{
+		"MD5", "MD4", "MD2",
+		"RIPEMD-160", "RIPEMD160",
+		"WHIRLPOOL",
+		"HAS-160", "HAS160",
+	}
+	for _, name := range legacy {
+		if !isHashFamily(name) {
+			t.Errorf("isHashFamily(%q) = false, want true (legacy hash should be flagged for CNSA 2.0)", name)
+		}
+	}
+}
+
+// TestEvaluate_LegacyHashUnclassifiedFinding asserts that an MD5 finding
+// with no QuantumRisk set (e.g. emitted by an engine that didn't run
+// classification) still produces a CNSA 2.0 violation — previously these
+// findings slipped through the hash-family check entirely.
+func TestEvaluate_LegacyHashUnclassifiedFinding(t *testing.T) {
+	cases := []struct {
+		name string
+		alg  string
+	}{
+		{"bare MD5", "MD5"},
+		{"RIPEMD-160", "RIPEMD-160"},
+		{"WHIRLPOOL", "WHIRLPOOL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := findings.UnifiedFinding{
+				Algorithm:   &findings.Algorithm{Name: tc.alg, Primitive: "hash"},
+				QuantumRisk: "", // deliberately unset — engine did not classify
+			}
+			violations := cnsa20Framework{}.Evaluate([]findings.UnifiedFinding{f})
+			if len(violations) == 0 {
+				t.Fatalf("expected at least one CNSA 2.0 violation for %q, got none", tc.alg)
+			}
+			// The rule we expect is cnsa2-hash-unapproved (defence-in-depth path).
+			found := false
+			for _, v := range violations {
+				if v.Rule == "cnsa2-hash-unapproved" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				rules := make([]string, len(violations))
+				for i, v := range violations {
+					rules[i] = v.Rule
+				}
+				t.Errorf("expected cnsa2-hash-unapproved violation, got rules: %v", rules)
+			}
+		})
+	}
+}
+
 func TestEvaluate_NoViolations(t *testing.T) {
 	tests := []struct {
 		name    string

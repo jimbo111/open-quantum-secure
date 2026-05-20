@@ -409,10 +409,24 @@ func resolveHashOutputSize(upperName string, keySize int) int {
 	return 0
 }
 
-// isHashFamily returns true when the algorithm name looks like a hash or MAC family
-// that is subject to the CNSA 2.0 output-size rule.
+// isHashFamily returns true when the algorithm name looks like a hash or MAC
+// family subject to the CNSA 2.0 output-size rule.
+//
+// MD5/MD4/MD2 and RIPEMD-* are included so that a finding emitted by an
+// engine that DIDN'T classify QuantumRisk (or classified to QRUnknown)
+// still trips the hash-unapproved rule. The early `QRDeprecated` rule in
+// Evaluate covers the common path where ClassifyAlgorithm runs first,
+// but defence-in-depth at this layer catches unclassified findings too.
 func isHashFamily(upper string) bool {
-	hashPrefixes := []string{"SHA", "SHA-", "SHA2", "SHA3", "BLAKE", "HMAC-SHA", "HMAC"}
+	hashPrefixes := []string{
+		"SHA", "SHA-", "SHA2", "SHA3",
+		"BLAKE",
+		"HMAC-SHA", "HMAC",
+		"MD5", "MD4", "MD2",
+		"RIPEMD", "RIPEMD-",
+		"WHIRLPOOL",
+		"HAS-160", "HAS160",
+	}
 	for _, p := range hashPrefixes {
 		if strings.HasPrefix(upper, p) {
 			return true
