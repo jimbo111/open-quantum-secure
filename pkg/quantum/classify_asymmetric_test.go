@@ -1029,7 +1029,8 @@ func TestClassifyAsymmetric_RecommendationContent(t *testing.T) {
 
 	t.Run("RSA_signature_mentions_CNSA_deadline", func(t *testing.T) {
 		got := ClassifyAlgorithm("RSA", "signature", 2048)
-		if !strings.Contains(got.Recommendation, "2035") {
+		// CNSA 2.0 general signing complete: 2033 (May 2025 NSA update).
+		if !strings.Contains(got.Recommendation, "2033") {
 			t.Errorf("RSA signature recommendation missing CNSA 2.0 deadline: %q", got.Recommendation)
 		}
 	})

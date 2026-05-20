@@ -20,10 +20,32 @@ const (
 	StandardCNSA20 Standard = "cnsa-2.0"
 )
 
-// CNSA 2.0 deadlines (NSA guidance, May 2025 update).
+// CNSA 2.0 deadlines (NSA Cybersecurity Information Sheet on CNSA 2.0, May
+// 2025 update — see https://media.defense.gov/2022/Sep/07/2003071834/-1/-1/0/
+// CSA_CNSA_2.0_ALGORITHMS_.PDF and the follow-up CSI on transition timelines).
+//
+// The NSA timeline is phased by equipment category, not a single 2035-end
+// cliff:
+//
+//	┌────────────────────────────────────┬────────────┬────────────┐
+//	│ Category                           │ Begin by   │ Complete   │
+//	├────────────────────────────────────┼────────────┼────────────┤
+//	│ Software / firmware signing        │ 2025       │ 2030       │
+//	│ Traditional networking equipment   │ 2026       │ 2030       │
+//	│ Web browsers / servers, cloud      │ 2025       │ 2033       │
+//	│ Operating systems                  │ 2027       │ 2033       │
+//	│ Niche / custom apps + infra        │ 2027       │ 2033       │
+//	└────────────────────────────────────┴────────────┴────────────┘
+//
+// We collapse the begin-transition column into a single "begin" constant
+// (2025) and the completion column into "firmware-signing complete" (2030)
+// and "general complete" (2033). The previous "2035" sentinel was wrong on
+// every category.
 const (
-	deadlineKeyExchange = "2030-01-01" // all NSS must use PQC for key exchange by this date
-	deadlineFull        = "2035-12-31" // full transition complete
+	deadlineBeginTransition  = "2025-01-01" // earliest begin-transition (software/firmware signing, web/cloud)
+	deadlineKeyExchange      = "2030-12-31" // traditional networking + firmware-signing must complete PQC migration
+	deadlineFirmwareSigning  = "2030-12-31" // software/firmware signing migration complete
+	deadlineFull             = "2033-12-31" // operating systems, browsers/cloud, niche/custom — full transition complete
 )
 
 // cnsa20Framework implements Framework for NSA CNSA 2.0 (May 2025 update).
@@ -47,8 +69,11 @@ func (cnsa20Framework) ApprovedAlgos() []ApprovedAlgoRef {
 
 func (cnsa20Framework) Deadlines() []DeadlineRef {
 	return []DeadlineRef{
-		{"2030-01-01", "All key exchange must use ML-KEM-1024"},
-		{"2035-12-31", "Full CNSA 2.0 transition complete"},
+		{"2025-01-01", "Begin transition: software/firmware signing, web browsers + servers, cloud services"},
+		{"2026-01-01", "Begin transition: traditional networking equipment"},
+		{"2027-01-01", "Begin transition: operating systems, niche/custom apps + infrastructure"},
+		{"2030-12-31", "Complete transition: software/firmware signing, traditional networking equipment"},
+		{"2033-12-31", "Complete transition: web/cloud, operating systems, niche/custom apps + infrastructure"},
 	}
 }
 

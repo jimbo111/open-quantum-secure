@@ -169,8 +169,10 @@ func TestHNDL_RecommendationContainsHNDLTerminology(t *testing.T) {
 	if !containsIgnoreCase(c.Recommendation, "HNDL") {
 		t.Errorf("signature recommendation should mention HNDL, got: %s", c.Recommendation)
 	}
-	if !containsIgnoreCase(c.Recommendation, "2035") {
-		t.Errorf("signature recommendation should mention 2035 deadline, got: %s", c.Recommendation)
+	// CNSA 2.0 general signing must complete migration by 2033 (May 2025
+	// NSA update). Previously this test pinned the wrong 2035 cliff.
+	if !containsIgnoreCase(c.Recommendation, "2033") {
+		t.Errorf("signature recommendation should mention 2033 deadline, got: %s", c.Recommendation)
 	}
 }
 

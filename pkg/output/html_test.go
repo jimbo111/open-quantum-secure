@@ -364,12 +364,16 @@ func TestWriteHTML_DependencyFinding(t *testing.T) {
 }
 
 // TestWriteHTML_CNSATimeline verifies CNSA 2.0 section is present.
+// Timeline follows the NSA May 2025 phased schedule — software/firmware
+// signing + traditional networking complete by 2030, everything else
+// (web/cloud, OS, niche/custom apps) complete by 2033.
 func TestWriteHTML_CNSATimeline(t *testing.T) {
 	out := render(t, basicResult())
 
 	checks := []string{
+		"2025",
 		"2030",
-		"2035",
+		"2033",
 		"CNSA 2.0",
 	}
 	for _, want := range checks {

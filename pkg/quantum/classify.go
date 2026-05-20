@@ -47,8 +47,8 @@ type Classification struct {
 // ephemeral exchange itself. Only a PQ-KEM session (ML-KEM, X25519MLKEM768, etc.)
 // is HNDL-resistant. See: Mosca, IEEE S&P 2018; Blanco-Romero et al., arXiv:2603.01091 (2026).
 const (
-	HNDLImmediate = "immediate" // Classical key exchange — recorded data can be decrypted when CRQC arrives (CNSA 2.0: 2030)
-	HNDLDeferred  = "deferred"  // Signatures — only future signatures at risk, not past data (CNSA 2.0: 2035)
+	HNDLImmediate = "immediate" // Classical key exchange — recorded data can be decrypted when CRQC arrives (CNSA 2.0 networking + firmware-signing complete: 2030)
+	HNDLDeferred  = "deferred"  // Signatures — only future signatures at risk, not past data (CNSA 2.0 general signing complete: 2033)
 )
 
 // pqcSafeFamilies are NIST post-quantum standard families, K-PQC Round 4 finalists,
@@ -313,7 +313,7 @@ func classifyVulnerable(baseName, primitive string, keySize int) Classification 
 			Risk:            RiskVulnerable,
 			Severity:        SeverityHigh,
 			HNDLRisk:        HNDLDeferred,
-			Recommendation:  "HNDL risk: DEFERRED — only future signatures are at risk (past signatures remain valid). Migrate to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205). Transition: use a composite classical+ML-DSA-65 signature (IETF draft) for backward compatibility. CNSA 2.0 deadline: 2035.",
+			Recommendation:  "HNDL risk: DEFERRED — only future signatures are at risk (past signatures remain valid). Migrate to ML-DSA (FIPS 204) or SLH-DSA (FIPS 205). Transition: use a composite classical+ML-DSA-65 signature (IETF draft) for backward compatibility. CNSA 2.0 general signing complete by 2033.",
 			TargetAlgorithm: t.Algorithm,
 			TargetStandard:  t.Standard,
 		}
