@@ -2,6 +2,7 @@
 package cbomutil
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -50,12 +51,15 @@ func GenerateKeyPair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 }
 
 // Sign signs cbomJSON with the given Ed25519 private key and returns a
-// SignedCBOM envelope. The signature covers SHA-256(cbomJSON) so that
-// integrity and authenticity can be verified independently.
+// SignedCBOM envelope. The signature covers SHA-256(canonical(cbomJSON))
+// so that integrity and authenticity can be verified independently.
 //
 // cbomJSON must be the complete, serialized CycloneDX CBOM document as
-// returned by output.WriteCBOM. Callers should not modify the bytes after
-// signing.
+// returned by output.WriteCBOM. Sign canonicalises the input through
+// json.Compact (whitespace-stripped form) before hashing so that the
+// digest survives downstream JSON pretty-printing of the envelope (e.g.
+// json.MarshalIndent). The canonical bytes are what get stored in the
+// SignedCBOM.CBOM field.
 func Sign(cbomJSON []byte, privateKey ed25519.PrivateKey) (*SignedCBOM, error) {
 	if len(cbomJSON) == 0 {
 		return nil, errors.New("cbomutil: cbomJSON must not be empty")
@@ -65,18 +69,27 @@ func Sign(cbomJSON []byte, privateKey ed25519.PrivateKey) (*SignedCBOM, error) {
 			len(privateKey), ed25519.PrivateKeySize)
 	}
 
-	// Compute SHA-256 digest over the raw CBOM bytes.
-	sum := sha256.Sum256(cbomJSON)
+	// Canonicalise the CBOM bytes by stripping all insignificant whitespace.
+	// This makes the digest stable across JSON pretty-print round-trips of
+	// the envelope (json.MarshalIndent re-indents inner json.RawMessage
+	// values).
+	canonical, err := canonicaliseJSON(cbomJSON)
+	if err != nil {
+		return nil, fmt.Errorf("cbomutil: canonicalise CBOM: %w", err)
+	}
+
+	// Compute SHA-256 digest over the canonical bytes.
+	sum := sha256.Sum256(canonical)
 	digest := hex.EncodeToString(sum[:])
 
-	// Sign the SHA-256 digest (not raw bytes) so that verification works
-	// after a JSON marshal/unmarshal round-trip where whitespace may change.
+	// Sign the SHA-256 digest (not raw bytes) — Ed25519's small signing
+	// surface keeps the envelope compact and signature verification cheap.
 	sig := ed25519.Sign(privateKey, sum[:])
 
 	pub := privateKey.Public().(ed25519.PublicKey)
 
 	return &SignedCBOM{
-		CBOM:      json.RawMessage(cbomJSON),
+		CBOM:      json.RawMessage(canonical),
 		Signature: base64.StdEncoding.EncodeToString(sig),
 		PublicKey: base64.StdEncoding.EncodeToString(pub),
 		SignedAt:  time.Now().UTC().Format(time.RFC3339),
@@ -84,11 +97,28 @@ func Sign(cbomJSON []byte, privateKey ed25519.PrivateKey) (*SignedCBOM, error) {
 	}, nil
 }
 
+// canonicaliseJSON returns the JSON-encoded src with insignificant whitespace
+// stripped (json.Compact). Used by Sign and Verify to obtain a stable byte
+// representation that survives MarshalIndent re-formatting.
+func canonicaliseJSON(src []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, src); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // Verify checks the Ed25519 signature of a SignedCBOM against its embedded
-// public key. It returns (true, nil) when the signature is valid.
+// public key AND cross-checks the embedded Digest field against the actual
+// CBOM bytes. It returns (true, nil) only when both checks succeed.
 //
-// Verify also cross-checks the Digest field against the CBOM bytes so that
-// a tampered digest is caught even if the signature itself is somehow reused.
+// Both checks are required: signing only the digest leaves the CBOM payload
+// unauthenticated. Without the CBOM↔digest comparison, an attacker can
+// substitute the entire `cbom` field while keeping digest+signature+publicKey
+// intact and Verify would still return true. (json.RawMessage.UnmarshalJSON
+// preserves source bytes verbatim, so digest equality survives a Marshal /
+// Unmarshal round-trip; whitespace drift only occurs if a downstream consumer
+// deserialises into a struct and re-marshals, which is out of scope here.)
 //
 // Note: Verify does NOT check SignedAt for expiry. Callers that need
 // freshness guarantees must enforce that separately.
@@ -121,9 +151,7 @@ func Verify(signed *SignedCBOM) (bool, error) {
 			len(sigBytes), ed25519.SignatureSize)
 	}
 
-	// Decode the stored digest for signature verification.
-	// We verify against the stored digest (not recomputed) because JSON
-	// marshal/unmarshal may alter CBOM whitespace, changing raw bytes.
+	// Decode the stored digest.
 	digestBytes, err := hex.DecodeString(signed.Digest)
 	if err != nil {
 		return false, fmt.Errorf("cbomutil: decode digest: %w", err)
@@ -133,15 +161,24 @@ func Verify(signed *SignedCBOM) (bool, error) {
 			len(digestBytes), sha256.Size)
 	}
 
+	// Cross-check the stored digest against the actual CBOM bytes. Without
+	// this, an attacker can swap the entire CBOM payload while keeping the
+	// signed digest intact. The CBOM bytes are canonicalised (whitespace-
+	// stripped) before hashing so that envelope pretty-print round-trips
+	// (json.MarshalIndent) don't break verification.
+	canonical, err := canonicaliseJSON(signed.CBOM)
+	if err != nil {
+		return false, fmt.Errorf("cbomutil: canonicalise CBOM: %w", err)
+	}
+	recomputed := sha256.Sum256(canonical)
+	if !bytes.Equal(recomputed[:], digestBytes) {
+		return false, nil
+	}
+
 	// Verify Ed25519 signature over the SHA-256 digest.
 	if !ed25519.Verify(pub, digestBytes, sigBytes) {
 		return false, nil
 	}
-
-	// Note: We do NOT cross-check CBOM bytes against the digest because JSON
-	// marshal/unmarshal may alter whitespace in json.RawMessage. The signature
-	// over the digest is the authoritative integrity check. If the digest is
-	// tampered, the signature verification above fails.
 
 	return true, nil
 }

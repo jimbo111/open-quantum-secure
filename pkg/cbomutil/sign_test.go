@@ -1,6 +1,7 @@
 package cbomutil
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -109,6 +110,48 @@ func TestVerifyFailsTamperedCBOM(t *testing.T) {
 	ok, err := Verify(signed)
 	if err == nil && ok {
 		t.Fatal("Verify returned (true, nil) for a tampered CBOM+digest — expected rejection")
+	}
+}
+
+// TestVerifyFailsTamperedCBOMOnly is the targeted regression for the
+// CBOM-substitution attack: tamper *only* the CBOM payload, leaving the
+// digest, signature, and public key intact. Without the CBOM↔digest
+// cross-check in Verify, the signature still validates against the
+// untouched digest and Verify would return (true, nil) for an arbitrary
+// payload — i.e. signature trust bypass.
+func TestVerifyFailsTamperedCBOMOnly(t *testing.T) {
+	_, priv, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+
+	signed, err := Sign([]byte(minimalCBOM), priv)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	originalDigest := signed.Digest
+	originalSig := signed.Signature
+
+	// Swap the entire CBOM payload. Leave digest + signature + publicKey
+	// untouched — the attack model is "I got a legitimately signed CBOM,
+	// I replace the content with anything I want."
+	signed.CBOM = json.RawMessage(`{"bomFormat":"CycloneDX","specVersion":"1.7","components":[{"name":"injected"}]}`)
+
+	if signed.Digest != originalDigest {
+		t.Fatalf("test setup invariant: digest must be unchanged, got %q vs %q",
+			signed.Digest, originalDigest)
+	}
+	if signed.Signature != originalSig {
+		t.Fatalf("test setup invariant: signature must be unchanged")
+	}
+
+	ok, err := Verify(signed)
+	if err != nil {
+		t.Fatalf("Verify returned unexpected error: %v", err)
+	}
+	if ok {
+		t.Fatal("Verify returned (true, nil) for CBOM-only tampering — signature trust bypass regression")
 	}
 }
 
@@ -267,8 +310,14 @@ func TestSignedCBOMDigestMatchesCBOMContent(t *testing.T) {
 		t.Fatalf("Sign: %v", err)
 	}
 
-	// Recompute digest independently and compare against the envelope field.
-	sum := sha256.Sum256(cbomBytes)
+	// Sign canonicalises the CBOM (json.Compact) before hashing so the digest
+	// survives MarshalIndent round-trips of the envelope. Recompute against
+	// the canonical form and compare against the envelope field.
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, cbomBytes); err != nil {
+		t.Fatalf("json.Compact: %v", err)
+	}
+	sum := sha256.Sum256(buf.Bytes())
 	expected := hex.EncodeToString(sum[:])
 	if signed.Digest != expected {
 		t.Errorf("Digest mismatch: got %s, want %s", signed.Digest, expected)
