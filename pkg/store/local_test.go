@@ -414,6 +414,52 @@ func TestConcurrentSaveScan(t *testing.T) {
 	}
 }
 
+// TestCrossProcessSaveScan_FlockSerialises exercises the cross-process race
+// window: two LocalStore values (simulating two oqs-scanner invocations
+// sharing ~/.oqs/history/) concurrently appending records to the same
+// project. With only the in-process sync.Mutex, the second process's
+// read-append-rename cycle silently overwrites the first. With the per-
+// project flock acquired before the cycle, every record survives.
+func TestCrossProcessSaveScan_FlockSerialises(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+
+	const procs = 4
+	const recordsPerProc = 5
+
+	var wg sync.WaitGroup
+	for p := 0; p < procs; p++ {
+		wg.Add(1)
+		// Each goroutine uses a SEPARATE LocalStore so the in-process mutex
+		// does not serialise them — the only thing that can is the flock.
+		go func(procID int) {
+			defer wg.Done()
+			s := NewLocalStore(baseDir)
+			for r := 0; r < recordsPerProc; r++ {
+				err := s.SaveScan(ctx, "shared-project",
+					makeRecord(fmt.Sprintf("proc-%d-rec-%d", procID, r)))
+				if err != nil {
+					t.Errorf("proc %d rec %d: SaveScan: %v", procID, r, err)
+					return
+				}
+			}
+		}(p)
+	}
+	wg.Wait()
+
+	// Use a fresh store to read back, just to be defensive.
+	verifier := NewLocalStore(baseDir)
+	records, err := verifier.ListScans(ctx, "shared-project", ListOptions{})
+	if err != nil {
+		t.Fatalf("ListScans: %v", err)
+	}
+	wantTotal := procs * recordsPerProc
+	if len(records) != wantTotal {
+		t.Errorf("got %d records, want %d (cross-process race lost %d records)",
+			len(records), wantTotal, wantTotal-len(records))
+	}
+}
+
 func TestSlashOnlyProject_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 	s := NewLocalStore(t.TempDir())

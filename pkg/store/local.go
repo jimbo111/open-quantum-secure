@@ -16,8 +16,11 @@ const maxSlugLen = 200
 
 // LocalStore persists scan records as JSON arrays under {baseDir}/history/.
 // Each project maps to a single file named {project-slug}.json.
-// LocalStore is safe for concurrent use within a single process; it does not
-// coordinate across multiple processes writing to the same baseDir.
+// LocalStore is safe for concurrent use within a single process AND across
+// multiple processes: the in-process sync.Mutex serialises goroutine access
+// and an advisory flock(2) on a per-project .lock sibling serialises access
+// across separate oqs-scanner invocations writing to the same baseDir
+// (POSIX only; see flock_windows.go for the Windows caveat).
 type LocalStore struct {
 	baseDir string
 	mu      sync.Mutex
@@ -53,6 +56,30 @@ func (s *LocalStore) SaveScan(_ context.Context, project string, record ScanReco
 	}
 
 	destPath := filepath.Join(historyDir, slug+".json")
+
+	// Cross-process advisory lock — blocks any other oqs-scanner invocation
+	// trying to SaveScan the same project until this function returns.
+	// Without it, two concurrent CI workers' read-append-rename cycles race
+	// and the second worker's record silently overwrites the first.
+	//
+	// Lock files live under <baseDir>/.locks/ (sibling of history/) so the
+	// user-visible history directory stays clean of implementation artefacts.
+	lockDir := filepath.Join(s.baseDir, ".locks")
+	if err := os.MkdirAll(lockDir, 0700); err != nil {
+		return fmt.Errorf("store: create lock dir: %w", err)
+	}
+	lockPath := filepath.Join(lockDir, slug+".lock")
+	release, err := acquireFileLock(lockPath)
+	if err != nil {
+		return fmt.Errorf("store: acquire file lock: %w", err)
+	}
+	defer func() {
+		if relErr := release(); relErr != nil {
+			// Lock release failure is non-fatal — the kernel releases on
+			// process exit. Surface it for diagnosability.
+			fmt.Fprintf(os.Stderr, "WARNING: %v\n", relErr)
+		}
+	}()
 
 	// Load existing records (treat missing file as empty list).
 	records, err := readRecords(destPath)
