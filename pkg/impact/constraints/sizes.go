@@ -98,14 +98,62 @@ func init() {
 	})
 }
 
-// migrationMap maps classical algorithm prefixes to their recommended PQC replacements.
+// migrationMap maps classical algorithm prefixes to their recommended PQC
+// replacements. Targets are aligned with NIST IR 8547 §3 Cat-N strength
+// mapping (matching the equivalent classical-bit security to ML-DSA / ML-KEM
+// parameter sets):
+//
+//	Classical strength      | ML-DSA      | ML-KEM
+//	------------------------|-------------|------------
+//	≤ Category 1 (≤128-bit) | ML-DSA-44   | ML-KEM-512
+//	Category 3   (~192-bit) | ML-DSA-65   | ML-KEM-768
+//	Category 5   (256-bit)  | ML-DSA-87   | ML-KEM-1024
+//
+// Specific curve / RSA-size mappings (FIPS 204 / 203 selection criteria):
+//
+//	ECDSA-P256 / Ed25519 ≈ Cat-3  → ML-DSA-65
+//	ECDSA-P384            ≈ Cat-3 → ML-DSA-65 (or ML-DSA-87 for headroom)
+//	ECDSA-P521 / Ed448    ≈ Cat-5 → ML-DSA-87
+//	RSA-2048              ≈ Cat-1 → ML-DSA-65 / ML-KEM-768 (Cat-3 floor)
+//	RSA-3072              ≈ Cat-3 → ML-DSA-65 / ML-KEM-768
+//	RSA-4096+             ≈ Cat-5 → ML-DSA-87 / ML-KEM-1024
+//
+// Note ordering: the FIRST target is the recommended default; callers that
+// pick `MigrationTargets[0]` get the standards-aligned baseline.
 var migrationMap = map[string][]string{
+	// Signature algorithms — RSA + EC + EdDSA.
 	"RSA":     {"ML-DSA-65", "ML-DSA-87"},
-	"ECDSA":   {"ML-DSA-44", "ML-DSA-65"},
-	"ECDH":    {"ML-KEM-768"},
-	"Ed25519": {"ML-DSA-44"},
-	"Ed448":   {"ML-DSA-44"},
+	"ECDSA":   {"ML-DSA-65", "ML-DSA-87"},
+	"Ed25519": {"ML-DSA-65"},
+	"Ed448":   {"ML-DSA-87"},
+	"DSA":     {"ML-DSA-65", "ML-DSA-87"},
 	"KCDSA":   {"HAETAE-3", "ML-DSA-65"},
+
+	// Key-agreement / KEM transitions.
+	"ECDH":         {"ML-KEM-768", "ML-KEM-1024"},
+	"ECDHE":        {"ML-KEM-768", "ML-KEM-1024"},
+	"DH":           {"ML-KEM-768", "ML-KEM-1024"},
+	"Diffie-Hellman": {"ML-KEM-768", "ML-KEM-1024"},
+	"FFDH":         {"ML-KEM-768", "ML-KEM-1024"},
+	"X25519":       {"ML-KEM-768"},
+	"X448":         {"ML-KEM-1024"},
+
+	// RSA encryption (PKE) — distinct from RSA signing.
+	"RSA-OAEP":          {"ML-KEM-768", "ML-KEM-1024"},
+	"RSAES-OAEP":        {"ML-KEM-768", "ML-KEM-1024"},
+	"RSAES":             {"ML-KEM-768", "ML-KEM-1024"},
+	"RSAES-PKCS1":       {"ML-KEM-768", "ML-KEM-1024"},
+	"RSAES-PKCS1-v1_5":  {"ML-KEM-768", "ML-KEM-1024"},
+
+	// Symmetric / hash — Grover halves the security margin. Migrate to a
+	// larger primitive in the same family (NOT a PQC swap, but documented
+	// here so `--impact-graph` produces a recommendation).
+	"AES-128": {"AES-256"},
+	"AES":     {"AES-256"},
+	"SHA-1":   {"SHA-256", "SHA-3-256"},
+	"SHA1":    {"SHA-256", "SHA-3-256"},
+	"MD5":     {"SHA-256", "SHA-3-256"},
+	"MD4":     {"SHA-256", "SHA-3-256"},
 }
 
 func init() {

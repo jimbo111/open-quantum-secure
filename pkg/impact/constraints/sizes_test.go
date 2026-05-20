@@ -202,6 +202,9 @@ func TestMigrationTargets_ReturnsCopy(t *testing.T) {
 }
 
 func TestMigrationTargets(t *testing.T) {
+	// Targets follow NIST IR 8547 §3 Cat-N strength mapping. ECDSA-P256 /
+	// Ed25519 → ML-DSA-65 (Cat-3) was previously ML-DSA-44 (Cat-2) — fixed
+	// to match the classical curve's actual security level.
 	tests := []struct {
 		from    string
 		want    []string
@@ -209,11 +212,16 @@ func TestMigrationTargets(t *testing.T) {
 	}{
 		{"RSA", []string{"ML-DSA-65", "ML-DSA-87"}, false},
 		{"RSA-2048", []string{"ML-DSA-65", "ML-DSA-87"}, false},
-		{"ECDSA", []string{"ML-DSA-44", "ML-DSA-65"}, false},
-		{"ECDSA-P256", []string{"ML-DSA-44", "ML-DSA-65"}, false},
-		{"ECDH", []string{"ML-KEM-768"}, false},
-		{"Ed25519", []string{"ML-DSA-44"}, false},
-		{"Ed448", []string{"ML-DSA-44"}, false},
+		{"ECDSA", []string{"ML-DSA-65", "ML-DSA-87"}, false},
+		{"ECDSA-P256", []string{"ML-DSA-65", "ML-DSA-87"}, false},
+		{"ECDH", []string{"ML-KEM-768", "ML-KEM-1024"}, false},
+		{"Ed25519", []string{"ML-DSA-65"}, false},
+		{"Ed448", []string{"ML-DSA-87"}, false},
+		// New mappings — encryption + DH + symmetric.
+		{"RSA-OAEP", []string{"ML-KEM-768", "ML-KEM-1024"}, false},
+		{"DH", []string{"ML-KEM-768", "ML-KEM-1024"}, false},
+		{"AES-128", []string{"AES-256"}, false},
+		{"SHA-1", []string{"SHA-256", "SHA-3-256"}, false},
 		{"UNKNOWN", nil, true},
 	}
 
