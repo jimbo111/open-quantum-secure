@@ -66,3 +66,42 @@ func TestValidateEngineNames_EmptyIsNoop(t *testing.T) {
 		t.Errorf("empty slice: %v", err)
 	}
 }
+
+// TestValidateImpactMaxHops covers the bounds applied to --impact-max-hops.
+// 0 must pass (means "use default"); negative must fail with a clear hint;
+// huge values must fail to prevent typos like 10000 from allocating a
+// large ForwardEdges slice.
+func TestValidateImpactMaxHops(t *testing.T) {
+	cases := []struct {
+		name    string
+		hops    int
+		wantErr bool
+		errSub  string
+	}{
+		{"default (0)", 0, false, ""},
+		{"small positive", 5, false, ""},
+		{"at max", maxImpactMaxHops, false, ""},
+		{"just above max", maxImpactMaxHops + 1, true, "exceeds the maximum"},
+		{"negative one", -1, true, ">= 0"},
+		{"large negative", -100, true, ">= 0"},
+		{"absurd positive", 1_000_000, true, "exceeds the maximum"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateImpactMaxHops(tc.hops)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("hops=%d: expected error, got nil", tc.hops)
+				}
+				if !strings.Contains(err.Error(), tc.errSub) {
+					t.Errorf("hops=%d: error %q does not contain %q",
+						tc.hops, err.Error(), tc.errSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("hops=%d: unexpected error: %v", tc.hops, err)
+			}
+		})
+	}
+}

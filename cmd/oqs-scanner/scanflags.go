@@ -30,6 +30,29 @@ func validateLifetimeAndProbeFlags(cmd *cobra.Command, dataLifetimeYears int, tl
 	return nil
 }
 
+// maxImpactMaxHops bounds --impact-max-hops on the high side. DataFlowPath
+// lengths in practice are <100; the propagator caps edges by min(path,
+// maxHops); anything beyond 1000 is almost certainly a typo and slows
+// blast-radius scoring without changing the result.
+const maxImpactMaxHops = 1000
+
+// validateImpactMaxHops rejects negative --impact-max-hops (which the
+// propagator would silently coerce to its default of 10 — surprising the
+// user) and clamps absurdly large values to maxImpactMaxHops so typos
+// don't waste memory in result.ForwardEdges allocation.
+//
+// 0 is allowed: it means "use the propagator's internal default" and is
+// the same as not passing the flag.
+func validateImpactMaxHops(hops int) error {
+	if hops < 0 {
+		return fmt.Errorf("--impact-max-hops must be >= 0 (got %d); 0 selects the default (%d), or pass a positive value to override", hops, 10)
+	}
+	if hops > maxImpactMaxHops {
+		return fmt.Errorf("--impact-max-hops %d exceeds the maximum %d; impact graphs deeper than %d hops are almost always a typo", hops, maxImpactMaxHops, maxImpactMaxHops)
+	}
+	return nil
+}
+
 // validateNetworkInputs runs the shared CT-lookup / SSH / Zeek / Suricata
 // input validation. Each input has its own validator (ValidateHostname,
 // validateSSHTarget, validateZeekLogPath, validateSuricataEvePath); this

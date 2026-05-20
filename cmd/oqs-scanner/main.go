@@ -417,6 +417,9 @@ Example with data lifetime adjustment for healthcare:
 			if err := validateLifetimeAndProbeFlags(cmd, dataLifetimeYears, tlsDetectPref, tlsEnumGroups, tlsDeepProbe); err != nil {
 				return err
 			}
+			if err := validateImpactMaxHops(impactMaxHops); err != nil {
+				return err
+			}
 
 			absPath, err := filepath.Abs(targetPath)
 			if err != nil {
