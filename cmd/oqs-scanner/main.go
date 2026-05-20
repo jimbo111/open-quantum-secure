@@ -13,11 +13,13 @@ import (
 	"net/url"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -66,7 +68,22 @@ var errFailOn = errors.New("policy violations detected")
 
 func main() {
 	orchestrator.SetScannerVersion(version)
-	if err := rootCmd().Execute(); err != nil {
+
+	// Install a SIGINT/SIGTERM handler so Ctrl+C and `kill <pid>` cleanly
+	// cancel the scan context. Subprocess engines (astgrep, semgrep,
+	// cdxgen, syft, cbomkit, cipherscope, cryptoscan, cryptodeps) all run
+	// under exec.CommandContext + WaitDelay=2s and react to ctx
+	// cancellation by sending SIGKILL to the child after the wait window.
+	// Without this signal hook, Ctrl+C kills oqs-scanner immediately,
+	// orphans the subprocess children, and leaks astgrep's temp rule
+	// files (oqs-astgrep-rules-*.yml in TMPDIR) on every run.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	root := rootCmd()
+	root.SetContext(ctx)
+
+	if err := root.Execute(); err != nil {
 		if !errors.Is(err, errFailOn) {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		}
