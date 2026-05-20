@@ -56,10 +56,19 @@ func DetectFormat(path string) string {
 	return ""
 }
 
-// isFatMachOMagic returns true when b begins with the Mach-O fat binary magic
-// 0xCAFEBABE (big-endian) or 0xBEBAFECA (little-endian) AND the following
-// four bytes, read as a big-endian uint32, represent an architecture count
-// that is plausible for a fat binary (≤ 30).
+// isFatMachOMagic returns true when b begins with a Mach-O fat binary magic
+// (32-bit FAT_MAGIC 0xCAFEBABE or 64-bit FAT_MAGIC_64 0xCAFEBABF, in either
+// byte order) AND the following four bytes, read in the matching byte order
+// as a uint32, represent an architecture count that is plausible for a fat
+// binary (≤ 30).
+//
+// Apple's mach-o/fat.h defines:
+//
+//	FAT_MAGIC    = 0xCAFEBABE  // 32-bit fat header
+//	FAT_MAGIC_64 = 0xCAFEBABF  // 64-bit fat header (Universal2 arm64+x86_64)
+//
+// Both layouts share the same first 8 bytes: 4-byte magic followed by
+// 4-byte big-endian nfat_arch (little-endian variants swap each field).
 //
 // The 0xCAFEBABE value is shared with Java class files. The disambiguation
 // heuristic is reliable because:
@@ -70,19 +79,23 @@ func DetectFormat(path string) string {
 //     small (typically 2–4, maximum ~10 for universal builds).
 //
 // A threshold of 30 safely separates the two: any value > 30 is treated as a
-// Java class file (or other non-fat-binary format).
+// Java class file (or other non-fat-binary format). FAT_MAGIC_64 has no Java
+// collision (0xCAFEBABF is not a class-file magic) but the same arch-count
+// bound is applied for symmetry.
 func IsFatMachOMagic(b []byte) bool {
 	if len(b) < 8 {
 		return false
 	}
-	// Big-endian fat binary: 0xCA 0xFE 0xBA 0xBE
-	if b[0] == 0xCA && b[1] == 0xFE && b[2] == 0xBA && b[3] == 0xBE {
+	// Big-endian FAT_MAGIC (32-bit) or FAT_MAGIC_64 (64-bit):
+	//   0xCA 0xFE 0xBA 0xBE   or   0xCA 0xFE 0xBA 0xBF
+	if b[0] == 0xCA && b[1] == 0xFE && b[2] == 0xBA && (b[3] == 0xBE || b[3] == 0xBF) {
 		archCount := uint32(b[4])<<24 | uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7])
 		return archCount > 0 && archCount <= 30
 	}
-	// Little-endian fat binary: 0xBE 0xBA 0xFE 0xCA
+	// Little-endian FAT_CIGAM (32-bit) or FAT_CIGAM_64 (64-bit):
+	//   0xBE 0xBA 0xFE 0xCA   or   0xBF 0xBA 0xFE 0xCA
 	// The arch count is also little-endian in this variant.
-	if b[0] == 0xBE && b[1] == 0xBA && b[2] == 0xFE && b[3] == 0xCA {
+	if (b[0] == 0xBE || b[0] == 0xBF) && b[1] == 0xBA && b[2] == 0xFE && b[3] == 0xCA {
 		archCount := uint32(b[4]) | uint32(b[5])<<8 | uint32(b[6])<<16 | uint32(b[7])<<24
 		return archCount > 0 && archCount <= 30
 	}
