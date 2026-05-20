@@ -66,6 +66,8 @@ var pqcSafeFamilies = map[string]bool{
 	"ML-DSA":  true, // FIPS 204
 	"SLH-DSA": true, // FIPS 205
 	"HQC":     true, // NIST PQC 5th standard (selected March 2025), draft expected 2026
+	"Falcon":  true, // NIST IR 8413 selected (2022); FIPS 206 draft pending publication
+	"FN-DSA":  true, // FIPS 206 standardised name for Falcon (lattice signature)
 	"XMSS":    true,
 	"LMS":     true,
 	// K-PQC Round 4 finalists

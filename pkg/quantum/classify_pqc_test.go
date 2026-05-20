@@ -237,7 +237,11 @@ func TestClassifyPQCEdgeCases(t *testing.T) {
 		{"MLKEM768 no hyphen", "MLKEM768", "kem", RiskSafe, SeverityInfo}, // added to pqcSafeFamilies (X1 fix)
 		{"Kyber-768 old name", "Kyber-768", "kem", RiskVulnerable, SeverityCritical},
 		{"Dilithium3 old name", "Dilithium3", "signature", RiskVulnerable, SeverityHigh},
-		{"Falcon-512 old name", "Falcon-512", "signature", RiskVulnerable, SeverityHigh},
+		// Falcon is NIST-selected (IR 8413) and on the FIPS 206 standardisation
+		// path. Both "Falcon-*" (NIST submission name) and "FN-DSA-*" (FIPS 206
+		// name) refer to the same lattice signature primitive — both PQC-safe.
+		{"Falcon-512 NIST-selected", "Falcon-512", "signature", RiskSafe, SeverityInfo},
+		{"FN-DSA-512 FIPS 206 name", "FN-DSA-512", "signature", RiskSafe, SeverityInfo},
 		{"SPHINCS+ old name", "SPHINCS+", "signature", RiskVulnerable, SeverityHigh},
 		{"FrodoKEM unknown kem", "FrodoKEM", "kem", RiskVulnerable, SeverityCritical},
 		{"BIKE unknown kem", "BIKE", "kem", RiskVulnerable, SeverityCritical},

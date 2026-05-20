@@ -224,6 +224,19 @@
       ]
     },
     {
+      "family": "Falcon",
+      "standard": [
+        {"name": "FIPS 206 (draft, FN-DSA)", "url": "https://csrc.nist.gov/projects/post-quantum-cryptography"},
+        {"name": "NIST IR 8413", "url": "https://csrc.nist.gov/pubs/ir/8413/upd1/final"}
+      ],
+      "variant": [
+        {"pattern": "Falcon-512", "primitive": "signature"},
+        {"pattern": "Falcon-1024", "primitive": "signature"},
+        {"pattern": "FN-DSA-512", "primitive": "signature"},
+        {"pattern": "FN-DSA-1024", "primitive": "signature"}
+      ]
+    },
+    {
       "family": "XMSS",
       "standard": [
         {"name": "RFC 8391", "url": "https://www.rfc-editor.org/rfc/rfc8391"}
