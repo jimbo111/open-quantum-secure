@@ -98,33 +98,34 @@ var publicFallbackNS = []string{"1.1.1.1:53", "8.8.8.8:53"}
 //
 // Implementation notes:
 //   - Uses UDP with an EDNS0 OPT record advertising a 4096-byte buffer.
+//   - Validates the response transaction ID against the sent ID (rejects
+//     off-path spoofed responses).
+//   - Validates the response QNAME matches the query QNAME (rejects
+//     mis-targeted spoofed responses).
 //   - Checks the TC (truncated) bit after reading the UDP response; if set,
 //     retries the same query over TCP (RFC 7766 §6.2).
 //   - Parses only the RDATA portion minimally: walks SvcParams looking for key 5.
 //   - DNS failure modes (NXDOMAIN, timeout, SERVFAIL) all return false silently.
-//   - When denyPrivate is true, a private/loopback system resolver is bypassed
-//     in favour of publicFallbackNS to honour --tls-strict semantics.
+//   - When denyPrivate is true AND the system resolver is private/loopback,
+//     the DNS query is SKIPPED entirely (returns false). Previous behaviour
+//     bypassed to publicFallbackNS — but that leaks the scanned hostname to
+//     Cloudflare/Google, defeating the privacy intent of --tls-strict.
+//     Users who need ECH detection under --tls-strict must point the system
+//     resolver at a non-private upstream they control.
 func queryHTTPSRecordForECH(ctx context.Context, hostname string, timeout time.Duration, denyPrivate bool) bool {
 	// Resolve the system's default nameserver address.
 	nsAddr := resolveSystemNS()
 
 	if denyPrivate {
-		// Validate the system resolver: if it is private/loopback, use public fallbacks.
+		// Under --tls-strict the user has explicitly told us NOT to talk to
+		// private/loopback IPs. If the system resolver is private, the only
+		// way to do the query is to bypass it to 1.1.1.1 / 8.8.8.8 — which
+		// leaks every scanned hostname to a third party. That trades one
+		// data-exposure surface for another, in direct conflict with the
+		// strict-mode user intent. Skip ECH detection in this case.
 		host, _, err := net.SplitHostPort(nsAddr)
 		if err != nil || isPrivateIP(net.ParseIP(host)) {
-			// System resolver is private. Try public fallbacks in order.
-			nsAddr = ""
-			for _, fb := range publicFallbackNS {
-				fbHost, _, fbErr := net.SplitHostPort(fb)
-				if fbErr == nil && !isPrivateIP(net.ParseIP(fbHost)) {
-					nsAddr = fb
-					break
-				}
-			}
-			if nsAddr == "" {
-				// All fallbacks are also private (extremely unusual) — bail safely.
-				return false
-			}
+			return false
 		}
 	}
 
@@ -137,7 +138,7 @@ func queryHTTPSRecordForECH(ctx context.Context, hostname string, timeout time.D
 	if !strings.HasSuffix(qname, ".") {
 		qname += "."
 	}
-	query, err := buildDNSQuery(qname, 65 /* HTTPS */)
+	query, txID, err := buildDNSQueryWithTxID(qname, 65 /* HTTPS */)
 	if err != nil {
 		return false
 	}
@@ -184,7 +185,84 @@ func queryHTTPSRecordForECH(ctx context.Context, hostname string, timeout time.D
 		}
 	}
 
+	// Validate transaction ID matches what we sent. Without this check, an
+	// off-path attacker blasting forged HTTPS-RR responses can spoof a
+	// positive ECH-detection result; the scanner would then mark the host
+	// PartialInventory=true and skip downstream cert inventory checks.
+	if len(resp) < 12 || binary.BigEndian.Uint16(resp[0:2]) != txID {
+		return false
+	}
+
+	// Validate the question section's QNAME matches what we sent. A
+	// matching txID with a different question is still a forged response.
+	if !responseQNameMatches(resp, qname) {
+		return false
+	}
+
 	return parseHTTPSResponseForECH(resp)
+}
+
+// responseQNameMatches parses the question section of a DNS response and
+// returns true when its QNAME equals expectedFQDN (case-insensitive, per
+// RFC 1035 §3.1). Used as a second-layer defence against spoofed responses
+// after the transaction-ID check.
+func responseQNameMatches(resp []byte, expectedFQDN string) bool {
+	if len(resp) < 12 {
+		return false
+	}
+	qdcount := int(binary.BigEndian.Uint16(resp[4:6]))
+	if qdcount != 1 {
+		return false
+	}
+	got, _, ok := readDNSName(resp, 12)
+	if !ok {
+		return false
+	}
+	expected := strings.ToLower(strings.TrimSuffix(expectedFQDN, "."))
+	return strings.ToLower(strings.TrimSuffix(got, ".")) == expected
+}
+
+// readDNSName decodes a DNS name (with compression-pointer support) starting
+// at offset and returns (name, advancedOffset, ok). advancedOffset is the
+// wire position immediately after the name (or the pointer field at the
+// outermost call site). Mirrors skipDNSName's pointer-loop cap.
+func readDNSName(data []byte, offset int) (string, int, bool) {
+	hops := 0
+	outerAdvance := -1
+	cur := offset
+	var b strings.Builder
+	for cur < len(data) {
+		length := int(data[cur])
+		if length == 0 {
+			if outerAdvance >= 0 {
+				return b.String(), outerAdvance, true
+			}
+			return b.String(), cur + 1, true
+		}
+		if length&0xC0 == 0xC0 {
+			if cur+1 >= len(data) {
+				return "", 0, false
+			}
+			hops++
+			if hops > maxDNSPointerHops {
+				return "", 0, false
+			}
+			if outerAdvance < 0 {
+				outerAdvance = cur + 2
+			}
+			cur = int(binary.BigEndian.Uint16(data[cur:cur+2]) & 0x3FFF)
+			continue
+		}
+		if cur+1+length > len(data) || length > 63 {
+			return "", 0, false
+		}
+		if b.Len() > 0 {
+			b.WriteByte('.')
+		}
+		b.Write(data[cur+1 : cur+1+length])
+		cur += 1 + length
+	}
+	return "", 0, false
 }
 
 // dnsQueryTCP sends a DNS query over TCP and returns the response bytes, or nil
@@ -278,7 +356,18 @@ func readSystemResolver() string {
 
 // buildDNSQuery constructs a minimal RFC 1035 DNS query message with an EDNS0
 // OPT pseudo-RR (RFC 6891) advertising a 4096-byte UDP payload size.
+//
+// Kept for backward compatibility with callers / tests that don't need the
+// transaction ID. queryHTTPSRecordForECH uses buildDNSQueryWithTxID so it
+// can validate the response.
 func buildDNSQuery(fqdn string, qtype uint16) ([]byte, error) {
+	msg, _, err := buildDNSQueryWithTxID(fqdn, qtype)
+	return msg, err
+}
+
+// buildDNSQueryWithTxID is buildDNSQuery that also returns the generated
+// transaction ID so the caller can validate the response.
+func buildDNSQueryWithTxID(fqdn string, qtype uint16) ([]byte, uint16, error) {
 	txID := dnsTxIDFn()
 
 	// Header: ID(2) + FLAGS(2) + QDCOUNT(2) + ANCOUNT(2) + NSCOUNT(2) + ARCOUNT(2)
@@ -291,7 +380,7 @@ func buildDNSQuery(fqdn string, qtype uint16) ([]byte, error) {
 	// Encode the QNAME as a sequence of labels.
 	for _, label := range strings.Split(strings.TrimSuffix(fqdn, "."), ".") {
 		if len(label) == 0 || len(label) > 63 {
-			return nil, fmt.Errorf("invalid DNS label %q", label)
+			return nil, 0, fmt.Errorf("invalid DNS label %q", label)
 		}
 		msg = append(msg, byte(len(label)))
 		msg = append(msg, []byte(label)...)
@@ -319,7 +408,7 @@ func buildDNSQuery(fqdn string, qtype uint16) ([]byte, error) {
 	// Set ARCOUNT=1 in the header (bytes 10–11).
 	binary.BigEndian.PutUint16(msg[10:12], 1)
 
-	return msg, nil
+	return msg, txID, nil
 }
 
 // parseHTTPSResponseForECH walks a DNS response and returns true when any HTTPS

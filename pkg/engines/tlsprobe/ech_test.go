@@ -265,6 +265,64 @@ func TestParseHTTPSResponseForECH_WithoutECHParam(t *testing.T) {
 	}
 }
 
+// TestResponseQNameMatches_AcceptsMatchingName covers the qname validation
+// helper used by queryHTTPSRecordForECH to reject spoofed responses with
+// the wrong question section.
+func TestResponseQNameMatches_AcceptsMatchingName(t *testing.T) {
+	t.Parallel()
+	resp := buildHTTPSResponse("example.com", []byte{0x00, 0x05, 0x00, 0x00})
+	if !responseQNameMatches(resp, "example.com.") {
+		t.Error("expected qname match for example.com, got false")
+	}
+	// Case-insensitive per RFC 1035 §3.1.
+	if !responseQNameMatches(resp, "Example.COM") {
+		t.Error("expected case-insensitive qname match")
+	}
+}
+
+// TestResponseQNameMatches_RejectsMismatchedName proves the helper rejects
+// a forged response whose question section names a different host. Without
+// this check, an off-path attacker could send `example.com IN HTTPS ...`
+// in response to our query for `victim.example.com` and pass txID check
+// alone if they guessed the txID.
+func TestResponseQNameMatches_RejectsMismatchedName(t *testing.T) {
+	t.Parallel()
+	resp := buildHTTPSResponse("attacker.example.com", []byte{0x00, 0x05, 0x00, 0x00})
+	if responseQNameMatches(resp, "victim.example.com.") {
+		t.Error("expected qname mismatch for attacker vs victim, got true")
+	}
+}
+
+// TestResponseQNameMatches_RejectsTruncated guards against zero-byte and
+// short-header responses where the question section is absent.
+func TestResponseQNameMatches_RejectsTruncated(t *testing.T) {
+	t.Parallel()
+	if responseQNameMatches(nil, "example.com.") {
+		t.Error("expected false for nil response")
+	}
+	if responseQNameMatches([]byte{0x00, 0x00, 0x00, 0x00}, "example.com.") {
+		t.Error("expected false for truncated header")
+	}
+}
+
+// TestBuildDNSQueryWithTxID_ReturnsRandomID ensures the helper returns the
+// transaction ID embedded at offset 0 of the query, so queryHTTPSRecordForECH
+// can compare it to the response's first two bytes.
+func TestBuildDNSQueryWithTxID_ReturnsRandomID(t *testing.T) {
+	t.Parallel()
+	q, txID, err := buildDNSQueryWithTxID("example.com.", 65)
+	if err != nil {
+		t.Fatalf("buildDNSQueryWithTxID: %v", err)
+	}
+	if len(q) < 2 {
+		t.Fatalf("query too short: %d bytes", len(q))
+	}
+	gotID := uint16(q[0])<<8 | uint16(q[1])
+	if gotID != txID {
+		t.Errorf("txID = %d, want %d (embedded in query header)", txID, gotID)
+	}
+}
+
 func TestParseHTTPSResponseForECH_EmptyResponse(t *testing.T) {
 	t.Parallel()
 	if parseHTTPSResponseForECH(nil) {

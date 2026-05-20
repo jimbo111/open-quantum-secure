@@ -87,6 +87,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		DenyPrivate: opts.TLSDenyPrivate,
 		Timeout:     timeout,
 		CACertPath:  opts.TLSCACert,
+		DetectECH:   opts.TLSDetectECH,
 	}
 
 	sem := make(chan struct{}, defaultConcurrency)

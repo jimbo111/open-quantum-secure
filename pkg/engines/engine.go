@@ -3,11 +3,17 @@ package engines
 import (
 	"context"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 )
+
+// ansiEscapeRE matches ANSI CSI sequences (color/style codes). Tools like
+// cdxgen wrap their --version banner in `\x1b[1m...\x1b[0m`; without
+// stripping, those bytes leak into engine listings.
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 // Tier represents the analysis depth of an engine.
 type Tier int
@@ -81,6 +87,7 @@ type ScanOptions struct {
 	TLSDenyPrivate bool     // reject RFC 1918 / loopback / link-local target IPs
 	TLSTimeout     int      // per-target dial+handshake timeout in seconds (0 = default 10s)
 	TLSCACert      string   // path to custom CA cert PEM for manual verification
+	TLSDetectECH   bool     // opt-in: emit a DNS HTTPS RR query per host to detect ECH (leaks hostname to resolver)
 
 	// Network kill-switch: disables all outbound calls across all network engines.
 	// Equivalent to running in an air-gapped environment.
@@ -158,20 +165,22 @@ type Engine interface {
 	Scan(ctx context.Context, opts ScanOptions) ([]findings.UnifiedFinding, error)
 }
 
-// ProbeVersion runs `<binaryPath> --version` with a 5-second timeout and
-// returns the trimmed first line of output. Returns "unknown" on any failure.
-// This is a convenience helper for subprocess-based engines implementing Version().
+// ProbeVersion runs `<binaryPath> --version` with a 15-second timeout, strips
+// ANSI escape sequences, and returns the trimmed first line of output. Returns
+// "unknown" on any failure. The 15s budget covers cold-start tools (semgrep
+// loads its Python rule cache on first invocation, regularly >5s after install).
 func ProbeVersion(binaryPath string) string {
 	if binaryPath == "" {
 		return "unknown"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, binaryPath, "--version").Output()
 	if err != nil {
 		return "unknown"
 	}
-	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	clean := ansiEscapeRE.ReplaceAllString(string(out), "")
+	line, _, _ := strings.Cut(strings.TrimSpace(clean), "\n")
 	return strings.TrimSpace(line)
 }

@@ -367,6 +367,7 @@ func scanCmd() *cobra.Command {
 		tlsTargets        []string
 		tlsInsecure       bool
 		tlsStrict         bool
+		tlsDetectECH      bool
 		tlsDeepProbe      bool
 		tlsEnumGroups     bool
 		tlsEnumSigAlgs    bool
@@ -538,6 +539,7 @@ Example with data lifetime adjustment for healthcare:
 				TLSTargets:             tlsTargets,
 				TLSInsecure:            tlsInsecure,
 				TLSDenyPrivate:         tlsStrict,
+				TLSDetectECH:           tlsDetectECH,
 				TLSTimeout:             tlsTimeout,
 				TLSCACert:              cfg.TLS.CACert,
 				DeepProbe:              tlsDeepProbe,
@@ -737,6 +739,7 @@ Overrides --sector when both are provided.`)
 		TLSTargets:        &tlsTargets,
 		TLSInsecure:       &tlsInsecure,
 		TLSStrict:         &tlsStrict,
+		TLSDetectECH:      &tlsDetectECH,
 		TLSDeepProbe:      &tlsDeepProbe,
 		TLSEnumGroups:     &tlsEnumGroups,
 		TLSEnumSigAlgs:    &tlsEnumSigAlgs,
@@ -788,6 +791,7 @@ func diffCmd() *cobra.Command {
 		tlsTargets        []string
 		tlsInsecure       bool
 		tlsStrict         bool
+		tlsDetectECH      bool
 		tlsDeepProbe      bool
 		tlsEnumGroups     bool
 		tlsEnumSigAlgs    bool
@@ -942,6 +946,7 @@ Example:
 				TLSTargets:             tlsTargets,
 				TLSInsecure:            tlsInsecure,
 				TLSDenyPrivate:         tlsStrict,
+				TLSDetectECH:           tlsDetectECH,
 				TLSTimeout:             cfg.TLS.Timeout,
 				TLSCACert:              cfg.TLS.CACert,
 				DeepProbe:              tlsDeepProbe,
@@ -1099,6 +1104,7 @@ financial/banking=7, legal/contracts=10, web sessions/ephemeral=1.
 		TLSTargets:        &tlsTargets,
 		TLSInsecure:       &tlsInsecure,
 		TLSStrict:         &tlsStrict,
+		TLSDetectECH:      &tlsDetectECH,
 		TLSDeepProbe:      &tlsDeepProbe,
 		TLSEnumGroups:     &tlsEnumGroups,
 		TLSEnumSigAlgs:    &tlsEnumSigAlgs,

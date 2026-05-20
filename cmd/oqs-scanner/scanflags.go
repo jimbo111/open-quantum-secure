@@ -80,6 +80,7 @@ type networkProbeFlagVars struct {
 	TLSTargets        *[]string
 	TLSInsecure       *bool
 	TLSStrict         *bool
+	TLSDetectECH      *bool
 	TLSDeepProbe      *bool
 	TLSEnumGroups     *bool
 	TLSEnumSigAlgs    *bool
@@ -115,6 +116,7 @@ func addNetworkProbeFlags(cmd *cobra.Command, v networkProbeFlagVars) {
 	cmd.Flags().StringSliceVar(v.TLSTargets, "tls-targets", nil, "TLS endpoints to probe for quantum-vulnerable crypto (comma-separated host:port)")
 	cmd.Flags().BoolVar(v.TLSInsecure, "tls-insecure", false, "Skip TLS certificate verification when probing (use for self-signed certs)")
 	cmd.Flags().BoolVar(v.TLSStrict, "tls-strict", true, "Deny TLS probe connections to private/loopback IPs (use --tls-strict=false to allow)")
+	cmd.Flags().BoolVar(v.TLSDetectECH, "detect-ech", false, "Opt-in: probe each TLS target for Encrypted Client Hello via a DNS HTTPS RR query. Off by default because the query leaks the scanned hostname to the resolver. Under --tls-strict, the query is skipped entirely when the system resolver is private (no bypass to public 1.1.1.1/8.8.8.8).")
 	cmd.Flags().BoolVar(v.TLSDeepProbe, "deep-probe", false, "After TLS handshake, probe PQC group codepoints via raw ClientHellos (Sprint 7; requires --tls-targets)")
 	cmd.Flags().BoolVar(v.TLSEnumGroups, "enumerate-groups", false, "Probe all 13 TLS SupportedGroup codepoints individually to build a full acceptance list (Sprint 8; requires --tls-targets; implies --deep-probe level of detail)")
 	cmd.Flags().BoolVar(v.TLSEnumSigAlgs, "enumerate-sigalgs", false, "Probe each TLS SignatureScheme codepoint individually to detect server-supported sig algs (Sprint 8; requires --tls-targets)")

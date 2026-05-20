@@ -99,6 +99,14 @@ type ProbeOpts struct {
 	DenyPrivate bool
 	Timeout     time.Duration
 	CACertPath  string
+
+	// DetectECH controls whether the probe performs DNS HTTPS RR (Type=65)
+	// queries to detect Encrypted Client Hello support. Off by default
+	// because every successful TLS probe would emit one DNS query per
+	// host — leaking the scanned hostname to the resolver (and, under
+	// DenyPrivate, to the public fallback 1.1.1.1/8.8.8.8 when the
+	// system resolver is private). Opt in with --detect-ech.
+	DetectECH bool
 }
 
 // probe connects to a TLS endpoint, captures handshake data, and optionally
@@ -202,11 +210,15 @@ func probe(ctx context.Context, target string, opts ProbeOpts) ProbeResult {
 	result.BytesOut = counting.BytesOut()
 	result.HandshakeVolumeClass = ClassifyHandshakeVolume(result.BytesIn + result.BytesOut).String()
 
-	// Detect ECH (S2.4) after handshake data is available.
-	// Pass DenyPrivate so that --tls-strict prevents DNS queries to private resolvers.
-	echDetected, echSource := detectECH(ctx, host, opts.Timeout, opts.DenyPrivate)
-	result.ECHDetected = echDetected
-	result.ECHSource = echSource
+	// Detect ECH (S2.4) — opt-in via --detect-ech. The probe emits a DNS
+	// HTTPS RR query per host, leaking the scanned hostname to the
+	// resolver. Default-off avoids that leak; users who need ECH-presence
+	// signals explicitly opt in.
+	if opts.DetectECH {
+		echDetected, echSource := detectECH(ctx, host, opts.Timeout, opts.DenyPrivate)
+		result.ECHDetected = echDetected
+		result.ECHSource = echSource
+	}
 
 	// Extract leaf cert info.
 	if len(capturedCerts) > 0 {
