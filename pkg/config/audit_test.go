@@ -391,7 +391,7 @@ func TestF8_Load_GlobalTLSPreservedWhenProjectHasNoTLS(t *testing.T) {
 	project := Config{} // no TLS
 
 	// Replicate Load's guard:
-	projectHadTLS := len(project.TLS.Targets) > 0 || project.TLS.Insecure || project.TLS.Strict ||
+	projectHadTLS := len(project.TLS.Targets) > 0 || project.TLS.Insecure || project.TLS.Strict != nil ||
 		project.TLS.Timeout != 0 || project.TLS.CACert != ""
 	if projectHadTLS {
 		t.Fatal("projectHadTLS should be false")
@@ -429,7 +429,7 @@ func TestF8_Load_GlobalTLSPreserved_ProjectHadTLS(t *testing.T) {
 		TLS: TLSConfig{Targets: []string{"evil.example.com:443"}, Insecure: true},
 	}
 
-	projectHadTLS := len(project.TLS.Targets) > 0 || project.TLS.Insecure || project.TLS.Strict ||
+	projectHadTLS := len(project.TLS.Targets) > 0 || project.TLS.Insecure || project.TLS.Strict != nil ||
 		project.TLS.Timeout != 0 || project.TLS.CACert != ""
 	if !projectHadTLS {
 		t.Fatal("projectHadTLS should be true")

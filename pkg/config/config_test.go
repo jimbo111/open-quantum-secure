@@ -205,9 +205,10 @@ tls:
 			}
 
 			// Replicate the SSRF guard from Load() (config.go:131-141).
+			// TLS.Strict is *bool (tristate) — nil means unset.
 			projectHadTLS := len(project.TLS.Targets) > 0 ||
 				project.TLS.Insecure ||
-				project.TLS.Strict ||
+				project.TLS.Strict != nil ||
 				project.TLS.Timeout != 0 ||
 				project.TLS.CACert != ""
 
@@ -226,14 +227,57 @@ tls:
 			if merged.TLS.Insecure {
 				t.Error("TLS.Insecure should be false after SSRF guard")
 			}
-			if merged.TLS.Strict {
-				t.Error("TLS.Strict should be false after SSRF guard")
+			if merged.TLS.Strict != nil {
+				t.Errorf("TLS.Strict should be nil (unset) after SSRF guard, got %v", *merged.TLS.Strict)
 			}
 			if merged.TLS.Timeout != 0 {
 				t.Errorf("TLS.Timeout should be 0 after SSRF guard, got %d", merged.TLS.Timeout)
 			}
 			if merged.TLS.CACert != "" {
 				t.Errorf("TLS.CACert should be empty after SSRF guard, got %q", merged.TLS.CACert)
+			}
+		})
+	}
+}
+
+// TestTLSStrictTristate_YAMLCanDisable verifies that the YAML decoder
+// distinguishes "tls.strict not mentioned" (Strict == nil) from
+// "tls.strict: false" (Strict points at a false value). This is the
+// fundamental invariant that lets `.oqs-scanner.yaml` disable a CLI
+// default-true tls-strict flag — previously a plain bool conflated the
+// two cases and `tls.strict: false` was silently ignored.
+//
+// Note: global config (~/.oqs/config.yaml) carries TLS settings; project
+// configs have TLS stripped for SSRF protection. We parse a global-shape
+// YAML directly via the unmarshalStrict helper.
+func TestTLSStrictTristate_YAMLCanDisable(t *testing.T) {
+	cases := []struct {
+		name       string
+		yaml       string
+		wantNil    bool
+		wantValue  bool
+	}{
+		{"unset stays nil", "tls:\n  targets:\n    - example.com:443\n", true, false},
+		{"explicit true", "tls:\n  strict: true\n", false, true},
+		{"explicit false", "tls:\n  strict: false\n", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var c Config
+			if err := unmarshalStrict([]byte(tc.yaml), &c); err != nil {
+				t.Fatalf("unmarshalStrict: %v", err)
+			}
+			if tc.wantNil {
+				if c.TLS.Strict != nil {
+					t.Fatalf("Strict = %v, want nil", *c.TLS.Strict)
+				}
+				return
+			}
+			if c.TLS.Strict == nil {
+				t.Fatalf("Strict = nil, want %v", tc.wantValue)
+			}
+			if *c.TLS.Strict != tc.wantValue {
+				t.Fatalf("Strict = %v, want %v", *c.TLS.Strict, tc.wantValue)
 			}
 		})
 	}

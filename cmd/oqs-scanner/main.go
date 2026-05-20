@@ -468,8 +468,14 @@ Example with data lifetime adjustment for healthcare:
 			if !cmd.Flags().Changed("tls-insecure") && cfg.TLS.Insecure {
 				tlsInsecure = true
 			}
-			if !cmd.Flags().Changed("tls-strict") && cfg.TLS.Strict {
-				tlsStrict = true
+			// Tristate resolution: precedence is CLI > config > hardcoded
+			// default (true). cfg.TLS.Strict is *bool — nil means "config
+			// didn't mention it" (keep default); non-nil means user
+			// explicitly chose true OR false in YAML. Previously this used
+			// the OR-up `&& cfg.TLS.Strict` pattern which could only flip
+			// false→true, so `tls.strict: false` in YAML was ignored.
+			if !cmd.Flags().Changed("tls-strict") && cfg.TLS.Strict != nil {
+				tlsStrict = *cfg.TLS.Strict
 			}
 
 			// --deep-probe requires at least one TLS target; fail early so the
@@ -908,8 +914,9 @@ Example:
 			if !cmd.Flags().Changed("tls-insecure") && cfg.TLS.Insecure {
 				tlsInsecure = true
 			}
-			if !cmd.Flags().Changed("tls-strict") && cfg.TLS.Strict {
-				tlsStrict = true
+			// Tristate resolution — see scanCmd for full rationale.
+			if !cmd.Flags().Changed("tls-strict") && cfg.TLS.Strict != nil {
+				tlsStrict = *cfg.TLS.Strict
 			}
 
 			// --deep-probe requires at least one TLS target; fail early.

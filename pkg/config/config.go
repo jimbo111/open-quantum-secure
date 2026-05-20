@@ -25,10 +25,16 @@ type Config struct {
 // TLSConfig controls TLS probe engine behavior. For security, TLS targets are
 // blocked from project config (.oqs-scanner.yaml) and only loaded from global
 // config (~/.oqs/config.yaml) or CLI flags.
+//
+// Strict is a TRISTATE (*bool): nil means "not set in config" (caller falls
+// back to its hardcoded default), &true / &false are explicit user choices.
+// A plain bool would conflate "config didn't mention strict" with "config
+// said strict: false" — the latter must be able to disable a CLI default
+// of true, the former must NOT.
 type TLSConfig struct {
 	Targets  []string `yaml:"targets,omitempty"`
 	Insecure bool     `yaml:"insecure,omitempty"`
-	Strict   bool     `yaml:"strict,omitempty"`
+	Strict   *bool    `yaml:"strict,omitempty"`
 	Timeout  int      `yaml:"timeout,omitempty"`
 	CACert   string   `yaml:"caCert,omitempty"`
 }
@@ -146,7 +152,7 @@ func Load(targetPath string) (Config, error) {
 	// TLS config from project config is blocked for security (prevents SSRF
 	// via malicious .oqs-scanner.yaml in PRs). Only global config and CLI flags
 	// can set TLS targets.
-	projectHadTLS := len(project.TLS.Targets) > 0 || project.TLS.Insecure || project.TLS.Strict || project.TLS.Timeout != 0 || project.TLS.CACert != ""
+	projectHadTLS := len(project.TLS.Targets) > 0 || project.TLS.Insecure || project.TLS.Strict != nil || project.TLS.Timeout != 0 || project.TLS.CACert != ""
 	if projectHadTLS {
 		project.TLS = TLSConfig{} // zero out before merge
 	}
