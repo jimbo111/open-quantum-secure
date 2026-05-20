@@ -1224,8 +1224,16 @@ func writeOutput(_ *cobra.Command, format, outputFile string, scanResult output.
 		return writeErr
 	}
 
-	// Flush and check close error to catch write failures (e.g. disk full).
+	// fsync THEN close. Without Sync(), the most recent buffered writes
+	// can be lost if the host loses power between Close() and the kernel
+	// flushing its page cache. Close() alone gives no guarantee the bytes
+	// reached disk. saveLocalCBOM (line ~1933) follows the same
+	// Sync→Close pattern; mirror it here for any --output writer.
 	if f != nil {
+		if err := f.Sync(); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("sync output file: %w", err)
+		}
 		if err := f.Close(); err != nil {
 			return fmt.Errorf("close output file: %w", err)
 		}
