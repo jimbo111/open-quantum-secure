@@ -98,7 +98,13 @@ func WriteSARIF(w io.Writer, result ScanResult) error {
 	}
 
 	log := sarifLog{
-		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+		// Pin $schema to the OASIS canonical errata-01 release URL rather
+		// than the upstream GitHub `main` branch. The github branch is a
+		// moving target — a SARIF 2.2 redesign would silently change what
+		// strict validators reference. The OASIS-hosted errata01 URL is
+		// the latest stable official 2.1.0 release and is content-frozen
+		// per OASIS publication conventions.
+		Schema:  "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
 		Version: "2.1.0",
 		Runs: []sarifRun{
 			{
