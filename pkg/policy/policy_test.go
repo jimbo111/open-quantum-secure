@@ -1,11 +1,58 @@
 package policy
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
 	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
 )
+
+// TestPolicyValidate covers the policy-level config-load guard. MinQRS
+// must lie in [0,100] (the QRS range); MaxQuantumVulnerable must be nil
+// (disabled) or >= 0. Negative MaxQuantumVulnerable would otherwise
+// silently fail clean scans via Evaluate's `summary.QuantumVulnerable
+// > *p.MaxQuantumVulnerable` check (0 > -1 is true).
+func TestPolicyValidate(t *testing.T) {
+	cases := []struct {
+		name    string
+		p       Policy
+		wantErr bool
+		errSub  string
+	}{
+		{"zero (default)", Policy{}, false, ""},
+		{"MinQRS=0 disabled", Policy{MinQRS: 0}, false, ""},
+		{"MinQRS=50 valid", Policy{MinQRS: 50}, false, ""},
+		{"MinQRS=100 valid (perfect)", Policy{MinQRS: 100}, false, ""},
+		{"MinQRS=101 rejected", Policy{MinQRS: 101}, true, "minQRS"},
+		{"MinQRS=200 rejected", Policy{MinQRS: 200}, true, "minQRS"},
+		{"MinQRS=-1 rejected", Policy{MinQRS: -1}, true, "minQRS"},
+		{"MaxQuantumVulnerable nil disabled", Policy{MaxQuantumVulnerable: nil}, false, ""},
+		{"MaxQuantumVulnerable=0 valid (strict)", Policy{MaxQuantumVulnerable: intPtr(0)}, false, ""},
+		{"MaxQuantumVulnerable=5 valid", Policy{MaxQuantumVulnerable: intPtr(5)}, false, ""},
+		{"MaxQuantumVulnerable=-1 rejected", Policy{MaxQuantumVulnerable: intPtr(-1)}, true, "maxQuantumVulnerable"},
+		{"MaxQuantumVulnerable=-100 rejected", Policy{MaxQuantumVulnerable: intPtr(-100)}, true, "maxQuantumVulnerable"},
+		// Both bad — order doesn't matter, the first error fires.
+		{"both invalid (MinQRS first)", Policy{MinQRS: 200, MaxQuantumVulnerable: intPtr(-1)}, true, "minQRS"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.p.Validate()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tc.errSub) {
+					t.Errorf("error %q does not contain %q", err.Error(), tc.errSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
 
 // helpers
 

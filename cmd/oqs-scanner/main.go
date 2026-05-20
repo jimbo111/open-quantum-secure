@@ -2098,6 +2098,13 @@ func evaluatePolicy(cfg config.Config, failOn string, results []findings.Unified
 		MaxQuantumVulnerable: cfg.Policy.MaxQuantumVulnerable,
 		MinQRS:               cfg.Policy.MinQRS,
 	}
+	// Reject MinQRS out of [0,100] and negative MaxQuantumVulnerable BEFORE
+	// running Evaluate — otherwise a typo'd `policy.minQRS: 200` silently
+	// fails every scan, and `policy.maxQuantumVulnerable: -1` makes clean
+	// scans fail with `0 > -1`.
+	if err := pol.Validate(); err != nil {
+		return err
+	}
 	summary := policy.ScanSummary{
 		QuantumVulnerable: scanResult.Summary.QuantumVulnerable,
 		QuantumSafe:       scanResult.Summary.QuantumSafe,
@@ -2213,6 +2220,11 @@ func evaluatePolicyAdvisory(cfg config.Config, failOn string, results []findings
 		RequirePQC:           cfg.Policy.RequirePQC,
 		MaxQuantumVulnerable: cfg.Policy.MaxQuantumVulnerable,
 		MinQRS:               cfg.Policy.MinQRS,
+	}
+	// Advisory mode never exits non-zero — surface validation errors as
+	// warnings instead of blocking the scan.
+	if err := pol.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: [ADVISORY] policy validation: %s\n", err)
 	}
 	summary := policy.ScanSummary{
 		QuantumVulnerable: scanResult.Summary.QuantumVulnerable,
