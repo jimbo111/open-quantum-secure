@@ -8,6 +8,23 @@ import (
 	"strings"
 )
 
+// maxAPIResponseBytes is the hard cap applied to every JSON success-body
+// read by the API client (16 MiB). Without this bound a hostile or
+// runaway server could stream unbounded JSON into json.NewDecoder.Decode
+// and OOM the scanner.
+//
+// 16 MiB is generous for every documented response (Identity is < 1 KiB,
+// scan/apikey/history list responses are bounded by server-side paging).
+// Larger payloads should use a dedicated endpoint with explicit streaming
+// (cf. DownloadCache which has its own 50 MiB+1 cap).
+const maxAPIResponseBytes int64 = 16 << 20
+
+// decodeJSONResponse wraps resp.Body in an io.LimitReader before decoding
+// JSON into dst. Callers MUST still defer resp.Body.Close().
+func decodeJSONResponse(resp *http.Response, dst interface{}) error {
+	return json.NewDecoder(io.LimitReader(resp.Body, maxAPIResponseBytes)).Decode(dst)
+}
+
 // apiErrorEnvelope is the JSON wrapper around the error object.
 type apiErrorEnvelope struct {
 	Error APIError `json:"error"`

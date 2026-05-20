@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -47,7 +46,7 @@ func (c *Client) UploadCache(ctx context.Context, req CacheUploadRequest) (*Cach
 	}
 
 	var envelope apiResponse[CacheUploadResponse]
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+	if err := decodeJSONResponse(resp, &envelope); err != nil {
 		return nil, fmt.Errorf("api: cache upload: decode response: %w", err)
 	}
 	return &envelope.Data, nil

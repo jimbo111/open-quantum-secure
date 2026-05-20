@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,7 +31,7 @@ func (c *Client) CreateAPIKey(ctx context.Context, name string) (*APIKeyCreateRe
 	}
 
 	var envelope apiResponse[APIKeyCreateResponse]
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+	if err := decodeJSONResponse(resp, &envelope); err != nil {
 		return nil, fmt.Errorf("api: decode create-api-key response: %w", err)
 	}
 	return &envelope.Data, nil
@@ -52,7 +51,7 @@ func (c *Client) ListAPIKeys(ctx context.Context) (*APIKeyListResponse, error) {
 	}
 
 	var envelope apiResponse[APIKeyListResponse]
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+	if err := decodeJSONResponse(resp, &envelope); err != nil {
 		return nil, fmt.Errorf("api: decode list-api-keys response: %w", err)
 	}
 

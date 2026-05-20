@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -39,7 +38,7 @@ func (c *Client) ListScans(ctx context.Context, project string, limit int) (*Sca
 	}
 
 	var envelope apiResponse[ScanListResponse]
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+	if err := decodeJSONResponse(resp, &envelope); err != nil {
 		return nil, err
 	}
 	return &envelope.Data, nil

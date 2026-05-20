@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 )
 
@@ -20,7 +19,7 @@ func (c *Client) UploadCBOM(ctx context.Context, req UploadRequest) (*UploadResp
 	}
 
 	var envelope apiResponse[UploadResponse]
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+	if err := decodeJSONResponse(resp, &envelope); err != nil {
 		return nil, err
 	}
 	return &envelope.Data, nil
