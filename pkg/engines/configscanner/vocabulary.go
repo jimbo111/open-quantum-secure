@@ -49,6 +49,32 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "algorithm", ValueHints: []string{"ecdh"}, Algorithm: "ECDH", Primitive: "key-exchange"},
 	{KeyPattern: "algorithm", ValueHints: []string{"ed25519"}, Algorithm: "Ed25519", Primitive: "signature"},
 	{KeyPattern: "algorithm", ValueHints: []string{"x25519"}, Algorithm: "X25519", Primitive: "key-exchange"},
+	// --- PQC under 'algorithm' (NIST FIPS 203/204/205 + IETF hybrid KEMs) ---
+	// More-specific hints first so first-match-wins picks the canonical name.
+	{KeyPattern: "algorithm", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"secp256r1mlkem768", "secp256r1-mlkem-768"}, Algorithm: "SecP256r1MLKEM768", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"secp384r1mlkem1024", "secp384r1-mlkem-1024"}, Algorithm: "SecP384r1MLKEM1024", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"ml-kem-512", "mlkem512"}, Algorithm: "ML-KEM-512", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"ml-kem-768", "mlkem768"}, Algorithm: "ML-KEM-768", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"ml-kem-1024", "mlkem1024"}, Algorithm: "ML-KEM-1024", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"ml-kem"}, Algorithm: "ML-KEM", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"ml-dsa-44", "mldsa44"}, Algorithm: "ML-DSA-44", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"ml-dsa-65", "mldsa65"}, Algorithm: "ML-DSA-65", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"ml-dsa-87", "mldsa87"}, Algorithm: "ML-DSA-87", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"ml-dsa"}, Algorithm: "ML-DSA", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"slh-dsa-sha2-128s"}, Algorithm: "SLH-DSA-SHA2-128s", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"slh-dsa-sha2-128f"}, Algorithm: "SLH-DSA-SHA2-128f", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"slh-dsa-sha2-192s"}, Algorithm: "SLH-DSA-SHA2-192s", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"slh-dsa-sha2-256s"}, Algorithm: "SLH-DSA-SHA2-256s", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"slh-dsa"}, Algorithm: "SLH-DSA", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"fn-dsa-512", "falcon-512"}, Algorithm: "Falcon-512", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"fn-dsa-1024", "falcon-1024"}, Algorithm: "Falcon-1024", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"falcon", "fn-dsa"}, Algorithm: "Falcon", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"hqc-128"}, Algorithm: "HQC-128", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"hqc-192"}, Algorithm: "HQC-192", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"hqc-256"}, Algorithm: "HQC-256", Primitive: "kem"},
+	{KeyPattern: "algorithm", ValueHints: []string{"hqc"}, Algorithm: "HQC", Primitive: "kem"},
+	// Legacy / draft Kyber names still appear in older configs.
 	{KeyPattern: "algorithm", ValueHints: []string{"kyber"}, Algorithm: "Kyber", Primitive: "kem"},
 	{KeyPattern: "algorithm", ValueHints: []string{"dilithium"}, Algorithm: "Dilithium", Primitive: "signature"},
 
@@ -102,6 +128,13 @@ var cryptoParams = []CryptoParam{
 	// --- cipher suite keys (must appear before bare "cipher" entries) ---
 	// These use longer KeyPattern substrings (ciphersuite/cipher-suite/cipher_suite)
 	// and will only match keys that contain those exact substrings.
+	// PQC hybrid + pure KEMs come first so first-match-wins picks the canonical name.
+	{KeyPattern: "ciphersuite", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
+	{KeyPattern: "cipher-suite", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
+	{KeyPattern: "cipher_suite", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
+	{KeyPattern: "ciphersuite", ValueHints: []string{"mlkem"}, Algorithm: "ML-KEM", Primitive: "kem"},
+	{KeyPattern: "cipher-suite", ValueHints: []string{"mlkem"}, Algorithm: "ML-KEM", Primitive: "kem"},
+	{KeyPattern: "cipher_suite", ValueHints: []string{"mlkem"}, Algorithm: "ML-KEM", Primitive: "kem"},
 	{KeyPattern: "ciphersuite", ValueHints: []string{"ecdhe"}, Algorithm: "ECDHE", Primitive: "key-exchange"},
 	{KeyPattern: "cipher-suite", ValueHints: []string{"ecdhe"}, Algorithm: "ECDHE", Primitive: "key-exchange"},
 	{KeyPattern: "cipher_suite", ValueHints: []string{"ecdhe"}, Algorithm: "ECDHE", Primitive: "key-exchange"},
@@ -109,7 +142,34 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "cipher-suite", ValueHints: []string{"rsa"}, Algorithm: "RSA", Primitive: "asymmetric"},
 	{KeyPattern: "cipher_suite", ValueHints: []string{"rsa"}, Algorithm: "RSA", Primitive: "asymmetric"},
 
+	// --- TLS SupportedGroups / named-group / key-exchange keys (PQC-aware) ---
+	// Modern TLS 1.3 configs name groups directly (e.g. groups=X25519MLKEM768).
+	// Longer hints first; pure ML-KEM and hybrids classify as RiskSafe via pqcSafeFamilies.
+	{KeyPattern: "groups", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
+	{KeyPattern: "groups", ValueHints: []string{"secp256r1mlkem768", "secp256r1-mlkem-768"}, Algorithm: "SecP256r1MLKEM768", Primitive: "kem"},
+	{KeyPattern: "groups", ValueHints: []string{"secp384r1mlkem1024", "secp384r1-mlkem-1024"}, Algorithm: "SecP384r1MLKEM1024", Primitive: "kem"},
+	{KeyPattern: "groups", ValueHints: []string{"mlkem768", "ml-kem-768"}, Algorithm: "ML-KEM-768", Primitive: "kem"},
+	{KeyPattern: "groups", ValueHints: []string{"mlkem1024", "ml-kem-1024"}, Algorithm: "ML-KEM-1024", Primitive: "kem"},
+	{KeyPattern: "groups", ValueHints: []string{"mlkem512", "ml-kem-512"}, Algorithm: "ML-KEM-512", Primitive: "kem"},
+	{KeyPattern: "groups", ValueHints: []string{"kyber"}, Algorithm: "Kyber", Primitive: "kem"},
+	{KeyPattern: "groups", ValueHints: []string{"x25519"}, Algorithm: "X25519", Primitive: "key-exchange"},
+	{KeyPattern: "groups", ValueHints: []string{"secp256r1", "p-256"}, Algorithm: "ECDH", Primitive: "key-exchange"},
+	{KeyPattern: "groups", ValueHints: []string{"secp384r1", "p-384"}, Algorithm: "ECDH", Primitive: "key-exchange"},
+	{KeyPattern: "kex", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
+	{KeyPattern: "kex", ValueHints: []string{"mlkem"}, Algorithm: "ML-KEM", Primitive: "kem"},
+	{KeyPattern: "kex", ValueHints: []string{"ecdhe"}, Algorithm: "ECDHE", Primitive: "key-exchange"},
+	{KeyPattern: "key_exchange", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
+	{KeyPattern: "key_exchange", ValueHints: []string{"mlkem"}, Algorithm: "ML-KEM", Primitive: "kem"},
+	{KeyPattern: "key_exchange", ValueHints: []string{"ecdhe"}, Algorithm: "ECDHE", Primitive: "key-exchange"},
+
 	// --- cipher mode keys ---
+	// PQC hints under bare 'cipher' come before classical so first-match-wins picks PQC.
+	{KeyPattern: "cipher", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
+	{KeyPattern: "cipher", ValueHints: []string{"mlkem", "ml-kem"}, Algorithm: "ML-KEM", Primitive: "kem"},
+	{KeyPattern: "cipher", ValueHints: []string{"mldsa", "ml-dsa"}, Algorithm: "ML-DSA", Primitive: "signature"},
+	{KeyPattern: "cipher", ValueHints: []string{"slh-dsa", "slhdsa"}, Algorithm: "SLH-DSA", Primitive: "signature"},
+	{KeyPattern: "cipher", ValueHints: []string{"falcon", "fn-dsa"}, Algorithm: "Falcon", Primitive: "signature"},
+	{KeyPattern: "cipher", ValueHints: []string{"hqc"}, Algorithm: "HQC", Primitive: "kem"},
 	{KeyPattern: "cipher", ValueHints: []string{"aes-256-gcm", "aes256gcm"}, Algorithm: "AES", Primitive: "symmetric", KeySize: 256, Mode: "GCM"},
 	{KeyPattern: "cipher", ValueHints: []string{"aes-128-gcm", "aes128gcm"}, Algorithm: "AES", Primitive: "symmetric", KeySize: 128, Mode: "GCM"},
 	{KeyPattern: "cipher", ValueHints: []string{"aes-256-cbc", "aes256cbc"}, Algorithm: "AES", Primitive: "symmetric", KeySize: 256, Mode: "CBC"},
@@ -120,6 +180,9 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "cipher", ValueHints: []string{"aes"}, Algorithm: "AES", Primitive: "symmetric"},
 
 	// --- SSL/TLS protocol version keys ---
+	// PQC hybrid names occasionally appear in 'protocol' / 'named_groups' style configs.
+	{KeyPattern: "protocol", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
+	{KeyPattern: "protocol", ValueHints: []string{"mlkem", "ml-kem"}, Algorithm: "ML-KEM", Primitive: "kem"},
 	{KeyPattern: "protocol", ValueHints: []string{"sslv3", "ssl3", "ssl 3"}, Algorithm: "SSLv3", Primitive: "protocol"},
 	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.0", "tls1.0", "tls 1.0"}, Algorithm: "TLS", Primitive: "protocol"},
 	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.1", "tls1.1", "tls 1.1"}, Algorithm: "TLS", Primitive: "protocol"},
