@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/output"
@@ -103,6 +104,24 @@ func validateWebhookURL(rawURL string) error {
 	return nil
 }
 
+// redactWebhookURL returns scheme://host of rawURL — dropping path, query,
+// fragment, and any userinfo. Slack, Discord, and many custom webhook
+// providers embed secrets in the URL path (e.g. hooks.slack.com/services/
+// T../B../<token>). Logging the full URL to stderr would surface the
+// secret in CI logs and scrollback. The redacted form is enough to
+// identify the destination host without exposing credentials.
+//
+// On parse failure (which validateWebhookURL would already have rejected
+// upstream) the literal string "<webhook URL redacted>" is returned so the
+// log line still renders.
+func redactWebhookURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return "<webhook URL redacted>"
+	}
+	return u.Scheme + "://" + u.Host
+}
+
 // sendWebhook marshals payload to JSON and POSTs it to webhookURL.
 // All failures are non-fatal: a warning is printed to stderr and the scan
 // exit code is not affected.
@@ -111,6 +130,9 @@ func sendWebhook(webhookURL string, payload WebhookPayload) {
 		fmt.Fprintf(os.Stderr, "WARNING: webhook skipped: %s\n", err)
 		return
 	}
+	// Use the redacted form in every log line so secrets embedded in the
+	// path (Slack/Discord-style) don't leak to CI logs / scrollback.
+	logURL := redactWebhookURL(webhookURL)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -141,7 +163,13 @@ func sendWebhook(webhookURL string, payload WebhookPayload) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: webhook delivery failed: %s\n", err)
+		// The underlying net/http error wraps the request URL — strip it
+		// and substitute the redacted form so DNS or TLS-handshake errors
+		// don't surface the secret-bearing path. err.Error() typically
+		// looks like `Post "<webhookURL>": dial tcp: ...`; replace the
+		// quoted URL with the redacted form before printing.
+		fmt.Fprintf(os.Stderr, "WARNING: webhook delivery failed: %s\n",
+			strings.Replace(err.Error(), webhookURL, logURL, 1))
 		return
 	}
 	defer resp.Body.Close()
@@ -151,5 +179,5 @@ func sendWebhook(webhookURL string, payload WebhookPayload) {
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "Webhook delivered to %s (HTTP %d)\n", webhookURL, resp.StatusCode)
+	fmt.Fprintf(os.Stderr, "Webhook delivered to %s (HTTP %d)\n", logURL, resp.StatusCode)
 }

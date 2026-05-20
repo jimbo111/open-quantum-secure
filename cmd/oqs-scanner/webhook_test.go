@@ -6,12 +6,62 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/output"
 	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
 )
+
+// TestRedactWebhookURL exercises the path/query/userinfo stripping that
+// prevents Slack/Discord-style secrets in the URL from leaking to stderr.
+func TestRedactWebhookURL(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"slack-style path token", "https://hooks.slack.com/services/T01234/B5678/secrettoken1234", "https://hooks.slack.com"},
+		{"discord-style path token", "https://discord.com/api/webhooks/123456/secretpath", "https://discord.com"},
+		{"path + query", "https://hook.example.com/path?token=abc", "https://hook.example.com"},
+		{"with userinfo", "https://user:pass@hook.example.com/path", "https://hook.example.com"},
+		{"with port", "https://hook.internal:8443/p", "https://hook.internal:8443"},
+		{"only host", "https://hook.example.com", "https://hook.example.com"},
+		{"malformed", ":::not-a-url", "<webhook URL redacted>"},
+		{"empty", "", "<webhook URL redacted>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactWebhookURL(tc.in)
+			if got != tc.want {
+				t.Errorf("redactWebhookURL(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRedactWebhookURL_NeverEmitsSecretPath asserts every case that
+// contains a secret-bearing path returns a string that does NOT include
+// the secret. Stronger guard than the table — uses substring containment.
+func TestRedactWebhookURL_NeverEmitsSecretPath(t *testing.T) {
+	secrets := []struct {
+		url    string
+		secret string
+	}{
+		{"https://hooks.slack.com/services/T01234/B5678/secrettoken1234", "secrettoken1234"},
+		{"https://discord.com/api/webhooks/123456/secretpath", "secretpath"},
+		{"https://hook.example.com/path?token=abc", "abc"},
+		{"https://hook.example.com/path?token=abc#frag", "frag"},
+		{"https://user:hunter2@hook.example.com/", "hunter2"},
+	}
+	for _, tc := range secrets {
+		if got := redactWebhookURL(tc.url); strings.Contains(got, tc.secret) {
+			t.Errorf("redactWebhookURL(%q) = %q — contains secret %q",
+				tc.url, got, tc.secret)
+		}
+	}
+}
 
 // TestValidateWebhookURL covers the URL validation rules.
 func TestValidateWebhookURL(t *testing.T) {
