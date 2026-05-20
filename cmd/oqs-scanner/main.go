@@ -3218,12 +3218,23 @@ History is read directly from local files — no backend server required.
 Press Ctrl+C to stop the dashboard.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			histDir := config.HistoryDir()
-			fmt.Fprintf(os.Stderr, "Dashboard running at http://localhost%s\n", addr)
-			fmt.Fprintf(os.Stderr, "History directory: %s\n", histDir)
-			fmt.Fprintf(os.Stderr, "Press Ctrl+C to stop.\n")
-			return dashboard.Serve(addr, histDir)
+			return dashboard.ServeWithReady(addr, histDir, func(boundAddr string) {
+				// Print only after the listener is bound — a port-in-use
+				// failure now surfaces as a normal error instead of an
+				// out-of-order "Dashboard running … Error: bind: address
+				// already in use" sequence.
+				fmt.Fprintf(os.Stderr, "Dashboard running at http://%s\n", boundAddr)
+				fmt.Fprintf(os.Stderr, "History directory: %s\n", histDir)
+				fmt.Fprintf(os.Stderr, "Press Ctrl+C to stop.\n")
+			})
 		},
 	}
-	cmd.Flags().StringVar(&addr, "addr", ":8899", "Address to listen on (e.g. :8899 or 127.0.0.1:9000)")
+	// Default binds to LOOPBACK ONLY. Previously the default `:8899` bound
+	// `0.0.0.0:8899` so scan history was reachable from any host on the same
+	// LAN / public WiFi — a privacy/data-exposure surface for a tool that is
+	// inherently a single-user local dev utility. Users who want LAN/remote
+	// reachability can opt in explicitly via `--addr 0.0.0.0:8899` (and
+	// should pair that with a reverse proxy + auth).
+	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:8899", "Address to listen on. Default is loopback-only (127.0.0.1:8899); use 0.0.0.0:8899 to expose on all interfaces (NOT recommended without a reverse proxy + auth).")
 	return cmd
 }

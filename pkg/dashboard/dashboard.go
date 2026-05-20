@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,11 +22,46 @@ import (
 //go:embed templates/dashboard.html
 var staticFS embed.FS
 
-// Serve starts a local HTTP server on addr (e.g. ":8899") that reads scan
-// history from historyDir. It blocks until the server returns an error.
+// Serve starts a local HTTP server on addr (e.g. "127.0.0.1:8899") that reads
+// scan history from historyDir. It blocks until the server returns an error.
 //
 // All API endpoints are read-only. No mutations are performed.
 func Serve(addr string, historyDir string) error {
+	return ServeWithReady(addr, historyDir, nil)
+}
+
+// ServeWithReady is Serve with an optional callback fired AFTER the listener
+// is successfully bound but BEFORE blocking on Serve. The callback receives
+// the bound address (e.g. "127.0.0.1:8899") so the CLI can emit a banner that
+// reflects what actually came up rather than what was requested.
+//
+// Splitting bind from serve also lets callers detect "port in use" errors
+// without the misleading prior-print "Dashboard running at …" line.
+func ServeWithReady(addr string, historyDir string, onReady func(boundAddr string)) error {
+	mux := buildMux(historyDir)
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("dashboard: listen on %s: %w", addr, err)
+	}
+
+	if onReady != nil {
+		onReady(listener.Addr().String())
+	}
+
+	srv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	return srv.Serve(listener)
+}
+
+// buildMux constructs the read-only HTTP mux for the dashboard. Factored out
+// so Serve and ServeWithReady stay tiny.
+func buildMux(historyDir string) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
@@ -74,15 +110,7 @@ func Serve(addr string, historyDir string) error {
 		serveHTML(w, r)
 	})
 
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-	return srv.ListenAndServe()
+	return mux
 }
 
 // ── Static asset ──────────────────────────────────────────────────────────────
