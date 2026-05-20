@@ -406,7 +406,18 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 		}
 	}
 
+	// Always surface per-engine errors to stderr so they aren't masked by a
+	// ctx-cancel return. Previously the ctx-cancel branch returned BEFORE
+	// the warning loop ran — "scan timed out" silently hid concurrent
+	// engine crashes/panics, costing operator visibility on the root cause.
+	for _, e := range errs {
+		fmt.Fprintf(os.Stderr, "WARNING: incremental engine error (partial results): %s\n", e)
+	}
+
 	if ctx.Err() != nil {
+		if len(errs) > 0 {
+			return nil, fmt.Errorf("incremental scan aborted: %w (with %d engine error(s) above)", ctx.Err(), len(errs))
+		}
 		return nil, fmt.Errorf("incremental scan aborted: %w", ctx.Err())
 	}
 
@@ -419,9 +430,6 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 
 	if len(errs) > 0 && len(merged) == 0 {
 		return nil, fmt.Errorf("all engines failed during incremental scan: %v", errs)
-	}
-	for _, e := range errs {
-		fmt.Fprintf(os.Stderr, "WARNING: incremental engine error (partial results): %s\n", e)
 	}
 
 	// Save updated cache.
