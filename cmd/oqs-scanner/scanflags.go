@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -55,6 +56,41 @@ func validateNetworkInputs(ctLookupTargets, sshTargets []string, zeekSSLPath, ze
 		return fmt.Errorf("invalid --suricata-eve: %w", err)
 	}
 	return nil
+}
+
+// validateEngineNames returns an error when any name in `names` is not the
+// Name() of an engine known to `orch`. Without this check, a typo like
+// `--engine cipherscop` silently filters the orchestrator's engine set down
+// to zero and surfaces as a misleading "no scanner engines found — run
+// 'oqs-scanner engines install --all'" message (the installed engines are
+// fine; the user just typo'd a name).
+//
+// Empty `names` is a no-op — orchestrator treats it as "all available
+// engines".
+//
+// Comparison is case-sensitive to match orchestrator.filterEngines (which
+// uses a direct map lookup of `e.Name()`); engine names are all lowercase
+// canonical (`cipherscope`, `tls-probe`, `binary-scanner`, ...).
+func validateEngineNames(known []string, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	knownSet := make(map[string]bool, len(known))
+	for _, n := range known {
+		knownSet[n] = true
+	}
+	var unknown []string
+	for _, n := range names {
+		if !knownSet[n] {
+			unknown = append(unknown, n)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	return fmt.Errorf("unknown --engine value(s): %s\n\nAvailable engines: %s",
+		strings.Join(unknown, ", "),
+		strings.Join(known, ", "))
 }
 
 // warnIfNoSourceEngine prints a stderr warning when only embedded engines

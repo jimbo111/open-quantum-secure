@@ -527,6 +527,14 @@ Example with data lifetime adjustment for healthcare:
 
 			orch := buildOrchestrator()
 
+			// Reject typos in --engine BEFORE the orchestrator filter
+			// silently reduces the engine set to 0 (which would then
+			// surface as the misleading "no scanner engines found" error).
+			knownEngineNames := allEngineNames(orch)
+			if err := validateEngineNames(knownEngineNames, engineNames); err != nil {
+				return err
+			}
+
 			ctx := context.Background()
 			if timeout > 0 {
 				var cancel context.CancelFunc
@@ -923,6 +931,13 @@ Example:
 			projInfo, _ := gitutil.InferProject(context.Background(), absPath)
 
 			orch := buildOrchestrator()
+
+			// Reject typos in --engine BEFORE the orchestrator filter
+			// silently reduces the engine set to 0. See scanCmd for context.
+			knownEngineNames := allEngineNames(orch)
+			if err := validateEngineNames(knownEngineNames, engineNames); err != nil {
+				return err
+			}
 
 			if incremental && noCache {
 				fmt.Fprintln(os.Stderr, "WARNING: --incremental with --no-cache: performing normal diff scan (--no-cache overrides)")
@@ -1763,6 +1778,19 @@ Examples:
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Check for updates without downloading")
 
 	return cmd
+}
+
+// allEngineNames returns the canonical Name() of every engine registered
+// in orch — including engines whose binary isn't currently available. Used
+// by validateEngineNames to give a "did-you-mean" set on --engine typos.
+func allEngineNames(orch *orchestrator.Orchestrator) []string {
+	all := orch.Engines()
+	names := make([]string, 0, len(all))
+	for _, e := range all {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return names
 }
 
 // engineNames returns a comma-separated list of engine names from the registry.
