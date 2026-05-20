@@ -61,12 +61,16 @@ type cdxCryptoProps struct {
 
 type cdxAlgorithmProps struct {
 	Primitive              string   `json:"primitive,omitempty"`
-	AlgorithmFamily        string   `json:"algorithmFamily,omitempty"`
 	ParameterSetIdentifier string   `json:"parameterSetIdentifier,omitempty"`
 	Curve                  string   `json:"curve,omitempty"`
 	Mode                   string   `json:"mode,omitempty"`
 	ExecutionEnvironment   string   `json:"executionEnvironment,omitempty"`
 	CryptoFunctions        []string `json:"cryptoFunctions,omitempty"`
+	// algorithmFamily is intentionally NOT a field here. CycloneDX 1.7's
+	// algorithmProperties uses additionalProperties:false; any non-standard
+	// field would be rejected by strict validators (Dependency-Track,
+	// cyclonedx-cli). The family lives in component.properties[] as
+	// `oqs:algorithmFamily` — see buildAlgorithmComponent.
 }
 
 type cdxProtocolProps struct {
@@ -288,7 +292,6 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 
 	algProps := &cdxAlgorithmProps{
 		Primitive:            mapToCDXPrimitive(alg.Primitive),
-		AlgorithmFamily:      extractFamily(alg.Name),
 		ExecutionEnvironment: "software-plain-ram",
 	}
 
@@ -302,8 +305,13 @@ func buildAlgorithmComponent(f findings.UnifiedFinding, occurrences []cdxOccurre
 		algProps.Curve = alg.Curve
 	}
 
-	// Build OQS custom properties
+	// Build OQS custom properties.
+	// algorithmFamily lives here (not in algorithmProperties) because CycloneDX
+	// 1.7's algorithmProperties schema uses additionalProperties:false.
 	var props []cdxProperty
+	if family := extractFamily(alg.Name); family != "" {
+		props = append(props, cdxProperty{Name: "oqs:algorithmFamily", Value: family})
+	}
 	props = append(props, cdxProperty{Name: "oqs:confidence", Value: string(f.Confidence)})
 	props = append(props, cdxProperty{Name: "oqs:source", Value: strings.Join(sources, "+")})
 	props = append(props, cdxProperty{Name: "oqs:reachable", Value: string(f.Reachable)})

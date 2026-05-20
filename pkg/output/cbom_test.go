@@ -216,8 +216,11 @@ func TestWriteCBOM_AlgorithmFindings(t *testing.T) {
 	if algProps.Primitive != "block-cipher" {
 		t.Errorf("primitive = %q, want block-cipher (mapped from symmetric)", algProps.Primitive)
 	}
-	if algProps.AlgorithmFamily != "AES" {
-		t.Errorf("algorithmFamily = %q, want AES", algProps.AlgorithmFamily)
+	// algorithmFamily is emitted as a top-level OQS property (not inside
+	// algorithmProperties) because CycloneDX 1.7 schema enforces
+	// additionalProperties:false on algorithmProperties.
+	if v, ok := findProp(aesComp.Properties, "oqs:algorithmFamily"); !ok || v != "AES" {
+		t.Errorf("oqs:algorithmFamily = %q, want AES", v)
 	}
 	if algProps.ParameterSetIdentifier != "256" {
 		t.Errorf("parameterSetIdentifier = %q, want 256", algProps.ParameterSetIdentifier)
@@ -270,8 +273,8 @@ func TestWriteCBOM_AlgorithmFindings(t *testing.T) {
 	if rsaComp.CryptoProperties.AlgorithmProperties.Primitive != "pke" {
 		t.Errorf("RSA primitive = %q, want pke (mapped from asymmetric)", rsaComp.CryptoProperties.AlgorithmProperties.Primitive)
 	}
-	if rsaComp.CryptoProperties.AlgorithmProperties.AlgorithmFamily != "RSA" {
-		t.Errorf("RSA algorithmFamily = %q, want RSA", rsaComp.CryptoProperties.AlgorithmProperties.AlgorithmFamily)
+	if v, ok := findProp(rsaComp.Properties, "oqs:algorithmFamily"); !ok || v != "RSA" {
+		t.Errorf("RSA oqs:algorithmFamily = %q, want RSA", v)
 	}
 }
 
