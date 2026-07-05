@@ -314,13 +314,9 @@ func isExecutable(path string) bool {
 	return info.Mode()&0o111 != 0
 }
 
-// probeVersion / probeVersionCtx delegate to the single probe implementation
-// in pkg/engines. Listings use the CombinedOutput variant: tools that print
+// probeVersionCtx delegates to the single probe implementation in
+// pkg/engines. Listings use the CombinedOutput variant: tools that print
 // their version to stderr still show a banner under `engines list`.
-func probeVersion(binaryPath string) string {
-	return engines.ProbeVersionCombined(context.Background(), binaryPath)
-}
-
 func probeVersionCtx(parent context.Context, binaryPath string) string {
 	return engines.ProbeVersionCombined(parent, binaryPath)
 }
