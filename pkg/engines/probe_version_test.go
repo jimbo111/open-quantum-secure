@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -51,5 +52,48 @@ func TestProbeVersion_FirstLineOnly(t *testing.T) {
 	got := ProbeVersion(bin)
 	if got != "first 1.0" {
 		t.Errorf("ProbeVersion first-line = %q; want %q", got, "first 1.0")
+	}
+}
+
+// TestProbeVersionCombined_ReadsStderr: enginemgr's listing probe counts
+// stderr toward the banner; the scan-time probe must not.
+func TestProbeVersionCombined_ReadsStderr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary not portable to Windows")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fake")
+	script := "#!/bin/sh\nprintf 'StderrTool 1.2.3\\n' >&2\n"
+	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake bin: %v", err)
+	}
+	if got := ProbeVersionCombined(context.Background(), bin); got != "StderrTool 1.2.3" {
+		t.Errorf("ProbeVersionCombined = %q; want %q", got, "StderrTool 1.2.3")
+	}
+	if got := ProbeVersion(bin); got != "unknown" {
+		t.Errorf("ProbeVersion (stdout-only, empty stdout) = %q; want \"unknown\"", got)
+	}
+}
+
+// TestProbeVersionCombined_EmptyPath short-circuits like ProbeVersion.
+func TestProbeVersionCombined_EmptyPath(t *testing.T) {
+	if got := ProbeVersionCombined(context.Background(), ""); got != "unknown" {
+		t.Errorf("ProbeVersionCombined(\"\") = %q; want \"unknown\"", got)
+	}
+}
+
+// TestProbeVersion_EmptyOutputIsUnknown pins the contract alignment: empty
+// probe output reports "unknown", never "".
+func TestProbeVersion_EmptyOutputIsUnknown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary not portable to Windows")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fake")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write fake bin: %v", err)
+	}
+	if got := ProbeVersion(bin); got != "unknown" {
+		t.Errorf("ProbeVersion(empty output) = %q; want \"unknown\"", got)
 	}
 }

@@ -6,12 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/config"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 )
 
 // EngineInfo describes a known engine and how to install it.
@@ -315,38 +314,13 @@ func isExecutable(path string) bool {
 	return info.Mode()&0o111 != 0
 }
 
-// ansiEscapeRE matches ANSI CSI sequences (color/style codes). cdxgen wraps
-// its --version banner in `\x1b[1m...\x1b[0m`; without stripping, those bytes
-// leak into engine listings.
-var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
-
-// probeVersion runs `<binary> --version` with a 15-second timeout derived from
-// context.Background() and returns the trimmed first line of output.
-// Returns "unknown" on any failure.
+// probeVersion / probeVersionCtx delegate to the single probe implementation
+// in pkg/engines. Listings use the CombinedOutput variant: tools that print
+// their version to stderr still show a banner under `engines list`.
 func probeVersion(binaryPath string) string {
-	return probeVersionCtx(context.Background(), binaryPath)
+	return engines.ProbeVersionCombined(context.Background(), binaryPath)
 }
 
-// probeVersionCtx runs `<binary> --version` with a 15-second timeout derived
-// from the parent context. If the parent context has a shorter deadline, that
-// shorter deadline is used instead. The 15s budget covers cold-start tools
-// (semgrep loads its Python rule cache on first invocation, regularly >5s
-// after install). Strips ANSI escape sequences before splitting on the first
-// newline. Returns "unknown" on any failure.
 func probeVersionCtx(parent context.Context, binaryPath string) string {
-	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
-	defer cancel()
-
-	out, err := exec.CommandContext(ctx, binaryPath, "--version").CombinedOutput()
-	if err != nil {
-		return "unknown"
-	}
-
-	clean := ansiEscapeRE.ReplaceAllString(string(out), "")
-	line := strings.SplitN(strings.TrimSpace(clean), "\n", 2)[0]
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return "unknown"
-	}
-	return line
+	return engines.ProbeVersionCombined(parent, binaryPath)
 }

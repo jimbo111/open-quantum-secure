@@ -166,21 +166,45 @@ type Engine interface {
 }
 
 // ProbeVersion runs `<binaryPath> --version` with a 15-second timeout, strips
-// ANSI escape sequences, and returns the trimmed first line of output. Returns
-// "unknown" on any failure. The 15s budget covers cold-start tools (semgrep
-// loads its Python rule cache on first invocation, regularly >5s after install).
+// ANSI escape sequences, and returns the trimmed first line of stdout. Returns
+// "unknown" on any failure or empty output. The 15s budget covers cold-start
+// tools (semgrep loads its Python rule cache on first invocation, regularly
+// >5s after install). Stderr is dropped; see ProbeVersionCombined.
 func ProbeVersion(binaryPath string) string {
+	return probeVersionOutput(context.Background(), binaryPath, false)
+}
+
+// ProbeVersionCombined is ProbeVersion with two differences used by engine
+// listings (`engines list` / `doctor`): the timeout derives from parent (a
+// shorter parent deadline wins), and stderr counts toward the version banner
+// (some tools print their version there).
+func ProbeVersionCombined(parent context.Context, binaryPath string) string {
+	return probeVersionOutput(parent, binaryPath, true)
+}
+
+func probeVersionOutput(parent context.Context, binaryPath string, combined bool) string {
 	if binaryPath == "" {
 		return "unknown"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, binaryPath, "--version").Output()
+	cmd := exec.CommandContext(ctx, binaryPath, "--version")
+	var out []byte
+	var err error
+	if combined {
+		out, err = cmd.CombinedOutput()
+	} else {
+		out, err = cmd.Output()
+	}
 	if err != nil {
 		return "unknown"
 	}
 	clean := ansiEscapeRE.ReplaceAllString(string(out), "")
 	line, _, _ := strings.Cut(strings.TrimSpace(clean), "\n")
-	return strings.TrimSpace(line)
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "unknown"
+	}
+	return line
 }
