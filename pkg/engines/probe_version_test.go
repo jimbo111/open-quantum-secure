@@ -58,15 +58,7 @@ func TestProbeVersion_FirstLineOnly(t *testing.T) {
 // TestProbeVersionCombined_ReadsStderr: enginemgr's listing probe counts
 // stderr toward the banner; the scan-time probe must not.
 func TestProbeVersionCombined_ReadsStderr(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fake binary not portable to Windows")
-	}
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "fake")
-	script := "#!/bin/sh\nprintf 'StderrTool 1.2.3\\n' >&2\n"
-	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
-		t.Fatalf("write fake bin: %v", err)
-	}
+	bin := writeFakeBin(t, "#!/bin/sh\nprintf 'StderrTool 1.2.3\\n' >&2\n")
 	if got := ProbeVersionCombined(context.Background(), bin); got != "StderrTool 1.2.3" {
 		t.Errorf("ProbeVersionCombined = %q; want %q", got, "StderrTool 1.2.3")
 	}
@@ -85,14 +77,7 @@ func TestProbeVersionCombined_EmptyPath(t *testing.T) {
 // TestProbeVersion_EmptyOutputIsUnknown pins the contract alignment: empty
 // probe output reports "unknown", never "".
 func TestProbeVersion_EmptyOutputIsUnknown(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fake binary not portable to Windows")
-	}
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "fake")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatalf("write fake bin: %v", err)
-	}
+	bin := writeFakeBin(t, "#!/bin/sh\nexit 0\n")
 	if got := ProbeVersion(bin); got != "unknown" {
 		t.Errorf("ProbeVersion(empty output) = %q; want \"unknown\"", got)
 	}
