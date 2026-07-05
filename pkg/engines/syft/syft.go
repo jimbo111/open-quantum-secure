@@ -1,14 +1,11 @@
 package syft
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -79,21 +76,13 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		"-q",
 	}
 
-	var stderrBuf bytes.Buffer
-	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
-	cmd.Stderr = &stderrBuf
-	// Bound ctx-cancel cleanup; see audit F1 (same fix applied across all
-	// four subprocess engines).
-	cmd.WaitDelay = 2 * time.Second
-
-	if err := cmd.Run(); err != nil {
+	if _, stderrMsg, err := engines.RunSubprocess(ctx, e.binaryPath, args...); err != nil {
 		// Propagate context cancellation instead of raw exec error.
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("syft: %w", ctx.Err())
 		}
-		msg := engines.RedactStderr(stderrBuf.String())
-		if msg != "" {
-			return nil, fmt.Errorf("syft run: %w: %s", err, msg)
+		if stderrMsg != "" {
+			return nil, fmt.Errorf("syft run: %w: %s", err, stderrMsg)
 		}
 		return nil, fmt.Errorf("syft run: %w", err)
 	}

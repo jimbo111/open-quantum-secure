@@ -1,15 +1,12 @@
 package cdxgen
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -76,17 +73,10 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 
 	args := []string{"-o", tmpPath, "--spec-version", "1.5", opts.TargetPath}
 
-	var stderrBuf bytes.Buffer
-	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
-	cmd.Stderr = &stderrBuf
-	// Bound ctx-cancel cleanup; see audit F1 (same fix applied across all
-	// four subprocess engines).
-	cmd.WaitDelay = 2 * time.Second
-
 	// cdxgen frequently exits non-zero even when it produces valid output
 	// (e.g., mixed-language projects, partial ecosystem support). Check the
 	// output file regardless of exit code.
-	runErr := cmd.Run()
+	_, stderrMsg, runErr := engines.RunSubprocess(ctx, e.binaryPath, args...)
 
 	// Propagate context cancellation before reading stale/empty output.
 	if ctx.Err() != nil {
@@ -96,9 +86,8 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	data, err := os.ReadFile(tmpPath)
 	if err != nil || len(data) == 0 {
 		if runErr != nil {
-			msg := engines.RedactStderr(stderrBuf.String())
-			if msg != "" {
-				return nil, fmt.Errorf("cdxgen exited with no output: %w: %s", runErr, msg)
+			if stderrMsg != "" {
+				return nil, fmt.Errorf("cdxgen exited with no output: %w: %s", runErr, stderrMsg)
 			}
 			return nil, fmt.Errorf("cdxgen exited with no output: %w", runErr)
 		}
