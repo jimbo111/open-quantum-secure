@@ -76,7 +76,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	// cdxgen frequently exits non-zero even when it produces valid output
 	// (e.g., mixed-language projects, partial ecosystem support). Check the
 	// output file regardless of exit code.
-	_, stderrMsg, runErr := engines.RunSubprocess(ctx, e.binaryPath, args...)
+	stderrMsg, runErr := engines.RunSubprocessNoStdout(ctx, e.binaryPath, args...)
 
 	// Propagate context cancellation before reading stale/empty output.
 	if ctx.Err() != nil {

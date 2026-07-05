@@ -59,3 +59,28 @@ func TestRunSubprocess_ContextCancel(t *testing.T) {
 		t.Fatal("want error for pre-cancelled context")
 	}
 }
+
+func TestRunSubprocessNoStdout_RedactsStderr(t *testing.T) {
+	bin := writeFakeBin(t, "#!/bin/sh\necho 'API_KEY=supersecret123' >&2\n")
+	stderr, err := RunSubprocessNoStdout(context.Background(), bin)
+	if err != nil {
+		t.Errorf("got err=%v; want nil", err)
+	}
+	if strings.Contains(stderr, "supersecret123") {
+		t.Errorf("stderr not redacted: %q", stderr)
+	}
+	if stderr == "" {
+		t.Error("stderr dropped entirely; want redacted placeholder present")
+	}
+}
+
+func TestRunSubprocessNoStdout_NonZeroExitReturnsErrAndStderr(t *testing.T) {
+	bin := writeFakeBin(t, "#!/bin/sh\necho 'boom' >&2\nexit 3\n")
+	stderr, err := RunSubprocessNoStdout(context.Background(), bin)
+	if err == nil {
+		t.Fatal("want non-nil runErr for exit 3")
+	}
+	if !strings.Contains(stderr, "boom") {
+		t.Errorf("stderr = %q; want it to contain 'boom'", stderr)
+	}
+}

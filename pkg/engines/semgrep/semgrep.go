@@ -76,7 +76,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 
 	// Semgrep exits 1 when findings are present — tolerate non-zero exit.
 	// But propagate context cancellation and detect real failures.
-	_, stderrMsg, runErr := engines.RunSubprocess(ctx, e.binaryPath, args...)
+	stderrMsg, runErr := engines.RunSubprocessNoStdout(ctx, e.binaryPath, args...)
 	if runErr != nil && ctx.Err() != nil {
 		return nil, fmt.Errorf("semgrep: %w", ctx.Err())
 	}

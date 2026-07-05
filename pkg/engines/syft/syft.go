@@ -76,7 +76,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		"-q",
 	}
 
-	if _, stderrMsg, err := engines.RunSubprocess(ctx, e.binaryPath, args...); err != nil {
+	if stderrMsg, err := engines.RunSubprocessNoStdout(ctx, e.binaryPath, args...); err != nil {
 		// Propagate context cancellation instead of raw exec error.
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("syft: %w", ctx.Err())

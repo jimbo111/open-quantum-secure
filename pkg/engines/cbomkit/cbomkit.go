@@ -70,7 +70,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	// partially fail while others produce valid output. Read the output file
 	// regardless of exit code and let presence-of-data drive the decision —
 	// mirrors cdxgen's pattern.
-	_, stderrMsg, runErr := engines.RunSubprocess(ctx, e.binaryPath, args...)
+	stderrMsg, runErr := engines.RunSubprocessNoStdout(ctx, e.binaryPath, args...)
 
 	// Propagate context cancellation before reading stale/empty output.
 	if ctx.Err() != nil {
