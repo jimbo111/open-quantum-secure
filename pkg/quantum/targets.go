@@ -62,6 +62,10 @@ var migrationTargets = map[string]MigrationTarget{
 	// "groups"/"kex" config-scanner vocabulary).
 	"TLSV1.0": {Algorithm: "TLS 1.3", Standard: ""},
 	"TLSV1.1": {Algorithm: "TLS 1.3", Standard: ""},
+	// SSLv3/SSLv2: same "not a FIPS standard, TLS 1.3 is the precondition"
+	// reasoning as TLS 1.0/1.1 above.
+	"SSLV3": {Algorithm: "TLS 1.3", Standard: ""},
+	"SSLV2": {Algorithm: "TLS 1.3", Standard: ""},
 
 	// Pre-standard PQC → current NIST names
 	"DILITHIUM": {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},

@@ -213,6 +213,18 @@ var deprecatedAlgorithms = map[string]bool{
 	// NOT classically broken and get a dedicated branch below instead.
 	"TLSv1.0": true,
 	"TLSv1.1": true,
+	// SSLv3/SSLv2 already had a distinct Algorithm.Name ("SSLv3") before the
+	// B6 fix above (vocabulary.go's "protocol" entry never collapsed it into
+	// "TLS"), but there was no corresponding deprecatedAlgorithms entry, so it
+	// fell through to RiskUnknown/SeverityLow — the same undifferentiated-risk
+	// gap as TLSv1.0/1.1, just missed by the original B6 finding because it
+	// wasn't one of the four entries that collapsed together. SSLv3 is
+	// classically broken (POODLE); SSLv2 is even worse (DROWN) and listed
+	// for the same reason even though configscanner has no vocabulary entry
+	// for it today — cheap to cover here for any caller that passes the
+	// literal name directly.
+	"SSLv3": true,
+	"SSLv2": true,
 	// Deprecated IETF draft hybrid KEMs (pre-FIPS 203). These are NOT quantum-safe:
 	// the Kyber component was the pre-standardisation draft, superseded by ML-KEM.
 	// Callers should migrate to X25519MLKEM768 (codepoint 0x11EC).
@@ -793,6 +805,10 @@ func deprecatedRecommendation(name string) string {
 		return "HAS-160 is deprecated (equivalent to SHA-1). Migrate to SHA-256 or LSH-256."
 	case "TLSV1.0", "TLSV1.1":
 		return "TLS 1.0/1.1 are formally deprecated (RFC 8996) — classically broken (POODLE/BEAST-class weaknesses) regardless of quantum computing. Migrate to TLS 1.3 and negotiate a hybrid PQC group (e.g. X25519MLKEM768)."
+	case "SSLV3":
+		return "SSLv3 is broken (POODLE attack) regardless of quantum computing. Disable SSLv3 and migrate to TLS 1.3, negotiating a hybrid PQC group (e.g. X25519MLKEM768)."
+	case "SSLV2":
+		return "SSLv2 is severely broken (DROWN attack) regardless of quantum computing. Disable SSLv2 and migrate to TLS 1.3, negotiating a hybrid PQC group (e.g. X25519MLKEM768)."
 	case "KYBER":
 		return "Kyber is the pre-standardization NIST Round 3 name for this lattice KEM — quantum-safe cryptography, not classically broken — now finalized as ML-KEM (FIPS 203). Migrate references/library calls to ML-KEM-768."
 	case "DILITHIUM":
