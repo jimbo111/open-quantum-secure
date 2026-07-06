@@ -55,10 +55,14 @@ func isSafePQC(alg string) bool {
 	upper := strings.ToUpper(alg)
 	// Prefix-based check covers all variants (ML-DSA-44/65/87, ML-KEM-512/768/1024,
 	// SLH-DSA-*, HQC-*, etc.) as well as the bare family names.
+	// Pre-standard aliases (KYBER/DILITHIUM/SPHINCS+) are deliberately NOT
+	// listed: since the G2 classification change they classify RiskDeprecated
+	// with ML-KEM/ML-DSA/SLH-DSA migration targets, so they need snippets —
+	// early-outing here contradicted the classifier (wave-2 review C27).
+	// XMSS/LMS stay: SP 800-208 final standards, genuinely nothing to migrate.
 	for _, prefix := range []string{
 		"ML-DSA", "ML-KEM", "SLH-DSA",
-		"DILITHIUM", "KYBER",           // pre-standard aliases
-		"XMSS", "LMS", "SPHINCS+",
+		"XMSS", "LMS",
 		"HQC",
 	} {
 		if upper == prefix || strings.HasPrefix(upper, prefix+"-") {

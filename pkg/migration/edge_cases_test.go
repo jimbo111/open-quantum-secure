@@ -779,15 +779,18 @@ func TestIsSafePQC_EdgeCases(t *testing.T) {
 		"ML-DSA", "ml-dsa", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87",
 		"ML-KEM", "ML-KEM-512", "ML-KEM-768", "ML-KEM-1024",
 		"SLH-DSA", "SLH-DSA-SHA2-128f",
-		"DILITHIUM", "DILITHIUM-2", "DILITHIUM-3",
-		"KYBER", "KYBER-512", "KYBER-768", "KYBER-1024",
 		"XMSS", "XMSS-SHA2-10-256",
 		"LMS",
-		"SPHINCS+",
 		"HQC", "HQC-128",
 	}
+	// Pre-standard names (KYBER/DILITHIUM/SPHINCS+) moved to notSafe in the
+	// wave-2 fix (C27): they classify RiskDeprecated with ML-* migration
+	// targets, so the generator must produce snippets for them.
 	notSafe := []string{
 		"RSA", "ECDSA", "ECDH", "X25519", "AES", "SHA-256", "",
+		"DILITHIUM", "DILITHIUM-2", "DILITHIUM-3",
+		"KYBER", "KYBER-512", "KYBER-768", "KYBER-1024",
+		"SPHINCS+",
 	}
 
 	for _, alg := range safe {

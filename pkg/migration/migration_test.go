@@ -736,23 +736,26 @@ func TestGenerateSnippet_EdgeCases(t *testing.T) {
 			targetAlg:    "",
 			wantNil:      true,
 		},
-		// Pre-standard "DILITHIUM-2": isSafePQC checks HasPrefix("DILITHIUM-2", "DILITHIUM-") → true → nil.
+		// Pre-standard "DILITHIUM-2" gets a snippet since the wave-2 fix
+		// (C27): it classifies RiskDeprecated with an ML-DSA target, so
+		// early-outing as "already safe" contradicted the classifier.
 		{
-			name:         "pre-standard DILITHIUM-2 is safe",
+			name:         "pre-standard DILITHIUM-2 gets a snippet",
 			filePath:     "internal/pqc.go",
 			classicalAlg: "DILITHIUM-2",
 			primitive:    "signature",
 			targetAlg:    "",
-			wantNil:      true,
+			wantNil:      false,
 		},
-		// Pre-standard "KYBER-768": isSafePQC checks HasPrefix("KYBER-768", "KYBER-") → true → nil.
+		// Pre-standard "KYBER-768" gets a snippet since the wave-2 fix (C27):
+		// deprecated pre-standard name, ML-KEM migration target.
 		{
-			name:         "pre-standard KYBER-768 is safe",
+			name:         "pre-standard KYBER-768 gets a snippet",
 			filePath:     "internal/pqc.go",
 			classicalAlg: "KYBER-768",
 			primitive:    "kem",
 			targetAlg:    "",
-			wantNil:      true,
+			wantNil:      false,
 		},
 	}
 
@@ -1027,4 +1030,26 @@ func TestJSModernAPI(t *testing.T) {
 			t.Errorf("After does not use the verified ml-kem-768 key type:\n%s", s.After)
 		}
 	})
+}
+
+// Wave-2 review C27: bare pre-standard names (Kyber/Dilithium/SPHINCS+) are
+// classified RiskDeprecated with ML-* migration targets since G2 — the
+// snippet generator must not early-out on them as "already safe".
+func TestGenerateSnippet_PreStandardNamesGetSnippets(t *testing.T) {
+	for _, tc := range []struct{ alg, prim, target string }{
+		{"Kyber", "kem", "ML-KEM-768"},
+		{"Kyber768", "kem", "ML-KEM-768"},
+		{"Dilithium", "signature", "ML-DSA-65"},
+		{"Dilithium3", "signature", "ML-DSA-65"},
+		{"SPHINCS+", "signature", "SLH-DSA"},
+	} {
+		s := GenerateSnippet("x.go", tc.alg, tc.prim, tc.target)
+		if s == nil {
+			t.Errorf("GenerateSnippet(%q) = nil; deprecated pre-standard names need migration snippets", tc.alg)
+		}
+	}
+	// Final standards still early-out — no snippet needed.
+	if s := GenerateSnippet("x.go", "ML-KEM-768", "kem", "ML-KEM-768"); s != nil {
+		t.Errorf("ML-KEM-768 should remain no-snippet (already safe), got %+v", s)
+	}
 }
