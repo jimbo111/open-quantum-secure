@@ -478,3 +478,44 @@ func TestASD_RegistrationAndID(t *testing.T) {
 		t.Errorf("Name = %q, want ASD ISM", fw.Name())
 	}
 }
+
+// Wave-2 review V16-V18: the signature default-deny must not flag
+// algorithms ASD ISM itself approves — OID-derived hyphen-less SLH-DSA
+// names from the TLS probe ("slhdsa-sha2-128s"), and SP 800-208 stateful
+// hash signatures (XMSS/LMS), which the mirrored CNSA 2.0 rule exempts.
+func TestASD_ApprovedSignatureShapesNotDenied(t *testing.T) {
+	fw := asdISMFramework{}
+	for _, tc := range []struct{ name, primitive string }{
+		{"slhdsa-sha2-128s", "digital-signature"},
+		{"slhdsa-shake-256f", "digital-signature"},
+		{"SLH-DSA-SHA2-128s", "signature"},
+		{"XMSS", "signature"},
+		{"LMS", "signature"},
+		{"XMSSMT", "signature"},
+	} {
+		ff := []findings.UnifiedFinding{{
+			Algorithm:   &findings.Algorithm{Name: tc.name, Primitive: tc.primitive},
+			QuantumRisk: findings.QRSafe,
+		}}
+		vs := fw.Evaluate(ff)
+		for _, v := range vs {
+			if v.Rule == "asd-signature-not-approved" {
+				t.Errorf("%s: asd-signature-not-approved fired on an ASD-approved signature shape: %s", tc.name, v.Message)
+			}
+		}
+	}
+	// Default-deny still catches genuinely unapproved signatures.
+	ff := []findings.UnifiedFinding{{
+		Algorithm:   &findings.Algorithm{Name: "Falcon-512", Primitive: "signature"},
+		QuantumRisk: findings.QRSafe,
+	}}
+	found := false
+	for _, v := range fw.Evaluate(ff) {
+		if v.Rule == "asd-signature-not-approved" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Falcon-512 must still trip asd-signature-not-approved")
+	}
+}

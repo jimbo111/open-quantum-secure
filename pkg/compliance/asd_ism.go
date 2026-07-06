@@ -142,8 +142,13 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			continue
 		}
 
-		// SLH-DSA is approved (all parameter sets).
-		if strings.HasPrefix(upper, "SLH-DSA") {
+		// SLH-DSA is approved (all parameter sets). Match hyphen-insensitively:
+		// the TLS probe emits OID-derived hyphen-less names ("slhdsa-sha2-128s"
+		// via LookupPQCSigAlgName) that a bare "SLH-DSA" prefix misses —
+		// flagging them contradicted this framework's own approved list
+		// (wave-2 review V16/V17).
+		if strings.HasPrefix(upper, "SLH-DSA") ||
+			strings.HasPrefix(strings.ReplaceAll(upper, "-", ""), "SLHDSA") {
 			continue
 		}
 
@@ -177,7 +182,11 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 		// enforcement. ML-DSA and SLH-DSA are handled by earlier branches
 		// that `continue` before reaching here. Mirrors CNSA 2.0's
 		// cnsa2-signature-not-approved default-deny (cnsa2.go:226-244).
-		if isSignaturePrimitive(f) {
+		// SP 800-208 stateful hash signatures (LMS/HSS/XMSS/XMSS^MT) are
+		// exempt, mirroring the CNSA 2.0 rule this default-deny is modeled
+		// on — omitting the exemption flagged approved firmware-signing
+		// schemes (wave-2 review V18).
+		if isSignaturePrimitive(f) && !isStatefulHashSignatureName(upper) {
 			violations = append(violations, Violation{
 				Algorithm:   name,
 				Rule:        "asd-signature-not-approved",
