@@ -164,19 +164,41 @@ func EnrichFindingsByFile(ff []findings.UnifiedFinding, fc FileConstants) {
 			candidates = append(candidates, candidate{field: fieldName(key), value: value})
 		}
 
-		switch len(candidates) {
+		// Key-evidence gate (wave-2 review V4/V5): a constant may only
+		// become a KeySize when BOTH hold:
+		//   (a) its name carries key evidence — a KEY/MODULUS/BITS/
+		//       STRENGTH name segment, or the finding's algorithm token
+		//       word-bounded in the name. Names like defaultBufSize or
+		//       PARSABLE_LIMIT do not qualify.
+		//   (b) its value is plausible for the algorithm family (4096 is
+		//       a fine RSA modulus but never an AES key).
+		// Without this, a file's lone unrelated int const (buffer size,
+		// iteration count, retry limit) silently became the key size and
+		// flipped the quantum-risk verdict in either direction.
+		algoToken := primaryAlgorithmToken(f.Algorithm.Name)
+		var eligible []candidate
+		for _, c := range candidates {
+			if !keyEvidenceName(c.field, algoToken) {
+				continue
+			}
+			if !plausibleKeySize(algoToken, c.value) {
+				continue
+			}
+			eligible = append(eligible, c)
+		}
+
+		switch len(eligible) {
 		case 0:
 			continue
 		case 1:
-			f.Algorithm.KeySize = candidates[0].value
+			f.Algorithm.KeySize = eligible[0].value
 		default:
-			algoToken := primaryAlgorithmToken(f.Algorithm.Name)
 			if algoToken == "" {
 				continue
 			}
 			var matchValue int
 			matches := 0
-			for _, c := range candidates {
+			for _, c := range eligible {
 				// Word-bounded, not a bare substring check: "PARSABLE_LIMIT"
 				// contains "RSA" as raw bytes (P-A-R-S-A-...) but isn't an
 				// RSA-related constant. containsWord requires the token to
@@ -191,6 +213,74 @@ func EnrichFindingsByFile(ff []findings.UnifiedFinding, fc FileConstants) {
 			}
 		}
 	}
+}
+
+// keyEvidenceName reports whether a constant's field name provides
+// evidence of being a key-size constant: a KEY/MODULUS/BITS/STRENGTH
+// segment (split on non-alphanumerics and camelCase boundaries), or the
+// finding's algorithm token appearing word-bounded in the name. A bare
+// SIZE/LENGTH/LEN segment is deliberately NOT sufficient — defaultBufSize
+// and MAX_LENGTH are the exact false-positive shapes being excluded.
+func keyEvidenceName(field, algoToken string) bool {
+	if algoToken != "" && containsWord(strings.ToUpper(field), algoToken) {
+		return true
+	}
+	for _, seg := range nameSegments(field) {
+		switch seg {
+		case "KEY", "MODULUS", "BITS", "STRENGTH":
+			return true
+		}
+	}
+	return false
+}
+
+// nameSegments splits an identifier on non-alphanumerics and lower→upper
+// camelCase boundaries, returning uppercased segments ("rsaKeyBits" →
+// [RSA KEY BITS], "PARSABLE_LIMIT" → [PARSABLE LIMIT]).
+func nameSegments(s string) []string {
+	var segs []string
+	var cur []byte
+	flush := func() {
+		if len(cur) > 0 {
+			segs = append(segs, strings.ToUpper(string(cur)))
+			cur = cur[:0]
+		}
+	}
+	prevLower := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		isAlnum := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !isAlnum {
+			flush()
+			prevLower = false
+			continue
+		}
+		if c >= 'A' && c <= 'Z' && prevLower {
+			flush()
+		}
+		cur = append(cur, c)
+		prevLower = c >= 'a' && c <= 'z'
+	}
+	flush()
+	return segs
+}
+
+// plausibleKeySize reports whether value is a credible key size for the
+// algorithm family named by token. Unknown families accept the union of
+// all known sets (conservative), never arbitrary integers.
+func plausibleKeySize(token string, value int) bool {
+	symmetric := map[int]bool{128: true, 192: true, 256: true, 512: true}
+	rsaClass := map[int]bool{1024: true, 2048: true, 3072: true, 4096: true, 7680: true, 8192: true, 15360: true}
+	ecClass := map[int]bool{224: true, 233: true, 255: true, 256: true, 283: true, 384: true, 409: true, 448: true, 521: true, 571: true}
+	switch token {
+	case "AES", "SM4", "CHACHA", "CHACHA20", "CAMELLIA", "ARIA", "SEED", "LEA", "TWOFISH", "SERPENT":
+		return symmetric[value]
+	case "RSA", "RSAES", "RSASSA", "DSA", "DH", "FFDH", "ELGAMAL", "DIFFIE":
+		return rsaClass[value]
+	case "ECDSA", "ECDH", "ECDHE", "EC", "ED25519", "ED448", "X25519", "X448", "SM2", "ECIES":
+		return ecClass[value]
+	}
+	return symmetric[value] || rsaClass[value] || ecClass[value]
 }
 
 // primaryAlgorithmToken extracts the leading alphanumeric token from an
