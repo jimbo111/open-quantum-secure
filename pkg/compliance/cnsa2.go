@@ -37,15 +37,28 @@ const (
 //	│ Niche / custom apps + infra        │ 2027       │ 2033       │
 //	└────────────────────────────────────┴────────────┴────────────┘
 //
-// We collapse the begin-transition column into a single "begin" constant
-// (2025) and the completion column into "firmware-signing complete" (2030)
-// and "general complete" (2033). The previous "2035" sentinel was wrong on
-// every category.
+// These five constants are the SINGLE SOURCE OF TRUTH for every date in this
+// file: Deadlines() (below) renders all five as the informational phase
+// table, while Evaluate() only ever emits deadlineKeyExchange or deadlineFull
+// on a real Violation (via deadlineForHNDL or a per-rule literal). The
+// 2025/2026/2027 "begin" dates are documentation only — no Violation ever
+// carries one, because the scanner has no per-finding signal for "which
+// equipment category is this" (only "is this KEX-relevant" via HNDL risk /
+// primitive, which maps to the 2030-or-2033 split).
+//
+// deadlineKeyExchange also stands in for "software/firmware signing complete"
+// (2030-12-31): NSA's phased timeline gives traditional networking equipment
+// and software/firmware signing the SAME completion date, and nothing in a
+// finding distinguishes "this is a firmware-signing artifact" from "this is
+// a KEX-relevant artifact" — so a separate deadlineFirmwareSigning constant
+// would have been a distinction without a difference (previously defined,
+// identical value, never referenced by Evaluate()).
 const (
-	deadlineBeginTransition  = "2025-01-01" // earliest begin-transition (software/firmware signing, web/cloud)
-	deadlineKeyExchange      = "2030-12-31" // traditional networking + firmware-signing must complete PQC migration
-	deadlineFirmwareSigning  = "2030-12-31" // software/firmware signing migration complete
-	deadlineFull             = "2033-12-31" // operating systems, browsers/cloud, niche/custom — full transition complete
+	deadlineBeginTransition = "2025-01-01" // begin: software/firmware signing, web browsers + servers, cloud services
+	deadlineNetworkingBegin = "2026-01-01" // begin: traditional networking equipment
+	deadlineOSBegin         = "2027-01-01" // begin: operating systems, niche/custom apps + infrastructure
+	deadlineKeyExchange     = "2030-12-31" // complete: traditional networking equipment AND software/firmware signing
+	deadlineFull            = "2033-12-31" // complete: web/cloud, operating systems, niche/custom apps + infrastructure
 )
 
 // cnsa20Framework implements Framework for NSA CNSA 2.0 (May 2025 update).
@@ -67,13 +80,18 @@ func (cnsa20Framework) ApprovedAlgos() []ApprovedAlgoRef {
 	}
 }
 
+// Deadlines returns NSA's full phased timeline for display/reporting only.
+// This table is informational — it documents all five phase dates for user
+// visibility, but only two of them (deadlineKeyExchange, deadlineFull) are
+// ever attached to an actual Violation by Evaluate(); see the const block
+// above for why. Do not infer per-category enforcement from this table.
 func (cnsa20Framework) Deadlines() []DeadlineRef {
 	return []DeadlineRef{
-		{"2025-01-01", "Begin transition: software/firmware signing, web browsers + servers, cloud services"},
-		{"2026-01-01", "Begin transition: traditional networking equipment"},
-		{"2027-01-01", "Begin transition: operating systems, niche/custom apps + infrastructure"},
-		{"2030-12-31", "Complete transition: software/firmware signing, traditional networking equipment"},
-		{"2033-12-31", "Complete transition: web/cloud, operating systems, niche/custom apps + infrastructure"},
+		{deadlineBeginTransition, "Begin transition: software/firmware signing, web browsers + servers, cloud services"},
+		{deadlineNetworkingBegin, "Begin transition: traditional networking equipment"},
+		{deadlineOSBegin, "Begin transition: operating systems, niche/custom apps + infrastructure"},
+		{deadlineKeyExchange, "Complete transition: software/firmware signing, traditional networking equipment"},
+		{deadlineFull, "Complete transition: web/cloud, operating systems, niche/custom apps + infrastructure"},
 	}
 }
 
