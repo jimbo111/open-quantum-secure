@@ -217,6 +217,33 @@ func matchesAnyPattern(algNameLower string, patterns []string) bool {
 		if p == algNameLower {
 			return true
 		}
+		// Generic protocol patterns cover their versioned forms: policies
+		// written as "tls"/"ssl" before config-scanner findings carried
+		// versions ("TLSv1.2") must keep matching them (wave-2 review V13).
+		// Only version-shaped suffixes qualify — "tls" does not match
+		// cipher-suite-style names like "tls_rsa_with_aes".
+		if (p == "tls" || p == "ssl") && isVersionedProtocolForm(algNameLower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// isVersionedProtocolForm reports whether alg is proto plus a version
+// suffix: "tlsv1.2", "tls1.2", "tls 1.3", "sslv3", "ssl 3.0".
+func isVersionedProtocolForm(alg, proto string) bool {
+	if !strings.HasPrefix(alg, proto) || len(alg) == len(proto) {
+		return false
+	}
+	rest := alg[len(proto):]
+	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
+	switch {
+	case isDigit(rest[0]):
+		return true
+	case rest[0] == 'v' && len(rest) > 1 && isDigit(rest[1]):
+		return true
+	case rest[0] == ' ' && len(rest) > 1 && isDigit(rest[1]):
+		return true
 	}
 	return false
 }
