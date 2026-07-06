@@ -71,7 +71,11 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	tmp.Close()
 	defer os.Remove(tmpPath)
 
-	args := []string{"-o", tmpPath, "--spec-version", "1.5", opts.TargetPath}
+	// See projecttypes.go for why an explicit -t allow-list is mandatory here
+	// (never bare — that means cdxgen auto-detects every ecosystem, including
+	// the chrome-extension host-browser-profile probe).
+	types := detectCdxgenTypes(opts.TargetPath)
+	args := buildCdxgenArgs(tmpPath, types, opts.TargetPath)
 
 	// cdxgen frequently exits non-zero even when it produces valid output
 	// (e.g., mixed-language projects, partial ecosystem support). Check the

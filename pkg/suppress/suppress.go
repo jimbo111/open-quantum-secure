@@ -194,6 +194,17 @@ func (s *Scanner) IsSuppressed(filePath string, line int, algorithm string) bool
 				s.mu.Unlock()
 				return true
 			}
+			// Generic protocol directives cover versioned finding names:
+			// `// oqs:ignore[TLS]` written before findings carried versions
+			// must keep suppressing "TLSv1.2" (wave-2 review V14). Only
+			// version-shaped suffixes qualify — [TLS] does not suppress a
+			// cipher-suite-style "TLS_RSA_WITH_AES" name.
+			if genericCoversVersioned(a, algorithm) {
+				s.mu.Lock()
+				s.stats.SuppressedByInline++
+				s.mu.Unlock()
+				return true
+			}
 		}
 	}
 
@@ -373,4 +384,30 @@ func (s *Scanner) PreloadFile(filePath string) {
 		s.stats.TotalDirectives += len(sups)
 	}
 	s.mu.Unlock()
+}
+
+// genericCoversVersioned reports whether directive is a generic protocol
+// name ("TLS"/"SSL", any case) and algorithm is a versioned form of it
+// ("TLSv1.2", "tls1.2", "SSL 3.0"). Cipher-suite-style names with an
+// underscore suffix ("TLS_RSA_WITH_AES") never qualify.
+func genericCoversVersioned(directive, algorithm string) bool {
+	d := strings.ToLower(strings.TrimSpace(directive))
+	if d != "tls" && d != "ssl" {
+		return false
+	}
+	a := strings.ToLower(algorithm)
+	if !strings.HasPrefix(a, d) || len(a) == len(d) {
+		return false
+	}
+	rest := a[len(d):]
+	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
+	switch {
+	case isDigit(rest[0]):
+		return true
+	case rest[0] == 'v' && len(rest) > 1 && isDigit(rest[1]):
+		return true
+	case rest[0] == ' ' && len(rest) > 1 && isDigit(rest[1]):
+		return true
+	}
+	return false
 }

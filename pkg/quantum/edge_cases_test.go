@@ -202,19 +202,21 @@ func TestClassify_RSAKeySizeLadder(t *testing.T) {
 		wantHNDL    string
 		wantTarget  string
 	}{
-		// Standard NIST-recommended sizes
-		{"RSA-1024 default prim", 1024, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-44"},
-		{"RSA-2048 default prim", 2048, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-44"},
+		// Standard NIST-recommended sizes. ML-DSA-65 is the floor (review
+		// SCANNER_REVIEW_2026-07-05.md finding A1 — below-3072 used to be
+		// ML-DSA-44, contradicting classify.go's recommendation text).
+		{"RSA-1024 default prim", 1024, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-65"},
+		{"RSA-2048 default prim", 2048, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-65"},
 		{"RSA-3072 default prim", 3072, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-65"},
 		{"RSA-4096 default prim", 4096, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-87"},
 		{"RSA-8192 large key", 8192, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-87"},
 		// Off-by-one boundaries
-		{"RSA-1023 unusual", 1023, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-44"},
-		{"RSA-2049 unusual", 2049, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-44"},
+		{"RSA-1023 unusual", 1023, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-65"},
+		{"RSA-2049 unusual", 2049, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-65"},
 		// Edge: zero keySize → no key-size info, still vulnerable
-		{"RSA-0 no size", 0, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-44"},
+		{"RSA-0 no size", 0, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-65"},
 		// Edge: negative keySize — must not panic
-		{"RSA negative size", -1, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-44"},
+		{"RSA negative size", -1, RiskVulnerable, SeverityHigh, HNDLImmediate, "ML-DSA-65"},
 	}
 
 	for _, tt := range tests {
@@ -821,11 +823,12 @@ func TestLookupTargetForKeySize_UnusualSizes(t *testing.T) {
 		keySize int
 		wantAlg string
 	}{
-		// All below 3072 → ML-DSA-44
-		{"keySize=0", 0, "ML-DSA-44"},
-		{"keySize=-1", -1, "ML-DSA-44"},
-		{"keySize=1023", 1023, "ML-DSA-44"},
-		{"keySize=2049", 2049, "ML-DSA-44"},
+		// All below 3072 → ML-DSA-65 (floor; review SCANNER_REVIEW_2026-07-05.md
+		// finding A1 — this tier used to return ML-DSA-44).
+		{"keySize=0", 0, "ML-DSA-65"},
+		{"keySize=-1", -1, "ML-DSA-65"},
+		{"keySize=1023", 1023, "ML-DSA-65"},
+		{"keySize=2049", 2049, "ML-DSA-65"},
 		// At/above 3072 → ML-DSA-65
 		{"keySize=3072", 3072, "ML-DSA-65"},
 		// At/above 4096 → ML-DSA-87

@@ -55,10 +55,14 @@ func isSafePQC(alg string) bool {
 	upper := strings.ToUpper(alg)
 	// Prefix-based check covers all variants (ML-DSA-44/65/87, ML-KEM-512/768/1024,
 	// SLH-DSA-*, HQC-*, etc.) as well as the bare family names.
+	// Pre-standard aliases (KYBER/DILITHIUM/SPHINCS+) are deliberately NOT
+	// listed: since the G2 classification change they classify RiskDeprecated
+	// with ML-KEM/ML-DSA/SLH-DSA migration targets, so they need snippets —
+	// early-outing here contradicted the classifier (wave-2 review C27).
+	// XMSS/LMS stay: SP 800-208 final standards, genuinely nothing to migrate.
 	for _, prefix := range []string{
 		"ML-DSA", "ML-KEM", "SLH-DSA",
-		"DILITHIUM", "KYBER",           // pre-standard aliases
-		"XMSS", "LMS", "SPHINCS+",
+		"XMSS", "LMS",
 		"HQC",
 	} {
 		if upper == prefix || strings.HasPrefix(upper, prefix+"-") {
@@ -398,9 +402,10 @@ with oqs.KeyEncapsulation("` + targetAlg + `") as kem:
 // Java snippets
 // ---------------------------------------------------------------------------
 
-func javaSnippet(family, targetAlg string) *Snippet {
-	// Strip variant suffix for the Bouncy Castle algorithm name:
-	// "ML-DSA-65" → "ML-DSA", "ML-KEM-768" → "ML-KEM".
+// javaBCAlgName strips the numeric variant suffix from a canonical PQC target
+// for the Bouncy Castle JCA algorithm name: "ML-DSA-65" → "ML-DSA",
+// "ML-KEM-768" → "ML-KEM".
+func javaBCAlgName(targetAlg string) string {
 	bcAlg := targetAlg
 	if idx := strings.LastIndex(targetAlg, "-"); idx > 0 {
 		prefix := targetAlg[:idx]
@@ -417,6 +422,31 @@ func javaSnippet(family, targetAlg string) *Snippet {
 			bcAlg = prefix
 		}
 	}
+	return bcAlg
+}
+
+// javaParamSpecClass builds the Bouncy Castle org.bouncycastle.jcajce.spec
+// parameter-set class simple name from a JCA algorithm name, e.g.
+// "ML-DSA" -> "MLDSAParameterSpec", "ML-KEM" -> "MLKEMParameterSpec".
+// Verified against the Bouncy Castle 1.83+ javadoc for MLDSAParameterSpec /
+// MLKEMParameterSpec; the same hyphen-stripped-plus-suffix convention is used
+// consistently across BC's other jcajce.spec PQC parameter classes.
+func javaParamSpecClass(bcAlg string) string {
+	return strings.ReplaceAll(bcAlg, "-", "") + "ParameterSpec"
+}
+
+// javaParamSpecField converts a canonical target algorithm (e.g. "ML-DSA-65")
+// into the corresponding Bouncy Castle parameter-set static field name (e.g.
+// "ml_dsa_65") — confirmed fields: ml_dsa_44/65/87, ml_kem_768/1024.
+func javaParamSpecField(targetAlg string) string {
+	return strings.ReplaceAll(strings.ToLower(targetAlg), "-", "_")
+}
+
+func javaSnippet(family, targetAlg string) *Snippet {
+	bcAlg := javaBCAlgName(targetAlg)
+	specClass := javaParamSpecClass(bcAlg)
+	specField := javaParamSpecField(targetAlg)
+	initCall := specClass + "." + specField
 
 	switch family {
 	case "sign":
@@ -426,18 +456,20 @@ KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
 kpg.initialize(2048);
 KeyPair kp = kpg.generateKeyPair();`
 
-		after := `import org.bouncycastle.pqc.jcajce.provider.BouncyCastlePQCProvider;
+		after := `import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.jcajce.spec.` + specClass + `;
 import java.security.KeyPairGenerator;
 
-Security.addProvider(new BouncyCastlePQCProvider());
-KeyPairGenerator kpg = KeyPairGenerator.getInstance("` + bcAlg + `", "BCPQC");
+Security.addProvider(new BouncyCastleProvider());
+KeyPairGenerator kpg = KeyPairGenerator.getInstance("` + bcAlg + `", "BC");
+kpg.initialize(` + initCall + `);
 KeyPair kp = kpg.generateKeyPair();`
 
 		return &Snippet{
 			Language:    "java",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA with " + targetAlg + pqcStdSuffix(targetAlg) + " using Bouncy Castle BCPQC provider.",
+			Explanation: "Replace RSA/ECDSA with " + targetAlg + pqcStdSuffix(targetAlg) + " using Bouncy Castle's standard \"BC\" provider.",
 		}
 
 	case "kem":
@@ -448,18 +480,20 @@ ka.init(privateKey);
 ka.doPhase(peerPublicKey, true);
 byte[] sharedSecret = ka.generateSecret();`
 
-		after := `import org.bouncycastle.pqc.jcajce.provider.BouncyCastlePQCProvider;
+		after := `import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.jcajce.spec.` + specClass + `;
 import java.security.KeyPairGenerator;
 
-Security.addProvider(new BouncyCastlePQCProvider());
-KeyPairGenerator kpg = KeyPairGenerator.getInstance("` + bcAlg + `", "BCPQC");
+Security.addProvider(new BouncyCastleProvider());
+KeyPairGenerator kpg = KeyPairGenerator.getInstance("` + bcAlg + `", "BC");
+kpg.initialize(` + initCall + `);
 KeyPair kp = kpg.generateKeyPair();`
 
 		return &Snippet{
 			Language:    "java",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace ECDH key agreement with " + targetAlg + pqcStdSuffix(targetAlg) + " using Bouncy Castle BCPQC provider.",
+			Explanation: "Replace ECDH key agreement with " + targetAlg + pqcStdSuffix(targetAlg) + " using Bouncy Castle's standard \"BC\" provider.",
 		}
 	}
 	return nil
@@ -552,30 +586,43 @@ func toOQSVariant(alg string) string {
 // Config snippets
 // ---------------------------------------------------------------------------
 
-// configServerType returns one of "nginx", "apache", "haproxy" based on
-// whether the file name or path contains a recognisable keyword (case-insensitive).
-// Falls back to "nginx" for unrecognised paths.
+// configServerType returns one of "nginx", "apache", "haproxy", "ssh", or
+// "generic" based on whether the file name or path contains a recognisable
+// keyword (case-insensitive). Paths that match none of the known servers
+// return "generic" — they must NOT silently default to nginx (B5): a
+// generic-guidance snippet is the only safe thing to emit for a server we
+// can't identify, since nginx directives are wrong syntax for anything else.
 func configServerType(filePath string) string {
-	lower := strings.ToLower(filePath)
+	lower := strings.ToLower(filepath.ToSlash(filePath))
+	base := strings.ToLower(filepath.Base(filePath))
 	switch {
 	case strings.Contains(lower, "haproxy"):
 		return "haproxy"
 	case strings.Contains(lower, "apache") || strings.Contains(lower, "httpd"):
 		return "apache"
-	default:
+	case strings.Contains(lower, "nginx"):
 		return "nginx"
+	case base == "sshd_config" || base == "ssh_config" ||
+		strings.Contains(lower, "/sshd_config.d/") || strings.Contains(lower, "/ssh/"):
+		return "ssh"
+	default:
+		return "generic"
 	}
 }
 
 // isExtensionlessConfigPath reports whether filePath looks like a server
 // configuration file even though it has no file extension (e.g.
-// /etc/nginx/sites-available/default).
+// /etc/nginx/sites-available/default, /etc/ssh/sshd_config).
 func isExtensionlessConfigPath(filePath string) bool {
 	if filepath.Ext(filePath) != "" {
 		return false
 	}
 	lower := strings.ToLower(filepath.ToSlash(filePath))
-	for _, marker := range []string{"/nginx/", "/apache/", "/apache2/", "/httpd/", "/haproxy/"} {
+	base := strings.ToLower(filepath.Base(filePath))
+	if base == "sshd_config" || base == "ssh_config" {
+		return true
+	}
+	for _, marker := range []string{"/nginx/", "/apache/", "/apache2/", "/httpd/", "/haproxy/", "/ssh/"} {
 		if strings.Contains(lower, marker) {
 			return true
 		}
@@ -585,7 +632,9 @@ func isExtensionlessConfigPath(filePath string) bool {
 
 // configSnippet generates a server-specific PQC migration snippet for config
 // files. The filePath is used to detect whether the target is nginx, Apache,
-// or HAProxy; all other paths default to nginx-style directives.
+// HAProxy, or OpenSSH (configServerType); paths matching none of those get a
+// generic guidance snippet rather than defaulting to any one server's syntax
+// (B5 — SSH and unrecognised configs must never receive nginx directives).
 func configSnippet(filePath, classicalAlg, family string) *Snippet {
 	_ = strings.ToUpper(classicalAlg) // kept for future per-alg branching
 
@@ -627,7 +676,7 @@ bind *:443 ssl crt /etc/haproxy/certs/server-mldsa.pem
 				Explanation: "Replace RSA/ECDSA TLS certificate with an ML-DSA-65 certificate (FIPS 204) in the HAProxy bind directive.",
 			}
 
-		default: // nginx
+		case "nginx":
 			before := `# Certificate key type (classical RSA)
 ssl_certificate     /etc/ssl/certs/server-rsa.crt;
 ssl_certificate_key /etc/ssl/private/server-rsa.key;`
@@ -643,6 +692,11 @@ ssl_certificate_key /etc/ssl/private/server-mldsa.key;
 				After:       after,
 				Explanation: "Replace RSA/ECDSA TLS certificate with an ML-DSA-65 certificate (FIPS 204).",
 			}
+
+		default: // "ssh" (host-key signature algorithms have no NIST-standard
+			// PQC replacement shipping yet) and "generic" — no server-specific
+			// directive can be assumed safely, so fall through to generic guidance.
+			return genericConfigSnippet(family, "ML-DSA-65")
 		}
 	}
 
@@ -675,7 +729,7 @@ SSLOpenSSLConfCmd Curves X25519MLKEM768:prime256v1:secp384r1`
 				Explanation: "Add X25519MLKEM768 to HAProxy TLS curve list to enable PQC hybrid key exchange (FIPS 203).",
 			}
 
-		default: // nginx
+		case "nginx":
 			before := `# TLS curve preference (classical only)
 ssl_ecdh_curve secp384r1:prime256v1;`
 
@@ -688,19 +742,89 @@ ssl_ecdh_curve X25519MLKEM768:secp384r1:prime256v1;`
 				After:       after,
 				Explanation: "Add X25519MLKEM768 to TLS curve list to enable PQC hybrid key exchange (FIPS 203).",
 			}
+
+		case "ssh":
+			// mlkem768x25519-sha256: OpenSSH 9.9+ (default since 10.0), hybrid
+			// ML-KEM-768/X25519, FIPS 203. sntrup761x25519-sha512: OpenSSH
+			// 8.5+ (default since 9.0), hybrid Streamlined NTRU Prime/X25519 —
+			// listed second as a fallback for servers/clients predating 9.9.
+			before := `# sshd_config / ssh_config (classical key exchange only)
+KexAlgorithms curve25519-sha256,ecdh-sha2-nistp256`
+
+			after := `# mlkem768x25519-sha256: OpenSSH 9.9+ (default since 10.0), FIPS 203 hybrid.
+# sntrup761x25519-sha512: OpenSSH 8.5+ (default since 9.0), fallback for older peers.
+KexAlgorithms mlkem768x25519-sha256,sntrup761x25519-sha512`
+
+			return &Snippet{
+				Language:    "config",
+				Before:      before,
+				After:       after,
+				Explanation: "Add mlkem768x25519-sha256 (OpenSSH 9.9+, FIPS 203) and sntrup761x25519-sha512 (OpenSSH 8.5+) hybrid post-quantum key exchange to KexAlgorithms.",
+			}
+
+		default: // "generic" — no server-specific directive can be assumed safely.
+			return genericConfigSnippet(family, "ML-KEM-768")
 		}
 	}
 
 	return nil
 }
 
+// genericConfigSnippet returns server-agnostic migration guidance for config
+// paths where configServerType could not identify a known server (or, for
+// the "sign" family, identified "ssh" — SSH host-key signatures have no
+// shipping NIST-standard PQC replacement, so no specific directive is safe to
+// assume). defaultTarget names the algorithm to recommend when the caller
+// didn't already bake one into an existing directive example.
+func genericConfigSnippet(family, defaultTarget string) *Snippet {
+	if family == "sign" {
+		before := `# Classical certificate/key configuration (directive names vary by server)
+# e.g. certificate_file = /etc/ssl/certs/server-rsa.crt`
+
+		after := `# Replace the classical certificate with an ` + defaultTarget + pqcStdSuffix(defaultTarget) + ` certificate.
+# Generate with: openssl genpkey -algorithm ` + defaultTarget + `
+# This config format was not recognised — consult your server's documentation
+# for its certificate/key directive name; do not assume another server's syntax.`
+
+		return &Snippet{
+			Language:    "config",
+			Before:      before,
+			After:       after,
+			Explanation: "Replace the classical certificate with an " + defaultTarget + pqcStdSuffix(defaultTarget) + " certificate — unrecognised config format, apply to your server's certificate directive.",
+		}
+	}
+
+	before := `# Classical TLS/key-exchange configuration (directive names vary by server)
+# e.g. key_exchange_curves = secp256r1`
+
+	after := `# Add a PQC hybrid key-exchange group, e.g. X25519MLKEM768` + pqcStdSuffix("ML-KEM-768") + `.
+# This config format was not recognised — consult your server's documentation
+# for its cipher/curve/key-exchange directive name; do not assume another server's syntax.`
+
+	return &Snippet{
+		Language:    "config",
+		Before:      before,
+		After:       after,
+		Explanation: "Add a PQC hybrid key-exchange group (e.g. X25519MLKEM768, FIPS 203) — unrecognised config format, apply to your server's cipher/curve directive.",
+	}
+}
+
 // ---------------------------------------------------------------------------
 // JavaScript / TypeScript snippets
 // ---------------------------------------------------------------------------
 
+// nodeKeyType converts a canonical target algorithm ("ML-DSA-65") into the
+// node:crypto asymmetricKeyType string ("ml-dsa-65"). Verified against the
+// Node.js 24.7+ crypto docs, which name ML-DSA/ML-KEM key types this way.
+func nodeKeyType(targetAlg string) string {
+	return strings.ToLower(targetAlg)
+}
+
 // jsSnippet returns Node.js migration snippets for the given family.
 // lang is "javascript" or "typescript" and is reflected in Snippet.Language.
 func jsSnippet(lang, family, targetAlg string) *Snippet {
+	keyType := nodeKeyType(targetAlg)
+
 	switch family {
 	case "sign":
 		before := `const { createSign } = require('crypto');
@@ -709,19 +833,19 @@ const sign = createSign('RSA-SHA256');
 sign.update(message);
 const signature = sign.sign(privateKey);`
 
-		after := `// Node.js has no native PQC signing yet.
-// Use liboqs-node (npm install liboqs-node) as an interim solution,
-// or wait for a future Node.js release with OpenSSL 3.5+ PQC support.
-const { Signature } = require('liboqs-node');
-const sig = new Signature('` + targetAlg + `');
-const publicKey = sig.generateKeypair();
-const signature = sig.sign(message);`
+		after := `// Node.js 24.7+: node:crypto has native ML-DSA sign()/verify() (OpenSSL 3.5+).
+// Browsers or older Node: use @noble/post-quantum (npm install @noble/post-quantum).
+const { generateKeyPairSync, sign, verify } = require('node:crypto');
+
+const { publicKey, privateKey } = generateKeyPairSync('` + keyType + `');
+const signature = sign(null, message, privateKey);
+const isValid = verify(null, message, publicKey, signature);`
 
 		return &Snippet{
 			Language:    lang,
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via liboqs-node.",
+			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via node:crypto (Node.js 24.7+).",
 		}
 
 	case "kem":
@@ -731,19 +855,19 @@ const ecdh = createECDH('prime256v1');
 ecdh.generateKeys();
 const sharedSecret = ecdh.computeSecret(peerPublicKey);`
 
-		after := `// Node.js 21+ with OpenSSL 3.x: X25519MLKEM768 hybrid is available for
-// TLS automatically — no code changes needed when using the https module.
-// For explicit KEM operations, use liboqs-node (npm install liboqs-node):
-const { KeyEncapsulation } = require('liboqs-node');
-const kem = new KeyEncapsulation('` + targetAlg + `');
-const publicKey = kem.generateKeypair();
-const { ciphertext, sharedSecret } = kem.encapSecret(publicKey);`
+		after := `// Node.js 24.7+: node:crypto has native ML-KEM encapsulate()/decapsulate() (OpenSSL 3.5+).
+// Browsers or older Node: use @noble/post-quantum (npm install @noble/post-quantum).
+const { generateKeyPairSync, encapsulate, decapsulate } = require('node:crypto');
+
+const { publicKey, privateKey } = generateKeyPairSync('` + keyType + `');
+const { ciphertext, sharedSecret } = encapsulate(publicKey);
+const recovered = decapsulate(privateKey, ciphertext);`
 
 		return &Snippet{
 			Language:    lang,
 			Before:      before,
 			After:       after,
-			Explanation: "Replace ECDH key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via liboqs-node.",
+			Explanation: "Replace ECDH key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via node:crypto (Node.js 24.7+).",
 		}
 	}
 	return nil
@@ -807,25 +931,54 @@ EVP_PKEY_keygen(ctx, &pkey);`
 // C# snippets
 // ---------------------------------------------------------------------------
 
+// csharpAlgorithmVariant converts a canonical target algorithm ("ML-DSA-65")
+// into the .NET 10 MLDsaAlgorithm/MLKemAlgorithm enum member name
+// ("MLDsa65"/"MLKem768"). Verified against the MLDsaAlgorithm/MLKemAlgorithm
+// static members documented for System.Security.Cryptography in .NET 10
+// (MLDsa44/65/87, MLKem512/768/1024).
+func csharpAlgorithmVariant(targetAlg string) string {
+	parts := strings.Split(targetAlg, "-")
+	var b strings.Builder
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		if i == 0 || (p[0] >= '0' && p[0] <= '9') {
+			// "ML" prefix and numeric suffixes ("65", "768") pass through
+			// unchanged; only the middle family segment gets Title-cased.
+			b.WriteString(strings.ToUpper(p[:1]) + p[1:])
+			continue
+		}
+		b.WriteString(strings.ToUpper(p[:1]) + strings.ToLower(p[1:]))
+	}
+	return b.String()
+}
+
 func csharpSnippet(family, targetAlg string) *Snippet {
+	variant := csharpAlgorithmVariant(targetAlg)
+
 	switch family {
 	case "sign":
 		before := `using var rsa = RSA.Create(2048);
 byte[] signature = rsa.SignData(
     message, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);`
 
-		after := `// .NET has no built-in PQC support yet; use BouncyCastle for .NET.
-// Install: dotnet add package BouncyCastle.Cryptography
-using Org.BouncyCastle.Pqc.Crypto.MLDsa;
-var keyGen = new MLDsaKeyPairGenerator();
-keyGen.Init(new MLDsaKeyGenerationParameters(new SecureRandom(), MLDsaParameters.ml_dsa_65));
-var keyPair = keyGen.GenerateKeyPair();`
+		after := `// .NET 10+: System.Security.Cryptography.MLDsa is built in ([Experimental] —
+// requires Linux+OpenSSL 3.5+ or Windows with CNG PQC support; not macOS yet).
+// Pre-.NET-10 or macOS: use BouncyCastle.Cryptography instead
+// (Org.BouncyCastle.Pqc.Crypto.MLDsa / MLDsaParameters.ml_dsa_65).
+using System.Security.Cryptography;
+
+using MLDsa key = MLDsa.GenerateKey(MLDsaAlgorithm.` + variant + `);
+byte[] signature = new byte[key.Algorithm.SignatureSizeInBytes];
+key.SignData(message, signature);
+bool isValid = key.VerifyData(message, signature);`
 
 		return &Snippet{
 			Language:    "csharp",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via BouncyCastle for .NET.",
+			Explanation: "Replace RSA/ECDSA signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via .NET 10's native MLDsa class.",
 		}
 
 	case "kem":
@@ -834,18 +987,22 @@ byte[] publicKey = ecdh.PublicKey.ExportSubjectPublicKeyInfo();
 byte[] sharedSecret = ecdh.DeriveKeyFromHash(
     peerPublicKey, HashAlgorithmName.SHA256);`
 
-		after := `// .NET has no built-in PQC KEM support yet; use BouncyCastle for .NET.
-// Install: dotnet add package BouncyCastle.Cryptography
-using Org.BouncyCastle.Pqc.Crypto.MLKem;
-var keyGen = new MLKemKeyPairGenerator();
-keyGen.Init(new MLKemKeyGenerationParameters(new SecureRandom(), MLKemParameters.ml_kem_768));
-var keyPair = keyGen.GenerateKeyPair();`
+		after := `// .NET 10+: System.Security.Cryptography.MLKem is built in and stable
+// (Linux+OpenSSL 3.5+ or Windows with CNG PQC support; not macOS yet).
+// Pre-.NET-10 or macOS: use BouncyCastle.Cryptography instead
+// (Org.BouncyCastle.Pqc.Crypto.MLKem / MLKemParameters.ml_kem_768).
+using System.Security.Cryptography;
+
+using MLKem privateKey = MLKem.GenerateKey(MLKemAlgorithm.` + variant + `);
+using MLKem publicKey = MLKem.ImportEncapsulationKey(MLKemAlgorithm.` + variant + `, privateKey.ExportEncapsulationKey());
+publicKey.Encapsulate(out byte[] ciphertext, out byte[] sharedSecret);
+byte[] sharedSecret2 = privateKey.Decapsulate(ciphertext);`
 
 		return &Snippet{
 			Language:    "csharp",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace ECDH key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via BouncyCastle for .NET.",
+			Explanation: "Replace ECDH key exchange with " + targetAlg + pqcStdSuffix(targetAlg) + " via .NET 10's native MLKem class.",
 		}
 	}
 	return nil
@@ -865,9 +1022,39 @@ func pqcStandard(targetAlg string) string {
 	return fipsStandardFor(targetAlg)
 }
 
-// swiftSnippet returns Apple CryptoKit migration snippets for the given family.
-// Swift has no native PQC support yet; the snippets explain the gap and point
-// to liboqs-swift or system TLS updates as interim paths.
+// swiftMLDSAType picks the CryptoKit ML-DSA type for a target algorithm.
+// CryptoKit (iOS 26/macOS 26) exposes only MLDSA65 and MLDSA87 — there is no
+// MLDSA44 type — so an ML-DSA-44 target renders the nearest available type
+// (MLDSA65) with a note explaining the substitution.
+func swiftMLDSAType(targetAlg string) (typeName, note string) {
+	if strings.Contains(targetAlg, "87") {
+		return "MLDSA87", ""
+	}
+	if strings.Contains(targetAlg, "44") {
+		return "MLDSA65", "// CryptoKit has no MLDSA44 type; using MLDSA65 (the nearest available parameter set).\n"
+	}
+	return "MLDSA65", ""
+}
+
+// swiftMLKEMType picks the CryptoKit ML-KEM type for a target algorithm.
+// CryptoKit (iOS 26/macOS 26) exposes only MLKEM768 and MLKEM1024 — there is
+// no MLKEM512 type — so an ML-KEM-512 target renders the nearest available
+// type (MLKEM768) with a note explaining the substitution.
+func swiftMLKEMType(targetAlg string) (typeName, note string) {
+	if strings.Contains(targetAlg, "1024") {
+		return "MLKEM1024", ""
+	}
+	if strings.Contains(targetAlg, "512") {
+		return "MLKEM768", "// CryptoKit has no MLKEM512 type; using MLKEM768 (the nearest available parameter set).\n"
+	}
+	return "MLKEM768", ""
+}
+
+// swiftSnippet returns Apple CryptoKit migration snippets for the given
+// family. iOS 26 / macOS 26 CryptoKit has native ML-KEM/ML-DSA types; older
+// OS versions or non-Apple platforms fall back to swift-crypto (a
+// CryptoKit-API-compatible package covering Linux/older-OS backends) or
+// liboqs-swift.
 func swiftSnippet(family, targetAlg string) *Snippet {
 	switch family {
 	case "sign":
@@ -877,22 +1064,22 @@ let privateKey = Curve25519.Signing.PrivateKey()
 let signature = try privateKey.signature(for: data)
 let isValid = publicKey.isValidSignature(signature, for: data)`
 
-		standard := pqcStandard(targetAlg)
-		standardSuffix := ""
-		if standard != "" {
-			standardSuffix = " (" + standard + ")"
-		}
+		mldsaType, note := swiftMLDSAType(targetAlg)
 
-		after := `// Swift has no native PQC signing yet.
-// Use liboqs-swift (SPM package) or OpenSSL via CCryptoBoringSSL.
-// Monitor Apple CryptoKit for future PQC support.
-// Target algorithm: ` + targetAlg + standardSuffix
+		after := `// iOS 26+ / macOS 26+: CryptoKit has native ML-DSA signing.
+// Older OS or Linux: use swift-crypto (CryptoKit-API-compatible) or liboqs-swift.
+` + note + `import CryptoKit
+
+let signingKey = ` + mldsaType + `.PrivateKey()
+let signature = try signingKey.signature(for: data)
+let isValid = signingKey.publicKey.isValidSignature(signature, for: data)
+// Target algorithm: ` + targetAlg + pqcStdSuffix(targetAlg)
 
 		return &Snippet{
 			Language:    "swift",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace Curve25519 signing with " + targetAlg + " — Swift PQC support pending.",
+			Explanation: "Replace Curve25519 signing with " + targetAlg + pqcStdSuffix(targetAlg) + " via Apple CryptoKit (iOS 26+/macOS 26+).",
 		}
 
 	case "kem":
@@ -901,16 +1088,22 @@ let isValid = publicKey.isValidSignature(signature, for: data)`
 let privateKey = Curve25519.KeyAgreement.PrivateKey()
 let sharedSecret = try privateKey.sharedSecretFromKeyAgreement(with: peerPublicKey)`
 
-		after := `// Swift has no native PQC key exchange yet.
-// For TLS: App Transport Security uses the system TLS stack.
-// macOS 15+ / iOS 18+ may support X25519MLKEM768 via system updates.
-// Target algorithm: ` + targetAlg
+		mlkemType, note := swiftMLKEMType(targetAlg)
+
+		after := `// iOS 26+ / macOS 26+: CryptoKit has native ML-KEM key encapsulation.
+// Older OS or Linux: use swift-crypto (CryptoKit-API-compatible) or liboqs-swift.
+` + note + `import CryptoKit
+
+let privateKey = ` + mlkemType + `.PrivateKey()
+let (ciphertext, sharedSecret) = privateKey.publicKey.encapsulate()
+let recovered = try privateKey.decapsulate(ciphertext)
+// Target algorithm: ` + targetAlg + pqcStdSuffix(targetAlg)
 
 		return &Snippet{
 			Language:    "swift",
 			Before:      before,
 			After:       after,
-			Explanation: "Replace Curve25519 key agreement with " + targetAlg + " — monitor Apple CryptoKit for PQC.",
+			Explanation: "Replace Curve25519 key agreement with " + targetAlg + pqcStdSuffix(targetAlg) + " via Apple CryptoKit (iOS 26+/macOS 26+).",
 		}
 	}
 	return nil

@@ -281,3 +281,53 @@ func TestEvaluate_AllApproved_ReturnsNil(t *testing.T) {
 		t.Errorf("all-approved findings should return nil violations; got %v", v)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// B4 fix: Deadlines() single-source-of-truth
+//
+// Before the fix, Deadlines() built its 5 rows from literal date strings
+// that merely happened to match the const block's values — a dual source of
+// truth that stays in sync only by discipline, not by construction. This
+// test pins Deadlines() to the named constants directly: deadlineNetworkingBegin
+// and deadlineOSBegin did not exist before this fix (2026-01-01 and
+// 2027-01-01 were literals with no backing const anywhere), so this test
+// fails to COMPILE against the pre-fix code — the strongest form of RED
+// available for a "reference the const, not a copy of its value" bug, since
+// the literal values themselves were never wrong.
+// ---------------------------------------------------------------------------
+
+func TestCNSA2_Deadlines_MatchConstants(t *testing.T) {
+	fw := cnsa20Framework{}
+	got := fw.Deadlines()
+	want := []DeadlineRef{
+		{deadlineBeginTransition, "Begin transition: software/firmware signing, web browsers + servers, cloud services"},
+		{deadlineNetworkingBegin, "Begin transition: traditional networking equipment"},
+		{deadlineOSBegin, "Begin transition: operating systems, niche/custom apps + infrastructure"},
+		{deadlineKeyExchange, "Complete transition: software/firmware signing, traditional networking equipment"},
+		{deadlineFull, "Complete transition: web/cloud, operating systems, niche/custom apps + infrastructure"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Deadlines() returned %d rows, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Deadlines()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestCNSA2_ViolationDeadlines_UnchangedByPhaseTableFix verifies that real
+// Violation deadlines still collapse to exactly the two enforcement dates
+// (2030-12-31 key-exchange / 2033-12-31 full) — B4 only single-sources the
+// informational Deadlines() phase table; it must NOT change what deadline
+// an actual Evaluate() violation carries.
+func TestCNSA2_ViolationDeadlines_UnchangedByPhaseTableFix(t *testing.T) {
+	kex := algFinding("FrodoKEM-976-AES", "kem", 0, findings.QRSafe, "immediate")
+	if v := Evaluate([]findings.UnifiedFinding{kex}); len(v) != 1 || v[0].Deadline != "2030-12-31" {
+		t.Errorf("KEM default-deny deadline = %+v, want 2030-12-31", v)
+	}
+	sig := algFinding("Falcon-512", "signature", 0, findings.QRSafe, "deferred")
+	if v := Evaluate([]findings.UnifiedFinding{sig}); len(v) != 1 || v[0].Deadline != "2033-12-31" {
+		t.Errorf("signature default-deny deadline = %+v, want 2033-12-31", v)
+	}
+}

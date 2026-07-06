@@ -57,6 +57,14 @@ func (r *Registry) Normalize(raw string, keySize int, mode string) NormalizedRes
 		if strings.HasPrefix(upper, familyName) {
 			fam := r.familyIndex[familyName]
 			canonical := buildCanonical(fam.Family, keySize, mode)
+			// HMAC composites must keep their inner digest: collapsing
+			// Java-style "HmacSHA1" to bare "HMAC" hides a deprecated
+			// hash from downstream classification (wave-2 review C9).
+			if fam.Family == "HMAC" {
+				if suffix := strings.Trim(upper[len(familyName):], "-_"); suffix != "" {
+					canonical = "HMAC-" + suffix
+				}
+			}
 			primitive := ""
 			if len(fam.Variant) > 0 {
 				primitive = fam.Variant[0].Primitive

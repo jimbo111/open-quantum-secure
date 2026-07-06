@@ -48,12 +48,13 @@ var kemSpecs = []kemSpec{
 		wantHNDLRisk: HNDLImmediate,
 	},
 	{
-		// Kyber768 is the pre-standardisation name. Not in pqcSafeFamilies;
-		// falls through to "unrecognized kem" path → HNDLImmediate.
+		// Kyber768 is the pre-standardisation name — now in deprecatedAlgorithms
+		// (review finding A2/F1), same treatment as X25519Kyber768Draft00 below:
+		// RiskDeprecated, no HNDLRisk (classically fine, just a superseded name).
 		algorithm:    "Kyber768",
 		primitive:    "kem",
-		wantRisk:     RiskVulnerable,
-		wantHNDLRisk: HNDLImmediate,
+		wantRisk:     RiskDeprecated,
+		wantHNDLRisk: "",
 	},
 	{
 		// X25519Kyber768Draft00: deprecated IETF draft hybrid (pre-FIPS 203 Kyber).

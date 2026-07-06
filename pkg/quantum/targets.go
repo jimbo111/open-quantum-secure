@@ -17,9 +17,9 @@ var migrationTargets = map[string]MigrationTarget{
 	"RSASSA-PKCS1": {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 	"RSASSA-PSS":   {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 	"DSA":          {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
-	"ECDSA":        {Algorithm: "ML-DSA-44", Standard: "FIPS 204"},
+	"ECDSA":        {Algorithm: "ML-DSA-65", Standard: "FIPS 204"}, // ML-DSA-65 floor, not -44 (review A1)
 	"EDDSA":        {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
-	"ED25519":      {Algorithm: "ML-DSA-44", Standard: "FIPS 204"},
+	"ED25519":      {Algorithm: "ML-DSA-65", Standard: "FIPS 204"}, // ML-DSA-65 floor, not -44 (review A1)
 	"ED448":        {Algorithm: "ML-DSA-87", Standard: "FIPS 204"},
 	"KCDSA":        {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 	"EC-KCDSA":     {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
@@ -55,11 +55,39 @@ var migrationTargets = map[string]MigrationTarget{
 	"RC5":        {Algorithm: "AES-256-GCM", Standard: ""},
 	"BLOWFISH":   {Algorithm: "AES-256-GCM", Standard: ""},
 	"HAS-160":    {Algorithm: "SHA-256", Standard: ""},
+	// TLS 1.0/1.1: not a NIST FIPS standard, so Standard is blank like the
+	// other "modern but not PQC" entries above. TLS 1.3 is the precondition
+	// for negotiating a hybrid PQC group — the KEM/signature findings that
+	// actually carry PQC risk are reported separately (tls-probe / the
+	// "groups"/"kex" config-scanner vocabulary).
+	"TLSV1.0": {Algorithm: "TLS 1.3", Standard: ""},
+	"TLSV1.1": {Algorithm: "TLS 1.3", Standard: ""},
+	// TLS 1.2 is classically fine but has no PQC key-exchange path of its
+	// own — same TLS 1.3 target as its deprecated siblings (wave-2 V10).
+	"TLSV1.2": {Algorithm: "TLS 1.3", Standard: ""},
+	// SSLv3/SSLv2: same "not a FIPS standard, TLS 1.3 is the precondition"
+	// reasoning as TLS 1.0/1.1 above.
+	"SSLV3": {Algorithm: "TLS 1.3", Standard: ""},
+	"SSLV2": {Algorithm: "TLS 1.3", Standard: ""},
 
 	// Pre-standard PQC → current NIST names
 	"DILITHIUM": {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 	"KYBER":     {Algorithm: "ML-KEM-768", Standard: "FIPS 203"},
 	"SPHINCS+":  {Algorithm: "SLH-DSA-SHA2-128f", Standard: "FIPS 205"},
+	"SPHINCS":   {Algorithm: "SLH-DSA-SHA2-128f", Standard: "FIPS 205"},
+	// No "FALCON" entry: Falcon's replacement standard (FIPS 206/FN-DSA) is
+	// still pending finalization — unlike Kyber/Dilithium/SPHINCS+ above,
+	// whose FIPS standards are already final — so Falcon is RiskSafe (HQC
+	// pattern, no migration target needed) rather than RiskDeprecated. See
+	// the Falcon branch in classify.go's ClassifyAlgorithm.
+
+	// Chinese/Russian national standards (review finding B2).
+	// SM2 is dual-purpose (signature + key exchange), same as RSA above; the
+	// key-agree/kem/pke override in classifyVulnerable redirects this FIPS 204
+	// default to ML-KEM-768/FIPS 203 when used for key exchange.
+	"SM2":          {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
+	"GOST R 34.10": {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
+	"GOST3410":     {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 }
 
 // LookupTarget returns the PQC migration target for a given algorithm base name.
@@ -76,25 +104,27 @@ func LookupTarget(baseName string) MigrationTarget {
 func LookupTargetForKeySize(baseName string, keySize int) MigrationTarget {
 	upper := strings.ToUpper(baseName)
 
-	// RSA: key size determines ML-DSA level
+	// RSA: key size determines ML-DSA level. ML-DSA-65 is the floor — RSA
+	// below the 3072-bit tier used to fall through to ML-DSA-44, which
+	// contradicted classify.go's recommendation text (review finding A1).
 	switch upper {
 	case "RSA", "RSASSA-PKCS1", "RSASSA-PSS":
 		if keySize >= 4096 {
 			return MigrationTarget{Algorithm: "ML-DSA-87", Standard: "FIPS 204"}
 		}
-		if keySize >= 3072 {
-			return MigrationTarget{Algorithm: "ML-DSA-65", Standard: "FIPS 204"}
-		}
-		return MigrationTarget{Algorithm: "ML-DSA-44", Standard: "FIPS 204"}
+		return MigrationTarget{Algorithm: "ML-DSA-65", Standard: "FIPS 204"}
 	}
 
-	// ECDSA/ECDH: curve size determines level
+	// ECDSA/ECDH: curve size determines level. ML-DSA-65 is the floor (same
+	// A1 fix as RSA above); a dedicated tier steps up to ML-DSA-87 for
+	// P-521-class curves (>= 521 bits), which previously shared the P-384
+	// tier's ML-DSA-65/ML-KEM-1024 target despite being NIST security level 5.
 	switch upper {
 	case "ECDSA":
-		if keySize >= 384 {
-			return MigrationTarget{Algorithm: "ML-DSA-65", Standard: "FIPS 204"}
+		if keySize >= 521 {
+			return MigrationTarget{Algorithm: "ML-DSA-87", Standard: "FIPS 204"}
 		}
-		return MigrationTarget{Algorithm: "ML-DSA-44", Standard: "FIPS 204"}
+		return MigrationTarget{Algorithm: "ML-DSA-65", Standard: "FIPS 204"}
 	case "ECDH", "ECDHE":
 		if keySize >= 384 {
 			return MigrationTarget{Algorithm: "ML-KEM-1024", Standard: "FIPS 203"}

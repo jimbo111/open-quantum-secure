@@ -104,7 +104,8 @@ func TestConfigFileDetection(t *testing.T) {
 		{"nginx.conf", "nginx.conf", "nginx"},
 		{"apache2.conf", "apache2.conf", "apache"},
 		{"haproxy.cfg", "haproxy.cfg", "haproxy"},
-		{"unknown.conf falls back to nginx", "server.conf", "nginx"},
+		// B5: unrecognised paths must NOT silently default to nginx.
+		{"unknown.conf falls back to generic", "server.conf", "generic"},
 		// Path-based detection — directory name contains the keyword.
 		{"/etc/nginx/sites-available/default", "/etc/nginx/sites-available/default", "nginx"},
 		{"/etc/apache2/sites-enabled/000-default.conf", "/etc/apache2/sites-enabled/000-default.conf", "apache"},
@@ -115,6 +116,11 @@ func TestConfigFileDetection(t *testing.T) {
 		{"HAProxy in path", "/srv/HAProxy/cfg/tls.cfg", "haproxy"},
 		{"Apache2 upper in path", "/etc/Apache2/tls.conf", "apache"},
 		{"NGINX upper in path", "/etc/NGINX/nginx.conf", "nginx"},
+		// B5: sshd_config / ssh_config / sshd_config.d must be detected as ssh,
+		// not fall through to nginx.
+		{"sshd_config", "/etc/ssh/sshd_config", "ssh"},
+		{"ssh_config", "/etc/ssh/ssh_config", "ssh"},
+		{"sshd_config.d drop-in", "/etc/ssh/sshd_config.d/10-pqc.conf", "ssh"},
 	}
 
 	for _, tc := range tests {
@@ -138,13 +144,14 @@ func TestConfigSnippetServerDirectives(t *testing.T) {
 		wantBefore   string
 		wantAfter    string
 	}{
-		// Unknown .conf falls back to nginx-style directives.
+		// B5: unknown .conf must fall back to generic guidance, NOT nginx
+		// directives — it still names the recommended hybrid group though.
 		{
-			name:         "unknown.conf ECDH falls back to nginx KEM snippet",
+			name:         "unknown.conf ECDH falls back to generic KEM guidance",
 			filePath:     "/etc/myapp/server.conf",
 			classicalAlg: "ECDH",
 			primitive:    "key-exchange",
-			wantBefore:   "ssl_ecdh_curve",
+			wantBefore:   "key-exchange",
 			wantAfter:    "X25519MLKEM768",
 		},
 		// apache2.conf with ECDH KEM.
@@ -772,15 +779,18 @@ func TestIsSafePQC_EdgeCases(t *testing.T) {
 		"ML-DSA", "ml-dsa", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87",
 		"ML-KEM", "ML-KEM-512", "ML-KEM-768", "ML-KEM-1024",
 		"SLH-DSA", "SLH-DSA-SHA2-128f",
-		"DILITHIUM", "DILITHIUM-2", "DILITHIUM-3",
-		"KYBER", "KYBER-512", "KYBER-768", "KYBER-1024",
 		"XMSS", "XMSS-SHA2-10-256",
 		"LMS",
-		"SPHINCS+",
 		"HQC", "HQC-128",
 	}
+	// Pre-standard names (KYBER/DILITHIUM/SPHINCS+) moved to notSafe in the
+	// wave-2 fix (C27): they classify RiskDeprecated with ML-* migration
+	// targets, so the generator must produce snippets for them.
 	notSafe := []string{
 		"RSA", "ECDSA", "ECDH", "X25519", "AES", "SHA-256", "",
+		"DILITHIUM", "DILITHIUM-2", "DILITHIUM-3",
+		"KYBER", "KYBER-512", "KYBER-768", "KYBER-1024",
+		"SPHINCS+",
 	}
 
 	for _, alg := range safe {

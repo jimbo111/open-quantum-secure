@@ -184,10 +184,19 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "protocol", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
 	{KeyPattern: "protocol", ValueHints: []string{"mlkem", "ml-kem"}, Algorithm: "ML-KEM", Primitive: "kem"},
 	{KeyPattern: "protocol", ValueHints: []string{"sslv3", "ssl3", "ssl 3"}, Algorithm: "SSLv3", Primitive: "protocol"},
-	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.0", "tls1.0", "tls 1.0"}, Algorithm: "TLS", Primitive: "protocol"},
-	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.1", "tls1.1", "tls 1.1"}, Algorithm: "TLS", Primitive: "protocol"},
-	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.2", "tls1.2", "tls 1.2"}, Algorithm: "TLS", Primitive: "protocol"},
-	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.3", "tls1.3", "tls 1.3"}, Algorithm: "TLS", Primitive: "protocol"},
+	// TLS entries carry the version in Algorithm.Name itself (not just a Mode
+	// hint) because pkg/quantum.ClassifyAlgorithm classifies on (name,
+	// primitive, keySize) and has no Mode parameter — Mode is populated
+	// elsewhere (cipherscope's AES-GCM/CBC) but is never read by the
+	// classifier, so a Mode-only encoding would leave the version unusable
+	// downstream. Distinct names let ClassifyAlgorithm tell TLSv1.0/1.1
+	// (classically deprecated), TLSv1.2 (classically fine but no PQC
+	// key-exchange option), and TLSv1.3 (current baseline) apart. See review
+	// finding B6 (previously all four emitted the same Algorithm:"TLS").
+	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.0", "tls1.0", "tls 1.0"}, Algorithm: "TLSv1.0", Primitive: "protocol"},
+	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.1", "tls1.1", "tls 1.1"}, Algorithm: "TLSv1.1", Primitive: "protocol"},
+	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.2", "tls1.2", "tls 1.2"}, Algorithm: "TLSv1.2", Primitive: "protocol"},
+	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.3", "tls1.3", "tls 1.3"}, Algorithm: "TLSv1.3", Primitive: "protocol"},
 
 	// --- key size keys (value parsed as integer) ---
 	{KeyPattern: "key.size", Algorithm: "AES", Primitive: "symmetric"},
@@ -218,6 +227,26 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "signature", ValueHints: []string{"rsa"}, Algorithm: "RSA", Primitive: "signature"},
 	{KeyPattern: "signature", ValueHints: []string{"ecdsa"}, Algorithm: "ECDSA", Primitive: "signature"},
 	{KeyPattern: "signature", ValueHints: []string{"ed25519"}, Algorithm: "Ed25519", Primitive: "signature"},
+
+	// --- JWT/JWS 'alg' claim (RFC 7518 §3.1) ---
+	// The registered claim name is the 3-character key "alg" (e.g. {"alg":
+	// "RS256"}), which is shorter than the 9-character substring "algorithm"
+	// that every entry above requires — strings.Contains("alg", "algorithm")
+	// can never be true, so this extremely common, security-relevant key was
+	// previously unreachable by any vocabulary entry (review finding B7/audit
+	// §2). Adding a standalone "alg" KeyPattern is only safe now that key
+	// matching is segment-boundary-aware (keyMatchesPattern): "alg" matches
+	// the whole segment "alg" in "jwt.alg" but does NOT match as a substring
+	// of "algorithm" (no boundary after "alg" inside "algorithm").
+	{KeyPattern: "alg", ValueHints: []string{"rs256", "rs384", "rs512"}, Algorithm: "RSA", Primitive: "signature"},
+	{KeyPattern: "alg", ValueHints: []string{"ps256", "ps384", "ps512"}, Algorithm: "RSASSA-PSS", Primitive: "signature"},
+	{KeyPattern: "alg", ValueHints: []string{"es256", "es384", "es512"}, Algorithm: "ECDSA", Primitive: "signature"},
+	// One entry per HS* value: bare "HMAC" classifies RiskUnknown (the
+	// classifier needs the inner hash to judge the digest), so each hint
+	// carries its digest into Algorithm.Name (wave-2 review V19/V20).
+	{KeyPattern: "alg", ValueHints: []string{"hs256"}, Algorithm: "HMAC-SHA256", Primitive: "mac"},
+	{KeyPattern: "alg", ValueHints: []string{"hs384"}, Algorithm: "HMAC-SHA384", Primitive: "mac"},
+	{KeyPattern: "alg", ValueHints: []string{"hs512"}, Algorithm: "HMAC-SHA512", Primitive: "mac"},
 }
 
 // keySizePatterns lists KeyPattern values for which the value is parsed as an
@@ -286,6 +315,102 @@ func isAlphaNumeric(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
+// insertCamelCaseBoundaries inserts a '.' separator before each ASCII
+// lower-or-digit-to-upper transition in s (e.g. "sslProtocol" ->
+// "ssl.Protocol", "expectedAlgorithms" -> "expected.Algorithms"). This must
+// run on the ORIGINAL-case string — the case transition that marks a
+// camelCase boundary is destroyed by strings.ToLower, so this has to happen
+// before lowering, not after. Non-ASCII runes are left untouched (never
+// treated as upper/lower for this purpose), which is conservative: it never
+// invents a boundary that could turn a false positive into a false negative
+// for non-Latin keys.
+func insertCamelCaseBoundaries(s string) string {
+	runes := []rune(s)
+	if len(runes) < 2 {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 4)
+	b.WriteRune(runes[0])
+	for i := 1; i < len(runes); i++ {
+		prev, cur := runes[i-1], runes[i]
+		if isASCIIUpper(cur) && (isASCIILower(prev) || isASCIIDigit(prev)) {
+			b.WriteByte('.')
+		} else if isASCIIUpper(prev) && isASCIIUpper(cur) &&
+			i+1 < len(runes) && isASCIILower(runes[i+1]) {
+			// Acronym-run end: "SSLProtocol" → boundary before the 'P'
+			// (the last upper of a run followed by a lower starts a new
+			// word). Without this, acronym-prefixed keys collapse into a
+			// single segment and never match (wave-2 review V6).
+			b.WriteByte('.')
+		}
+		b.WriteRune(cur)
+	}
+	return b.String()
+}
+
+func isASCIIUpper(r rune) bool { return r >= 'A' && r <= 'Z' }
+func isASCIILower(r rune) bool { return r >= 'a' && r <= 'z' }
+func isASCIIDigit(r rune) bool { return r >= '0' && r <= '9' }
+
+// keyMatchesPattern reports whether pattern matches a whole segment of key,
+// where segments are separated by ./[/]/_/- or a camelCase transition. This
+// replaces a bare strings.Contains(lowerKey, pattern) check, which
+// false-positived on any key that merely contained pattern as a substring
+// regardless of word boundaries — e.g. the flattened JSON key
+// "expectedAlgorithms[0]" (from a ground-truth manifest's OWN
+// {"expectedAlgorithms": [...]} schema) matched the "algorithm" vocabulary
+// entry purely because "expectedAlgorithms" contains "algorithm" as a
+// substring (review finding B7). Segment-bounding preserves the intended
+// matches — "encryption_algorithm", "spring.ssl.algorithm", camelCase
+// "sslProtocol" — while rejecting unrelated glued compounds.
+//
+// Multi-token patterns that embed their own separator (e.g. "cipher-suite",
+// "key_size") are handled the same way: containsWordBoundary requires the
+// pattern's own separator characters to appear literally in key too, so
+// these still only match when the full compound substring is present and
+// bounded on both ends.
+//
+// Compound patterns additionally tolerate a single trailing plural "s" (e.g.
+// "cipher-suite" matches the real-world key "cipher-suites"), since strict
+// boundary matching would otherwise regress that common plural form relative
+// to the old bare-substring behavior. This tolerance is deliberately NOT
+// extended to single-word patterns like "algorithm"/"cipher"/"protocol" --
+// doing so would resurrect exactly the bug this function fixes: "algorithm"
+// is a substring of "algorithms", and "expectedAlgorithms" (camelCase-split
+// to segment "algorithms") must NOT match. Gating the plural tolerance on
+// "pattern contains its own separator" cleanly distinguishes the two cases.
+func keyMatchesPattern(key, pattern string) bool {
+	segmented := strings.ToLower(insertCamelCaseBoundaries(key))
+	if containsWordBoundary(segmented, pattern) {
+		return true
+	}
+	if strings.ContainsAny(pattern, "-_.") {
+		return containsWordBoundary(segmented, pattern+"s")
+	}
+	// Glued compound patterns ("ciphersuite", "keylength") vs camelCase
+	// keys: "cipherSuite" segments to "cipher.suite", which no longer
+	// contains the glued pattern. Re-join contiguous MULTI-segment runs
+	// and compare for equality (plus a plural form). Single segments are
+	// deliberately excluded from the plural comparison — "algorithms"
+	// must not match "algorithm" (that is the B7 fix) — but a ≥2-segment
+	// join like "ciphersuites" cannot be a B7-style glued compound of an
+	// unrelated word, so the plural is safe there (wave-2 review V12).
+	segs := strings.FieldsFunc(segmented, func(r rune) bool {
+		return r == '.' || r == '[' || r == ']' || r == '_' || r == '-'
+	})
+	for i := 0; i < len(segs); i++ {
+		join := segs[i]
+		for j := i + 1; j < len(segs) && j-i < 4; j++ {
+			join += segs[j]
+			if join == pattern || join == pattern+"s" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // KeyValue represents a parsed config key-value pair with its source location.
 type KeyValue struct {
 	Key   string
@@ -299,11 +424,10 @@ type KeyValue struct {
 func matchCryptoParams(filePath string, kvPairs []KeyValue) []findings.UnifiedFinding {
 	var result []findings.UnifiedFinding
 	for _, kv := range kvPairs {
-		lowerKey := strings.ToLower(kv.Key)
 		lowerVal := strings.ToLower(kv.Value)
 
 		for _, param := range cryptoParams {
-			if !strings.Contains(lowerKey, param.KeyPattern) {
+			if !keyMatchesPattern(kv.Key, param.KeyPattern) {
 				continue
 			}
 
