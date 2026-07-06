@@ -193,6 +193,52 @@ func TestEnrichFindingsByFile_NilAndEmptyInputs(t *testing.T) {
 	}
 }
 
+// TestEnrichFindingsByFile_SubstringDisambiguation_NotWordBounded is the
+// review counter-example: multi-candidate disambiguation must match the
+// algorithm token as a whole word in the candidate's field name, not as a
+// bare substring. "PARSABLE_LIMIT" contains "RSA" as a raw substring
+// (P-A-R-S-A-...) but is not an RSA-related constant at all -- an RSA
+// finding in this file must NOT pick up PARSABLE_LIMIT's value.
+func TestEnrichFindingsByFile_SubstringDisambiguation_NotWordBounded(t *testing.T) {
+	fc := FileConstants{
+		"/repo/config.go": ConstMap{
+			"config.PARSABLE_LIMIT": 4096,
+			"config.MAX_ITEMS":      500,
+		},
+	}
+	ff := []findings.UnifiedFinding{
+		realFinding("/repo/config.go", "RSA", "RSA"),
+	}
+
+	EnrichFindingsByFile(ff, fc)
+
+	if ff[0].Algorithm.KeySize != 0 {
+		t.Errorf("KeySize = %d, want 0 (PARSABLE_LIMIT must not word-match RSA via bare substring containment)", ff[0].Algorithm.KeySize)
+	}
+}
+
+// TestEnrichFindingsByFile_WordBoundedDisambiguation_StillMatches is the
+// positive control for the fix above: a genuine whole-word match
+// (RSA_KEY_LENGTH for an RSA finding) must still resolve correctly once the
+// match is word-bounded instead of a bare substring check.
+func TestEnrichFindingsByFile_WordBoundedDisambiguation_StillMatches(t *testing.T) {
+	fc := FileConstants{
+		"/repo/config.go": ConstMap{
+			"config.RSA_KEY_LENGTH": 2048,
+			"config.MAX_ITEMS":      500,
+		},
+	}
+	ff := []findings.UnifiedFinding{
+		realFinding("/repo/config.go", "RSA", "RSA"),
+	}
+
+	EnrichFindingsByFile(ff, fc)
+
+	if ff[0].Algorithm.KeySize != 2048 {
+		t.Errorf("KeySize = %d, want 2048 (RSA_KEY_LENGTH is a genuine whole-word match)", ff[0].Algorithm.KeySize)
+	}
+}
+
 // TestEnrichFindingsByFile_PathCleaning confirms that a finding's file path
 // is matched against FileConstants after filepath.Clean, so trivial path
 // spelling differences (redundant "./" segments) don't defeat the match.

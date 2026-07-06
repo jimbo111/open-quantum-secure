@@ -128,9 +128,10 @@ const minPlausibleKeySize = 8
 //     this is the shape of the go-crypto ground-truth sample (a single
 //     `const KeySize = 256` next to a single aes.NewCipher call).
 //   - Multiple candidates: only assign when exactly one candidate's field
-//     name contains the finding's algorithm token (e.g. field
-//     "RSA_KEY_LENGTH" for an "RSA" finding, "AES_KEY_SIZE" for an "AES"
-//     finding in the same file). This is what keeps two co-located
+//     name contains the finding's algorithm token as a whole word (e.g.
+//     field "RSA_KEY_LENGTH" for an "RSA" finding, "AES_KEY_SIZE" for an
+//     "AES" finding in the same file) -- a bare substring check would let
+//     "PARSABLE_LIMIT" false-match "RSA". This is what keeps two co-located
 //     constants (RSA modulus bits + AES key size) from cross-contaminating
 //     each other's findings. If the name match is itself ambiguous (zero or
 //     2+ matches), the finding is left unenriched rather than guessed at --
@@ -176,7 +177,11 @@ func EnrichFindingsByFile(ff []findings.UnifiedFinding, fc FileConstants) {
 			var matchValue int
 			matches := 0
 			for _, c := range candidates {
-				if strings.Contains(strings.ToUpper(c.field), algoToken) {
+				// Word-bounded, not a bare substring check: "PARSABLE_LIMIT"
+				// contains "RSA" as raw bytes (P-A-R-S-A-...) but isn't an
+				// RSA-related constant. containsWord requires the token to
+				// sit on an alphanumeric boundary in the field name.
+				if containsWord(strings.ToUpper(c.field), algoToken) {
 					matchValue = c.value
 					matches++
 				}
