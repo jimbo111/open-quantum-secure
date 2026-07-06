@@ -60,6 +60,19 @@ var migrationTargets = map[string]MigrationTarget{
 	"DILITHIUM": {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 	"KYBER":     {Algorithm: "ML-KEM-768", Standard: "FIPS 203"},
 	"SPHINCS+":  {Algorithm: "SLH-DSA-SHA2-128f", Standard: "FIPS 205"},
+	"SPHINCS":   {Algorithm: "SLH-DSA-SHA2-128f", Standard: "FIPS 205"},
+	// Falcon's replacement standard (FIPS 206/FN-DSA) is still pending
+	// finalization — unlike Kyber/Dilithium/SPHINCS+ above, whose FIPS
+	// standards are already final. See deprecatedRecommendation's FALCON case.
+	"FALCON": {Algorithm: "FN-DSA-512", Standard: "FIPS 206"},
+
+	// Chinese/Russian national standards (review finding B2).
+	// SM2 is dual-purpose (signature + key exchange), same as RSA above; the
+	// key-agree/kem/pke override in classifyVulnerable redirects this FIPS 204
+	// default to ML-KEM-768/FIPS 203 when used for key exchange.
+	"SM2":          {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
+	"GOST":         {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
+	"GOST R 34.10": {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 }
 
 // LookupTarget returns the PQC migration target for a given algorithm base name.

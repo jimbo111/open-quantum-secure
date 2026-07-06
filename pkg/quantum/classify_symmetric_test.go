@@ -352,9 +352,9 @@ func TestClassifySymmetricAndHash(t *testing.T) {
 		// KDF and MAC
 		// =========================================================
 
-		// HMAC-SHA256: baseName=HMAC, isLikelyHash (prefix HMAC) → true.
-		// classifySymmetric(isHash=true): hashOutputSize contains "256" → 256.
-		// Not < 256. quantumResistantHash["HMAC"]=false. effectiveSize=256 >= 256 → resistant.
+		// HMAC-SHA256: extractBaseName strips the "HMAC-" prefix and resolves
+		// the inner hash → baseName=SHA256 (review finding B1/F3). baseName is
+		// a direct quantumResistantHash["SHA256"] hit → resistant.
 		{
 			name: "HMAC-SHA256 resistant",
 			algName: "HMAC-SHA256", primitive: "mac", keySize: 0,

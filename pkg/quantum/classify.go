@@ -66,10 +66,13 @@ var pqcSafeFamilies = map[string]bool{
 	"ML-DSA":  true, // FIPS 204
 	"SLH-DSA": true, // FIPS 205
 	"HQC":     true, // NIST PQC 5th standard (selected March 2025), draft expected 2026
-	"Falcon":  true, // NIST IR 8413 selected (2022); FIPS 206 draft pending publication
-	"FN-DSA":  true, // FIPS 206 standardised name for Falcon (lattice signature)
 	"XMSS":    true,
 	"LMS":     true,
+	// "Falcon" (bare, pre-standard NIST Round 3 name) is intentionally NOT
+	// listed here — it now classifies as RiskDeprecated via
+	// deprecatedAlgorithms (review finding A2), pointing users to FN-DSA.
+	// FN-DSA itself (the FIPS 206 name) remains RiskSafe below.
+	"FN-DSA": true, // FIPS 206 standardised name for Falcon; FIPS 206 itself is still draft/pending
 	// K-PQC Round 4 finalists
 	"SMAUG-T": true, // KEM, lattice-based
 	"HAETAE":  true, // Signature, lattice-based
@@ -135,6 +138,13 @@ func init() {
 	// match the same input via EqualFold. This makes extractBaseName deterministic
 	// regardless of map iteration order.
 	deprecatedAlgorithmsSorted = sortedMapKeys(deprecatedAlgorithms)
+	// preStandardPQCPrefixes is hand-written (small, fixed list) but re-sorted
+	// here defensively so a future edit that appends out of length order can't
+	// silently break longest-prefix-first matching (e.g. "SPHINCS" before
+	// "SPHINCS+" would truncate the "+" for parameterized SPHINCS+ names).
+	sort.Slice(preStandardPQCPrefixes, func(i, j int) bool {
+		return len(preStandardPQCPrefixes[i]) > len(preStandardPQCPrefixes[j])
+	})
 }
 
 // sortedMapKeys returns map keys sorted by length descending (longest match first).
@@ -159,6 +169,18 @@ var quantumVulnerableFamilies = map[string]bool{
 	"FFDH": true, "DH": true, "Diffie-Hellman": true,
 	"ElGamal": true, "ECIES": true, "MQV": true, "ECMQV": true,
 	"KCDSA": true, "EC-KCDSA": true,
+	// Chinese national standard (GM/T 0003-2012). ECC-based signature/key
+	// exchange, Shor-breakable exactly like ECDSA/ECDH. Its PQC hybrid pairing
+	// (curveSM2MLKEM768) is modeled separately in pqcSafeFamilies and MUST
+	// stay RiskSafe — that hybrid's full name is checked first in
+	// extractBaseName (pqcSafeFamiliesSorted runs before this map's prefix
+	// scan), so adding "SM2" here cannot shadow it. See review finding B2.
+	"SM2": true,
+	// Russian national standard (GOST R 34.10-2012), ECC-based signature,
+	// Shor-breakable. GOST symmetric (28147-89/Kuznyechik) and hash
+	// (Streebog) are out of scope here — review finding B2 scoped this to
+	// the ECC signature variant only.
+	"GOST": true, "GOST R 34.10": true,
 }
 
 // deprecatedAlgorithms are classically broken regardless of quantum computing,
@@ -185,7 +207,31 @@ var deprecatedAlgorithms = map[string]bool{
 	"X25519Kyber768Draft00":  true,
 	"X25519Kyber512Draft00":  true,
 	"X25519Kyber1024Draft00": true,
+	// Pre-standard NIST Round 3 submission names, superseded by finalized FIPS
+	// standards (Falcon's FN-DSA/FIPS 206 is the one exception still pending —
+	// see deprecatedRecommendation's FALCON case). The underlying cryptography
+	// is quantum-safe; these are flagged so a finding reads "superseded, here
+	// is the current name" instead of "unrecognized, quantum-vulnerable"
+	// (review finding A2/F1). Parameterized forms with no '-'/'_' separator
+	// before the digit suffix (Kyber512/768/1024, Dilithium2/3/5 — liboqs
+	// naming) do NOT resolve via this exact-match table; they resolve via the
+	// preStandardPQCPrefixes longest-prefix match in extractBaseName below.
+	"Kyber":     true,
+	"Dilithium": true,
+	"SPHINCS+":  true,
+	"SPHINCS":   true,
+	"Falcon":    true,
 }
+
+// preStandardPQCPrefixes enables longest-prefix matching (in extractBaseName)
+// for pre-standard PQC names whose parameterized forms have no '-'/'_'
+// separator before the digit suffix (liboqs naming: "Kyber512", "Dilithium2").
+// Hyphenated forms ("Falcon-512", "SPHINCS+-128s") already resolve via
+// extractBaseName's default '-'/'_' split and don't strictly need this list,
+// but are included for robustness. Every entry here MUST also be a key in
+// deprecatedAlgorithms — TestPreStandardPQCPrefixes_AllInDeprecatedAlgorithms
+// guards against drift. Sorted by length descending in init().
+var preStandardPQCPrefixes = []string{"Kyber", "Dilithium", "SPHINCS+", "SPHINCS", "Falcon"}
 
 // ClassifyAlgorithm assesses the quantum risk of a cryptographic algorithm.
 func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
@@ -383,6 +429,7 @@ func classifySymmetric(baseName, upperName string, keySize int, isHash bool) Cla
 		"SHA-2": true, "SHA-256": true, "SHA-384": true, "SHA-512": true,
 		"SHA256": true, "SHA384": true, "SHA512": true,
 		"LSH": true, // Korean standard
+		"SM3": true, // Chinese national standard (GB/T 32905-2016), 256-bit output
 	}
 
 	if isHash {
@@ -524,6 +571,14 @@ func extractBaseName(name string) string {
 			return alg
 		}
 	}
+	// Pre-standard PQC parameterized forms (Kyber512, Dilithium3, ...) that the
+	// EqualFold check above can't reach because they carry a digit suffix with
+	// no separator. See preStandardPQCPrefixes doc comment.
+	for _, prefix := range preStandardPQCPrefixes {
+		if strings.HasPrefix(upper, strings.ToUpper(prefix)) {
+			return prefix
+		}
+	}
 	for _, family := range quantumVulnerableFamiliesSorted {
 		if strings.HasPrefix(upper, strings.ToUpper(family)) {
 			return family
@@ -533,6 +588,21 @@ func extractBaseName(name string) string {
 		if strings.EqualFold(name, candidate) || strings.HasPrefix(upper, strings.ToUpper(candidate)+"-") {
 			return candidate
 		}
+	}
+
+	// HMAC composite names ("HMAC-MD5", "HmacSHA1", "HMAC-SHA256") wrap an
+	// inner hash; classification should follow the INNER hash's risk, not a
+	// generic "HMAC" bucket that never reaches the hash-family checks (review
+	// finding B1/F3). Strip a "HMAC-" or bare "Hmac"/"HMAC" prefix (Java's
+	// Mac.getInstance uses no separator: "HmacSHA1") and recurse on the
+	// remainder. Bare "HMAC" (no inner algorithm) falls through unchanged to
+	// the default segment split below, same as before this fix.
+	const hmacHyphenPrefix = "HMAC-"
+	switch {
+	case strings.HasPrefix(upper, hmacHyphenPrefix) && len(name) > len(hmacHyphenPrefix):
+		return extractBaseName(name[len(hmacHyphenPrefix):])
+	case strings.HasPrefix(upper, "HMAC") && len(name) > len("HMAC"):
+		return extractBaseName(name[len("HMAC"):])
 	}
 
 	// Default: take first segment before '-' or '_'
@@ -581,6 +651,11 @@ func symmetricKeySize(upperName string) int {
 	if strings.Contains(upperName, "CHACHA20") {
 		return 256
 	}
+	// SM4 (Chinese national standard, GB/T 32907-2016) is always 128-bit —
+	// same treatment as AES-128 (review finding B2/F5).
+	if strings.Contains(upperName, "SM4") {
+		return 128
+	}
 	// Check for common key size markers in the name.
 	switch {
 	case strings.Contains(upperName, "256"):
@@ -622,7 +697,7 @@ func normalizePrimitive(p string) string {
 }
 
 func isLikelySymmetric(upper string) bool {
-	prefixes := []string{"AES", "CHACHA", "CAMELLIA", "ARIA", "SEED", "LEA", "ASCON", "TWOFISH", "SERPENT"}
+	prefixes := []string{"AES", "CHACHA", "CAMELLIA", "ARIA", "SEED", "LEA", "ASCON", "TWOFISH", "SERPENT", "SM4"}
 	for _, p := range prefixes {
 		if strings.HasPrefix(upper, p) {
 			return true
@@ -632,7 +707,7 @@ func isLikelySymmetric(upper string) bool {
 }
 
 func isLikelyHash(upper string) bool {
-	prefixes := []string{"SHA", "BLAKE", "MD5", "MD4", "RIPEMD", "WHIRLPOOL", "LSH", "HMAC", "HKDF", "PBKDF", "ARGON", "SCRYPT", "BCRYPT"}
+	prefixes := []string{"SHA", "BLAKE", "MD5", "MD4", "RIPEMD", "WHIRLPOOL", "LSH", "HMAC", "HKDF", "PBKDF", "ARGON", "SCRYPT", "BCRYPT", "SM3"}
 	for _, p := range prefixes {
 		if strings.HasPrefix(upper, p) {
 			return true
@@ -655,6 +730,14 @@ func deprecatedRecommendation(name string) string {
 		return "Blowfish has a 64-bit block size (birthday attacks). Migrate to AES-256."
 	case "HAS-160":
 		return "HAS-160 is deprecated (equivalent to SHA-1). Migrate to SHA-256 or LSH-256."
+	case "KYBER":
+		return "Kyber is the pre-standardization NIST Round 3 name for this lattice KEM — quantum-safe cryptography, not classically broken — now finalized as ML-KEM (FIPS 203). Migrate references/library calls to ML-KEM-768."
+	case "DILITHIUM":
+		return "Dilithium is the pre-standardization NIST Round 3 name for this lattice signature scheme — quantum-safe cryptography, not classically broken — now finalized as ML-DSA (FIPS 204). Migrate references/library calls to ML-DSA-65."
+	case "SPHINCS+", "SPHINCS":
+		return "SPHINCS+ is the pre-standardization name for this hash-based signature scheme — quantum-safe cryptography, not classically broken — now finalized as SLH-DSA (FIPS 205). Migrate references/library calls to SLH-DSA."
+	case "FALCON":
+		return "Falcon is the NIST Round 3 selection name for this lattice signature scheme — quantum-safe cryptography, not classically broken. Its FIPS 206 standard (FN-DSA) is still pending finalization; migrate references to FN-DSA once FIPS 206 publishes."
 	}
 	return "This algorithm is deprecated. Migrate to a modern alternative."
 }
@@ -748,6 +831,10 @@ func vulnerableRecommendation(name string) string {
 		return "Ed448 (EdDSA) is quantum-vulnerable. Migrate to ML-DSA-87 (FIPS 204). Transition: use Ed448+ML-DSA-87 composite signature (IETF draft) for backward compatibility."
 	case "DSA":
 		return "DSA is quantum-vulnerable. Migrate to ML-DSA-65 (FIPS 204). DSA has no hybrid path — replace directly. See NIST PQC standards (FIPS 203/204/205)."
+	case "SM2":
+		return "SM2 is quantum-vulnerable (ECC-based, Shor's algorithm). For key exchange, migrate to the curveSM2MLKEM768 hybrid (Chinese national standard pairing). For signatures, migrate to ML-DSA-65 (FIPS 204)."
+	case "GOST", "GOST R 34.10":
+		return "GOST R 34.10 (Russian ECC-based signature standard) is quantum-vulnerable (Shor's algorithm). Migrate to ML-DSA-65 (FIPS 204)."
 	}
 	return "This algorithm is quantum-vulnerable. Migrate to NIST PQC standards (FIPS 203/204/205)."
 }

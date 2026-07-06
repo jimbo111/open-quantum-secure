@@ -235,14 +235,20 @@ func TestClassifyPQCEdgeCases(t *testing.T) {
 		// PQC-like names that don't match any family
 		{"ML-KEM-FAKE unknown", "ML-KEM-FAKE", "kem", RiskSafe, SeverityInfo},   // prefix still matches ML-KEM
 		{"MLKEM768 no hyphen", "MLKEM768", "kem", RiskSafe, SeverityInfo}, // added to pqcSafeFamilies (X1 fix)
-		{"Kyber-768 old name", "Kyber-768", "kem", RiskVulnerable, SeverityCritical},
-		{"Dilithium3 old name", "Dilithium3", "signature", RiskVulnerable, SeverityHigh},
+		// Kyber/Dilithium/SPHINCS+/Falcon are pre-standard NIST Round 3 names,
+		// now RiskDeprecated (not RiskVulnerable/RiskSafe) — review finding
+		// A2/F1: the underlying crypto is quantum-safe, but the name is
+		// superseded, so a finding should read "superseded, here's the
+		// current name" rather than either "unrecognized, vulnerable" (the
+		// old bug) or a bare "safe" that hides the naming drift.
+		{"Kyber-768 old name", "Kyber-768", "kem", RiskDeprecated, SeverityCritical},
+		{"Dilithium3 old name", "Dilithium3", "signature", RiskDeprecated, SeverityCritical},
 		// Falcon is NIST-selected (IR 8413) and on the FIPS 206 standardisation
-		// path. Both "Falcon-*" (NIST submission name) and "FN-DSA-*" (FIPS 206
-		// name) refer to the same lattice signature primitive — both PQC-safe.
-		{"Falcon-512 NIST-selected", "Falcon-512", "signature", RiskSafe, SeverityInfo},
+		// path, but FIPS 206 itself is still pending — unlike FN-DSA-512 below,
+		// which is the already-assigned FIPS 206 name and stays RiskSafe.
+		{"Falcon-512 NIST-selected", "Falcon-512", "signature", RiskDeprecated, SeverityCritical},
 		{"FN-DSA-512 FIPS 206 name", "FN-DSA-512", "signature", RiskSafe, SeverityInfo},
-		{"SPHINCS+ old name", "SPHINCS+", "signature", RiskVulnerable, SeverityHigh},
+		{"SPHINCS+ old name", "SPHINCS+", "signature", RiskDeprecated, SeverityCritical},
 		{"FrodoKEM unknown kem", "FrodoKEM", "kem", RiskVulnerable, SeverityCritical},
 		{"BIKE unknown kem", "BIKE", "kem", RiskVulnerable, SeverityCritical},
 		// HQC was added as NIST's 5th PQC standard (March 2025) — now RiskSafe.
