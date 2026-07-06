@@ -17,9 +17,9 @@ var migrationTargets = map[string]MigrationTarget{
 	"RSASSA-PKCS1": {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 	"RSASSA-PSS":   {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 	"DSA":          {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
-	"ECDSA":        {Algorithm: "ML-DSA-44", Standard: "FIPS 204"},
+	"ECDSA":        {Algorithm: "ML-DSA-65", Standard: "FIPS 204"}, // ML-DSA-65 floor, not -44 (review A1)
 	"EDDSA":        {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
-	"ED25519":      {Algorithm: "ML-DSA-44", Standard: "FIPS 204"},
+	"ED25519":      {Algorithm: "ML-DSA-65", Standard: "FIPS 204"}, // ML-DSA-65 floor, not -44 (review A1)
 	"ED448":        {Algorithm: "ML-DSA-87", Standard: "FIPS 204"},
 	"KCDSA":        {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 	"EC-KCDSA":     {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
@@ -76,25 +76,27 @@ func LookupTarget(baseName string) MigrationTarget {
 func LookupTargetForKeySize(baseName string, keySize int) MigrationTarget {
 	upper := strings.ToUpper(baseName)
 
-	// RSA: key size determines ML-DSA level
+	// RSA: key size determines ML-DSA level. ML-DSA-65 is the floor — RSA
+	// below the 3072-bit tier used to fall through to ML-DSA-44, which
+	// contradicted classify.go's recommendation text (review finding A1).
 	switch upper {
 	case "RSA", "RSASSA-PKCS1", "RSASSA-PSS":
 		if keySize >= 4096 {
 			return MigrationTarget{Algorithm: "ML-DSA-87", Standard: "FIPS 204"}
 		}
-		if keySize >= 3072 {
-			return MigrationTarget{Algorithm: "ML-DSA-65", Standard: "FIPS 204"}
-		}
-		return MigrationTarget{Algorithm: "ML-DSA-44", Standard: "FIPS 204"}
+		return MigrationTarget{Algorithm: "ML-DSA-65", Standard: "FIPS 204"}
 	}
 
-	// ECDSA/ECDH: curve size determines level
+	// ECDSA/ECDH: curve size determines level. ML-DSA-65 is the floor (same
+	// A1 fix as RSA above); a dedicated tier steps up to ML-DSA-87 for
+	// P-521-class curves (>= 521 bits), which previously shared the P-384
+	// tier's ML-DSA-65/ML-KEM-1024 target despite being NIST security level 5.
 	switch upper {
 	case "ECDSA":
-		if keySize >= 384 {
-			return MigrationTarget{Algorithm: "ML-DSA-65", Standard: "FIPS 204"}
+		if keySize >= 521 {
+			return MigrationTarget{Algorithm: "ML-DSA-87", Standard: "FIPS 204"}
 		}
-		return MigrationTarget{Algorithm: "ML-DSA-44", Standard: "FIPS 204"}
+		return MigrationTarget{Algorithm: "ML-DSA-65", Standard: "FIPS 204"}
 	case "ECDH", "ECDHE":
 		if keySize >= 384 {
 			return MigrationTarget{Algorithm: "ML-KEM-1024", Standard: "FIPS 203"}

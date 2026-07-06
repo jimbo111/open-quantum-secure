@@ -474,6 +474,21 @@ func extractBaseName(name string) string {
 		}
 	}
 
+	// JWA (RFC 7518) "alg" values for RSA encryption. These are exact tokens,
+	// not prefixes/suffixes of "RSAES-OAEP"/"RSAES-PKCS1" (the names actually
+	// present in quantumVulnerableFamilies/migrationTargets), so without this
+	// explicit mapping they fall through to the bare "RSA" prefix match below
+	// and get routed through RSA *signature* migration text/target for an
+	// encryption finding (review SCANNER_REVIEW_2026-07-05.md finding A3).
+	jwaRSAEncryptionNames := map[string]string{
+		"RSA-OAEP":     "RSAES-OAEP",
+		"RSA-OAEP-256": "RSAES-OAEP",
+		"RSA1_5":       "RSAES-PKCS1",
+	}
+	if base, ok := jwaRSAEncryptionNames[upper]; ok {
+		return base
+	}
+
 	// Handle known multi-part names first (sorted by length desc for longest match)
 	for _, prefix := range pqcSafeFamiliesSorted {
 		if strings.HasPrefix(upper, strings.ToUpper(prefix)) {
@@ -580,7 +595,7 @@ func symmetricKeySize(upperName string) int {
 
 func normalizePrimitive(p string) string {
 	switch strings.ToLower(p) {
-	case "pke", "public-key", "public_key":
+	case "pke", "public-key", "public_key", "encryption", "jwe", "key-encryption", "enc":
 		return "pke"
 	case "kem", "key-encapsulation":
 		return "kem"
@@ -718,7 +733,7 @@ func vulnerableRecommendation(name string) string {
 	case "ECDSA":
 		return "ECDSA is quantum-vulnerable. Migrate to ML-DSA-65 (FIPS 204) or SLH-DSA (FIPS 205). Transition: use ECDSA-P256+ML-DSA-65 composite signature (IETF draft) for backward compatibility."
 	case "KCDSA", "EC-KCDSA":
-		return "Migrate to HAETAE or ML-DSA (FIPS 204). Korean PQC transition deadline: 2028 (KS X 3262)."
+		return "Migrate to HAETAE or ML-DSA-65 (FIPS 204). Korean PQC transition deadline: 2028 (KS X 3262)."
 	case "ECDH", "ECDHE":
 		return "HNDL risk: IMMEDIATE. Key exchange is quantum-vulnerable. Migrate to ML-KEM-768 (FIPS 203). Transition: use ECDH-P256+ML-KEM-768 hybrid key exchange (deployed in TLS 1.3). CNSA 2.0 deadline: 2030."
 	case "X25519":

@@ -1069,12 +1069,14 @@ func TestClassifyFindingsPopulatesTargets(t *testing.T) {
 		wantStandard    string
 	}{
 		{
-			name: "RSA-2048 signature → ML-DSA-44 FIPS 204",
+			// ML-DSA-65 is the floor (review SCANNER_REVIEW_2026-07-05.md
+			// finding A1 — this used to be ML-DSA-44).
+			name: "RSA-2048 signature → ML-DSA-65 FIPS 204",
 			finding: findings.UnifiedFinding{
 				Algorithm: &findings.Algorithm{Name: "RSA-2048", Primitive: "signature", KeySize: 2048},
 			},
 			wantRisk:     findings.QRVulnerable,
-			wantTarget:   "ML-DSA-44",
+			wantTarget:   "ML-DSA-65",
 			wantStandard: "FIPS 204",
 		},
 		{
@@ -1298,8 +1300,8 @@ func TestClassifyThenAttachSnippets(t *testing.T) {
 	if f.QuantumRisk != findings.QRVulnerable {
 		t.Errorf("stage 1: QuantumRisk = %q, want %q", f.QuantumRisk, findings.QRVulnerable)
 	}
-	if f.TargetAlgorithm != "ML-DSA-44" {
-		t.Errorf("stage 1: TargetAlgorithm = %q, want ML-DSA-44", f.TargetAlgorithm)
+	if f.TargetAlgorithm != "ML-DSA-65" {
+		t.Errorf("stage 1: TargetAlgorithm = %q, want ML-DSA-65", f.TargetAlgorithm)
 	}
 
 	// Stage 2: snippet generation must consume the TargetAlgorithm set above.
