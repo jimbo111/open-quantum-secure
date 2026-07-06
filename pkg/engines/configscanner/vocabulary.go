@@ -241,7 +241,12 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "alg", ValueHints: []string{"rs256", "rs384", "rs512"}, Algorithm: "RSA", Primitive: "signature"},
 	{KeyPattern: "alg", ValueHints: []string{"ps256", "ps384", "ps512"}, Algorithm: "RSASSA-PSS", Primitive: "signature"},
 	{KeyPattern: "alg", ValueHints: []string{"es256", "es384", "es512"}, Algorithm: "ECDSA", Primitive: "signature"},
-	{KeyPattern: "alg", ValueHints: []string{"hs256", "hs384", "hs512"}, Algorithm: "HMAC", Primitive: "mac"},
+	// One entry per HS* value: bare "HMAC" classifies RiskUnknown (the
+	// classifier needs the inner hash to judge the digest), so each hint
+	// carries its digest into Algorithm.Name (wave-2 review V19/V20).
+	{KeyPattern: "alg", ValueHints: []string{"hs256"}, Algorithm: "HMAC-SHA256", Primitive: "mac"},
+	{KeyPattern: "alg", ValueHints: []string{"hs384"}, Algorithm: "HMAC-SHA384", Primitive: "mac"},
+	{KeyPattern: "alg", ValueHints: []string{"hs512"}, Algorithm: "HMAC-SHA512", Primitive: "mac"},
 }
 
 // keySizePatterns lists KeyPattern values for which the value is parsed as an

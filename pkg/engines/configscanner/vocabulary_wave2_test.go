@@ -33,3 +33,25 @@ func TestKeyMatchesPattern_AcronymAndGlued(t *testing.T) {
 		}
 	}
 }
+
+// Wave-2 review V19/V20: JWT HS* algs must carry their inner hash, not
+// collapse to bare "HMAC" (which classifies unknown).
+func TestJWTAlgCarriesInnerHash(t *testing.T) {
+	kvs := []KeyValue{
+		{Key: "alg", Value: "HS256", Line: 1},
+		{Key: "alg", Value: "hs512", Line: 2},
+	}
+	ff := matchCryptoParams("jwt.json", kvs)
+	if len(ff) != 2 {
+		t.Fatalf("got %d findings, want 2", len(ff))
+	}
+	want := map[int]string{1: "HMAC-SHA256", 2: "HMAC-SHA512"}
+	for _, f := range ff {
+		if f.Algorithm == nil {
+			t.Fatalf("nil algorithm on line %d", f.Location.Line)
+		}
+		if f.Algorithm.Name != want[f.Location.Line] {
+			t.Errorf("line %d: algorithm %q, want %q", f.Location.Line, f.Algorithm.Name, want[f.Location.Line])
+		}
+	}
+}
