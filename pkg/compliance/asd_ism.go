@@ -82,7 +82,7 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			violations = append(violations, Violation{
 				Algorithm:   name,
 				Rule:        "asd-quantum-vulnerable",
-				Message:     name + " is quantum-vulnerable; ASD ISM requires migration to ML-KEM-1024 or ML-DSA-87",
+				Message:     name + " is " + riskDescriptor(f) + "; ASD ISM requires migration to ML-KEM-1024 or ML-DSA-87",
 				Deadline:    asdDeadlineKEX,
 				Remediation: "Replace with ML-KEM-1024 (key exchange) or ML-DSA-87 (signatures) per ASD ISM",
 			})

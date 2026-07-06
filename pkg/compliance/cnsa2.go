@@ -133,7 +133,7 @@ func (cnsa20Framework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 			violations = append(violations, newCNSA2Violation(
 				name,
 				"cnsa2-quantum-vulnerable",
-				name+" is quantum-vulnerable and not approved for CNSA 2.0; migrate to an approved PQC algorithm",
+				name+" is "+riskDescriptor(f)+" and not approved for CNSA 2.0; migrate to an approved PQC algorithm",
 				deadlineForHNDL(f.HNDLRisk),
 			))
 			continue

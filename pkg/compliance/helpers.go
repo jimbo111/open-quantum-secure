@@ -179,3 +179,14 @@ func depViolation(f *findings.UnifiedFinding, rule, message, deadline, remediati
 	}
 	return &v
 }
+
+// riskDescriptor phrases a finding's risk bucket accurately for violation
+// messages: a deprecated-but-quantum-safe name (bare Kyber, draft hybrids)
+// is NOT "quantum-vulnerable" — saying so misstates the crypto even when
+// the compliance verdict (not approved) is identical (wave-2 review C15).
+func riskDescriptor(f *findings.UnifiedFinding) string {
+	if f.QuantumRisk == findings.QRDeprecated {
+		return "deprecated"
+	}
+	return "quantum-vulnerable"
+}
