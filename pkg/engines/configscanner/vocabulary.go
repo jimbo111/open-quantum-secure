@@ -331,6 +331,13 @@ func insertCamelCaseBoundaries(s string) string {
 		prev, cur := runes[i-1], runes[i]
 		if isASCIIUpper(cur) && (isASCIILower(prev) || isASCIIDigit(prev)) {
 			b.WriteByte('.')
+		} else if isASCIIUpper(prev) && isASCIIUpper(cur) &&
+			i+1 < len(runes) && isASCIILower(runes[i+1]) {
+			// Acronym-run end: "SSLProtocol" → boundary before the 'P'
+			// (the last upper of a run followed by a lower starts a new
+			// word). Without this, acronym-prefixed keys collapse into a
+			// single segment and never match (wave-2 review V6).
+			b.WriteByte('.')
 		}
 		b.WriteRune(cur)
 	}
@@ -375,6 +382,26 @@ func keyMatchesPattern(key, pattern string) bool {
 	}
 	if strings.ContainsAny(pattern, "-_.") {
 		return containsWordBoundary(segmented, pattern+"s")
+	}
+	// Glued compound patterns ("ciphersuite", "keylength") vs camelCase
+	// keys: "cipherSuite" segments to "cipher.suite", which no longer
+	// contains the glued pattern. Re-join contiguous MULTI-segment runs
+	// and compare for equality (plus a plural form). Single segments are
+	// deliberately excluded from the plural comparison — "algorithms"
+	// must not match "algorithm" (that is the B7 fix) — but a ≥2-segment
+	// join like "ciphersuites" cannot be a B7-style glued compound of an
+	// unrelated word, so the plural is safe there (wave-2 review V12).
+	segs := strings.FieldsFunc(segmented, func(r rune) bool {
+		return r == '.' || r == '[' || r == ']' || r == '_' || r == '-'
+	})
+	for i := 0; i < len(segs); i++ {
+		join := segs[i]
+		for j := i + 1; j < len(segs) && j-i < 4; j++ {
+			join += segs[j]
+			if join == pattern || join == pattern+"s" {
+				return true
+			}
+		}
 	}
 	return false
 }
