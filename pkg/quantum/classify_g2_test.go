@@ -345,10 +345,11 @@ func TestClassifySM4_Weakened(t *testing.T) {
 
 // TestClassifyGOST_Vulnerable verifies GOST R 34.10 (Russian ECC-based
 // signature standard) is classified as quantum-vulnerable instead of falling
-// through to RiskUnknown (review finding B2/F7, scoped to the ECC signature
-// variant only — GOST symmetric/hash are out of scope for this fix).
+// through to RiskUnknown (review finding B2/F7). Bare "GOST" was removed in
+// the wave-2 fix (V1-V3): its prefix swallowed Streebog/28147 — see
+// TestGOSTFamilyScoping and TestBareGOSTNotVulnerable in classify_wave2_test.go.
 func TestClassifyGOST_Vulnerable(t *testing.T) {
-	tests := []string{"GOST", "GOST R 34.10"}
+	tests := []string{"GOST R 34.10", "GOST3410"}
 	for _, alg := range tests {
 		alg := alg
 		t.Run(alg, func(t *testing.T) {

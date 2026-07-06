@@ -180,10 +180,11 @@ var quantumVulnerableFamilies = map[string]bool{
 	// scan), so adding "SM2" here cannot shadow it. See review finding B2.
 	"SM2": true,
 	// Russian national standard (GOST R 34.10-2012), ECC-based signature,
-	// Shor-breakable. GOST symmetric (28147-89/Kuznyechik) and hash
-	// (Streebog) are out of scope here — review finding B2 scoped this to
-	// the ECC signature variant only.
-	"GOST": true, "GOST R 34.10": true,
+	// Shor-breakable. Deliberately NO bare "GOST" entry: the prefix scan
+	// would swallow the hash (R 34.11/Streebog) and symmetric (28147-89,
+	// R 34.12 Kuznyechik/Magma) families, which are Grover-class, not
+	// Shor-class (wave-2 review V1-V3). Bare "GOST" stays RiskUnknown.
+	"GOST R 34.10": true, "GOST3410": true,
 }
 
 // deprecatedAlgorithms are classically broken regardless of quantum computing,
@@ -499,6 +500,9 @@ func classifySymmetric(baseName, upperName string, keySize int, isHash bool) Cla
 		"SHA256": true, "SHA384": true, "SHA512": true,
 		"LSH": true, // Korean standard
 		"SM3": true, // Chinese national standard (GB/T 32905-2016), 256-bit output
+		// Russian Streebog (GOST R 34.11-2012), 256/512-bit output —
+		// Grover-class like SHA-2, NOT the Shor-breakable R 34.10 signature.
+		"GOST R 34.11": true, "GOST3411": true, "STREEBOG": true,
 	}
 
 	if isHash {
@@ -766,7 +770,7 @@ func normalizePrimitive(p string) string {
 }
 
 func isLikelySymmetric(upper string) bool {
-	prefixes := []string{"AES", "CHACHA", "CAMELLIA", "ARIA", "SEED", "LEA", "ASCON", "TWOFISH", "SERPENT", "SM4"}
+	prefixes := []string{"AES", "CHACHA", "CAMELLIA", "ARIA", "SEED", "LEA", "ASCON", "TWOFISH", "SERPENT", "SM4", "GOST 28147", "GOST28147", "GOST R 34.12", "KUZNYECHIK", "MAGMA"}
 	for _, p := range prefixes {
 		if strings.HasPrefix(upper, p) {
 			return true
@@ -776,7 +780,7 @@ func isLikelySymmetric(upper string) bool {
 }
 
 func isLikelyHash(upper string) bool {
-	prefixes := []string{"SHA", "BLAKE", "MD5", "MD4", "RIPEMD", "WHIRLPOOL", "LSH", "HMAC", "HKDF", "PBKDF", "ARGON", "SCRYPT", "BCRYPT", "SM3"}
+	prefixes := []string{"SHA", "BLAKE", "MD5", "MD4", "RIPEMD", "WHIRLPOOL", "LSH", "HMAC", "HKDF", "PBKDF", "ARGON", "SCRYPT", "BCRYPT", "SM3", "GOST R 34.11", "GOST3411", "STREEBOG"}
 	for _, p := range prefixes {
 		if strings.HasPrefix(upper, p) {
 			return true
@@ -910,7 +914,7 @@ func vulnerableRecommendation(name string) string {
 		return "DSA is quantum-vulnerable. Migrate to ML-DSA-65 (FIPS 204). DSA has no hybrid path — replace directly. See NIST PQC standards (FIPS 203/204/205)."
 	case "SM2":
 		return "SM2 is quantum-vulnerable (ECC-based, Shor's algorithm). For key exchange, migrate to the curveSM2MLKEM768 hybrid (Chinese national standard pairing). For signatures, migrate to ML-DSA-65 (FIPS 204)."
-	case "GOST", "GOST R 34.10":
+	case "GOST R 34.10", "GOST3410":
 		return "GOST R 34.10 (Russian ECC-based signature standard) is quantum-vulnerable (Shor's algorithm). Migrate to ML-DSA-65 (FIPS 204)."
 	}
 	return "This algorithm is quantum-vulnerable. Migrate to NIST PQC standards (FIPS 203/204/205)."

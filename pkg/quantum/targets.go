@@ -83,8 +83,8 @@ var migrationTargets = map[string]MigrationTarget{
 	// key-agree/kem/pke override in classifyVulnerable redirects this FIPS 204
 	// default to ML-KEM-768/FIPS 203 when used for key exchange.
 	"SM2":          {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
-	"GOST":         {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 	"GOST R 34.10": {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
+	"GOST3410":     {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
 }
 
 // LookupTarget returns the PQC migration target for a given algorithm base name.
