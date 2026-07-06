@@ -86,16 +86,23 @@ func TestDetectCdxgenTypesLimit_NonexistentPathFallsBackToDefault(t *testing.T) 
 // once it hits the entry cap, instead of always finishing a full recursive
 // walk of TargetPath (which is the whole point of capping it — an
 // uncapped walk on a huge monorepo would itself become a perf problem).
+// Wave-2 review V7/V8 changed the cap-hit RESULT: a truncated walk can no
+// longer silently narrow the allow-list, so a cap-hit result is the union
+// of what was found with the full default list (the .py file below is
+// never visited, yet "py" is present via the union). The walk still stops
+// — proven by the cap flag path, and by the uncapped variant staying
+// narrow.
 func TestDetectCdxgenTypesLimit_CapsWalkEntries(t *testing.T) {
 	dir := t.TempDir()
-	// Only .py files, placed after enough .go-named entries (lexically) that a
-	// walk capped at 2 entries (dir root + first child) never reaches them.
 	mustWrite(t, filepath.Join(dir, "a_first.go"), "package main")
 	mustWrite(t, filepath.Join(dir, "z_second.py"), "print('hi')")
 
 	got := detectCdxgenTypesLimit(dir, 2) // root dir entry + first file only
-	want := []string{"go"}
-	assertStringSlicesEqual(t, got, want)
+	assertStringSlicesEqual(t, got, defaultCdxgenTypes)
+
+	// No cap pressure → detection stays narrow, no union.
+	narrow := detectCdxgenTypesLimit(dir, cdxgenWalkEntryCap)
+	assertStringSlicesEqual(t, narrow, []string{"go", "py"})
 }
 
 func TestBuildCdxgenArgs_AlwaysContainsTypeFlag(t *testing.T) {
@@ -206,3 +213,4 @@ func containsArg(args []string, target string) bool {
 	}
 	return false
 }
+

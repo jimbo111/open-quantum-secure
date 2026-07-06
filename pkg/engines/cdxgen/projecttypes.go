@@ -119,6 +119,7 @@ func detectCdxgenTypes(targetPath string) []string {
 func detectCdxgenTypesLimit(targetPath string, limit int) []string {
 	found := make(map[string]bool)
 	visited := 0
+	capped := false
 
 	_ = filepath.WalkDir(targetPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -128,6 +129,7 @@ func detectCdxgenTypesLimit(targetPath string, limit int) []string {
 			return nil
 		}
 		if visited >= limit {
+			capped = true
 			return filepath.SkipAll
 		}
 		visited++
@@ -151,6 +153,16 @@ func detectCdxgenTypesLimit(targetPath string, limit int) []string {
 
 	if len(found) == 0 {
 		return defaultCdxgenTypes
+	}
+	// Cap exhausted with partial signal: the walk may have stopped before
+	// reaching a later-sorted ecosystem (a 5000-entry JS frontend hides a
+	// services/ Go tree). Union the partial result with the full default
+	// allow-list — over-inclusion costs seconds per extra type, silent
+	// omission drops entire ecosystems from the SBOM (wave-2 review V7/V8).
+	if capped {
+		for _, t := range defaultCdxgenTypes {
+			found[t] = true
+		}
 	}
 	types := make([]string, 0, len(found))
 	for t := range found {
