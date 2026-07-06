@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
+	"github.com/jimbo111/open-quantum-secure/pkg/quantum"
 )
 
 var asd = asdISMFramework{}
@@ -356,6 +357,112 @@ func TestASD_HashUnapproved(t *testing.T) {
 				t.Errorf("%s: rule = %q, want %q", tt.algName, v[0].Rule, tt.wantRule)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// B3 fix: ASD ISM default-deny for KEM/signature primitives ASD ISM's own
+// ApprovedAlgos() table doesn't list. Mirrors CNSA 2.0's
+// cnsa2-kem-not-approved / cnsa2-signature-not-approved default-deny
+// (cnsa2.go:208-244). Before the fix, FrodoKEM/HQC/McEliece/Falcon fell
+// through Evaluate() with zero violations despite ASD ISM restricting Key
+// Exchange to ML-KEM-1024 and Digital Signatures to ML-DSA-87/SLH-DSA only.
+// ---------------------------------------------------------------------------
+
+func TestASD_KEMDefaultDeny(t *testing.T) {
+	tests := []struct {
+		algName     string
+		description string
+	}{
+		{"FrodoKEM-976-AES", "BSI-approved lattice KEM, not on ASD ISM's ML-KEM-1024-only list"},
+		{"FrodoKEM-1344-SHAKE", "BSI-approved Frodo variant"},
+		{"HQC-256", "NIST-selected 5th PQC KEM, not on ASD ISM's approved list"},
+		{"HQC-128", "HQC smaller variant"},
+		{"Classic-McEliece-6960", "BSI-approved code-based KEM"},
+		{"Classic-McEliece-8192", "Classic McEliece large variant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.algName, func(t *testing.T) {
+			f := asdFinding(tt.algName, "kem", 0, findings.QRSafe)
+			v := asd.Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 1 {
+				t.Fatalf("%s (%s): expected 1 violation, got %d: %+v", tt.algName, tt.description, len(v), v)
+			}
+			if v[0].Rule != "asd-kem-not-approved" {
+				t.Errorf("%s: rule = %q, want asd-kem-not-approved", tt.algName, v[0].Rule)
+			}
+		})
+	}
+}
+
+func TestASD_SignatureDefaultDeny(t *testing.T) {
+	// Falcon/FN-DSA: pkg/quantum classifies these RiskSafe (standard-pending,
+	// see G2 fix) but ASD ISM's own ApprovedAlgos() restricts Digital
+	// Signatures to ML-DSA-87 and SLH-DSA only — Falcon is not on that list.
+	names := []string{"Falcon-512", "Falcon-1024", "FALCON-512", "FN-DSA-512", "FNDSA512", "Falcon"}
+	for _, n := range names {
+		t.Run(n, func(t *testing.T) {
+			f := asdFinding(n, "signature", 0, findings.QRSafe)
+			v := asd.Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 1 {
+				t.Fatalf("expected 1 violation, got %d: %+v", len(v), v)
+			}
+			if v[0].Rule != "asd-signature-not-approved" {
+				t.Errorf("rule = %q, want asd-signature-not-approved", v[0].Rule)
+			}
+		})
+	}
+}
+
+// TestASD_SLHDSA_StillApproved is the regression guard: the new KEM/signature
+// default-deny must not swallow SLH-DSA, which ASD ISM's own ApprovedAlgos()
+// explicitly approves for all parameter sets.
+func TestASD_SLHDSA_StillApproved(t *testing.T) {
+	for _, n := range []string{"SLH-DSA", "SLH-DSA-128f", "SLH-DSA-256s"} {
+		t.Run(n, func(t *testing.T) {
+			f := asdFinding(n, "signature", 0, findings.QRSafe)
+			v := asd.Evaluate([]findings.UnifiedFinding{f})
+			if len(v) != 0 {
+				t.Errorf("SLH-DSA must remain approved under ASD ISM, got violations: %+v", v)
+			}
+		})
+	}
+}
+
+// TestASD_ApprovedKEMsSignaturesNotFlagged is the dual of the default-deny
+// tests: ML-KEM-1024 and ML-DSA-87 (ASD ISM's actual approved algorithms)
+// must not be caught by the new catch-all rules.
+func TestASD_ApprovedKEMsSignaturesNotFlagged(t *testing.T) {
+	f1 := asdFinding("ML-KEM-1024", "kem", 0, findings.QRSafe)
+	if v := asd.Evaluate([]findings.UnifiedFinding{f1}); len(v) != 0 {
+		t.Errorf("ML-KEM-1024 should not be flagged, got: %+v", v)
+	}
+	f2 := asdFinding("ML-DSA-87", "signature", 0, findings.QRSafe)
+	if v := asd.Evaluate([]findings.UnifiedFinding{f2}); len(v) != 0 {
+		t.Errorf("ML-DSA-87 should not be flagged, got: %+v", v)
+	}
+}
+
+// TestASD_Falcon_ClassifierVsFramework_LayerSeparation pins the distinction
+// between pkg/quantum's classifier view (Falcon is RiskSafe, standard-pending
+// — see the G2 fix) and ASD ISM's independent approved-list enforcement
+// (Falcon is NOT on ASD ISM's approved signature list, which is ML-DSA-87 +
+// SLH-DSA only). A quantum-safe algorithm per the classifier can still be
+// non-compliant with a specific framework's approved list — these are two
+// independent layers, and the fix for B3 must not conflate them.
+func TestASD_Falcon_ClassifierVsFramework_LayerSeparation(t *testing.T) {
+	c := quantum.ClassifyAlgorithm("Falcon-512", "signature", 0)
+	if c.Risk != quantum.RiskSafe {
+		t.Fatalf("pkg/quantum classifier: Falcon-512 Risk = %q, want RiskSafe (pre-req for this test's premise)", c.Risk)
+	}
+
+	f := asdFinding("Falcon-512", "signature", 0, findings.QRSafe)
+	v := asd.Evaluate([]findings.UnifiedFinding{f})
+	if len(v) != 1 {
+		t.Fatalf("ASD ISM must flag Falcon-512 as not-approved despite classifier RiskSafe; got %d violations: %+v", len(v), v)
+	}
+	if v[0].Rule != "asd-signature-not-approved" {
+		t.Errorf("rule = %q, want asd-signature-not-approved", v[0].Rule)
 	}
 }
 

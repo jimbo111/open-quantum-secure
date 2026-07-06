@@ -13,6 +13,15 @@ package compliance
 //   - SHA-384/512 required (SHA-256 insufficient).
 //   - No hybrid requirement (unlike BSI/ANSSI), but hybrid is permitted.
 //   - Quantum-vulnerable algorithms trigger violations with ASD deadlines.
+//   - Default-deny: any KEM/signature primitive not explicitly approved above
+//     (FrodoKEM, HQC, Classic McEliece, Falcon/FN-DSA, etc.) is a violation.
+//
+// NOTE: ISM-1917 Rev.3 transitional allowance for ML-KEM-768/ML-DSA-65 (until
+// 2030) unconfirmed against primary PDF — revisit before hardening/softening.
+// The grade checks below (asd-hybrid-sub-1024, asd-ml-kem-grade,
+// asd-ml-dsa-grade) currently reject sub-1024/sub-87 unconditionally; if the
+// transitional allowance is confirmed against the primary ISM text, those
+// checks would need a date-gated carve-out.
 
 import (
 	"strings"
@@ -135,6 +144,47 @@ func (asdISMFramework) Evaluate(ff []findings.UnifiedFinding) []Violation {
 
 		// SLH-DSA is approved (all parameter sets).
 		if strings.HasPrefix(upper, "SLH-DSA") {
+			continue
+		}
+
+		// --- Rule: KEM default-deny (non-ML-KEM quantum-safe KEMs) ---
+		// ASD ISM's ApprovedAlgos() restricts Key Exchange to ML-KEM-1024 only.
+		// Any other quantum-safe KEM — FrodoKEM, Classic McEliece, HQC, BIKE,
+		// future NIST Round 4 alternates — is NOT on the approved list. Pure/
+		// hybrid ML-KEM is already handled by the isHybridKEM/isMLKEMName
+		// branches above (which `continue` unconditionally), so only
+		// non-ML-KEM KEMs reach here. Mirrors CNSA 2.0's cnsa2-kem-not-approved
+		// default-deny (cnsa2.go:208-224). Matched by primitive
+		// (isKEMPrimitive) rather than name prefix so new algorithms are
+		// rejected without code updates.
+		if isKEMPrimitive(f) {
+			violations = append(violations, Violation{
+				Algorithm:   name,
+				Rule:        "asd-kem-not-approved",
+				Message:     name + " is not an ASD ISM approved KEM; ASD ISM approves only ML-KEM-1024 for key exchange",
+				Deadline:    asdDeadlineKEX,
+				Remediation: "Replace with ML-KEM-1024; ASD ISM does not approve FrodoKEM, Classic McEliece, HQC, or other non-ML-KEM quantum-safe KEMs",
+			})
+			continue
+		}
+
+		// --- Rule: signature default-deny (non-ML-DSA/non-SLH-DSA quantum-safe signatures) ---
+		// ASD ISM's ApprovedAlgos() restricts Digital Signatures to ML-DSA-87
+		// and SLH-DSA (all parameter sets). Falcon/FN-DSA — classified
+		// RiskSafe by pkg/quantum as a NIST-selected, standard-pending scheme
+		// — is NOT on ASD ISM's approved list; the classifier's view (safe,
+		// standard-pending) is independent of this framework's approved-list
+		// enforcement. ML-DSA and SLH-DSA are handled by earlier branches
+		// that `continue` before reaching here. Mirrors CNSA 2.0's
+		// cnsa2-signature-not-approved default-deny (cnsa2.go:226-244).
+		if isSignaturePrimitive(f) {
+			violations = append(violations, Violation{
+				Algorithm:   name,
+				Rule:        "asd-signature-not-approved",
+				Message:     name + " is not an ASD ISM approved signature; ASD ISM approves only ML-DSA-87 and SLH-DSA (all parameter sets)",
+				Deadline:    asdDeadlineFull,
+				Remediation: "Replace with ML-DSA-87 or SLH-DSA; ASD ISM does not approve Falcon/FN-DSA or other non-approved signature schemes",
+			})
 			continue
 		}
 
