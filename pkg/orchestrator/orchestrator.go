@@ -575,8 +575,8 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 		}
 	}
 
-	// Enrich findings with cross-file constant resolution (fills missing KeySize).
-	// Skip in diff mode for speed — constant resolution requires full-tree walk.
+	// Enrich findings with same-file constant resolution (fills missing KeySize).
+	// Skip in diff/quick mode for speed — constant resolution requires full-tree walk.
 	if opts.Mode != engines.ModeDiff && opts.Mode != engines.ModeQuick {
 		enrichStart := time.Now()
 		func() {
@@ -586,8 +586,8 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 				}
 			}()
 			collector := constresolver.New()
-			constMap := collector.Collect(ctx, opts.TargetPath)
-			constresolver.EnrichFindings(allFindings, constMap)
+			fileConsts := collector.CollectByFile(ctx, opts.TargetPath)
+			constresolver.EnrichFindingsByFile(allFindings, fileConsts)
 		}()
 		metrics.EnrichDur = time.Since(enrichStart)
 	}
