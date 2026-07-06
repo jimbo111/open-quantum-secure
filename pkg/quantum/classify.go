@@ -297,10 +297,11 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 	switch baseName {
 	case "TLSv1.2":
 		return Classification{
-			Risk:           RiskVulnerable,
-			Severity:       SeverityMedium,
-			HNDLRisk:       HNDLImmediate,
-			Recommendation: "TLS 1.2 has no post-quantum key-exchange option — its classical ECDHE/RSA key exchange is Harvest-Now-Decrypt-Later exposed. Migrate to TLS 1.3 and negotiate a hybrid PQC group (e.g. X25519MLKEM768).",
+			Risk:            RiskVulnerable,
+			Severity:        SeverityMedium,
+			HNDLRisk:        HNDLImmediate,
+			Recommendation:  "TLS 1.2 has no post-quantum key-exchange option — its classical ECDHE/RSA key exchange is Harvest-Now-Decrypt-Later exposed. Migrate to TLS 1.3 and negotiate a hybrid PQC group (e.g. X25519MLKEM768).",
+			TargetAlgorithm: "TLS 1.3",
 		}
 	case "TLSv1.3":
 		return Classification{
@@ -605,6 +606,17 @@ var jwaAlgNames = map[string]string{
 	"A128GCMKW": "AES", "A192GCMKW": "AES", "A256GCMKW": "AES",
 }
 
+// protocolVersionNames canonicalizes TLS/SSL protocol-version spellings.
+// Keys are uppercased with spaces removed.
+var protocolVersionNames = map[string]string{
+	"TLSV1.0": "TLSv1.0", "TLS1.0": "TLSv1.0",
+	"TLSV1.1": "TLSv1.1", "TLS1.1": "TLSv1.1",
+	"TLSV1.2": "TLSv1.2", "TLS1.2": "TLSv1.2",
+	"TLSV1.3": "TLSv1.3", "TLS1.3": "TLSv1.3",
+	"SSLV3": "SSLv3", "SSL3": "SSLv3", "SSL3.0": "SSLv3",
+	"SSLV2": "SSLv2", "SSL2": "SSLv2", "SSL2.0": "SSLv2",
+}
+
 // extractBaseName gets the algorithm family name from a full identifier.
 // "AES-256-GCM" → "AES", "RSA-2048" → "RSA", "SHA-256" → "SHA-256"
 // Korean multi-part names: "SMAUG-T-128" → "SMAUG-T", "HAETAE-2" → "HAETAE",
@@ -624,6 +636,14 @@ func extractBaseName(name string) string {
 	}
 
 	if base, ok := jwaAlgNames[upper]; ok {
+		return base
+	}
+
+	// Protocol-version tokens canonicalize case-insensitively and with or
+	// without the 'v' ("tlsv1.2", "TLS1.2", "SSL 3.0" → "TLSv1.2"/"SSLv3").
+	// Every other classification path is case-insensitive; the TLS/SSL
+	// version switch must not be the one exact-case exception (wave-2 V9).
+	if base, ok := protocolVersionNames[strings.ReplaceAll(upper, " ", "")]; ok {
 		return base
 	}
 

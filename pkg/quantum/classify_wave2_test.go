@@ -81,3 +81,30 @@ func TestJOSESymmetricNotVulnerable(t *testing.T) {
 		t.Errorf("RSA-OAEP-256/jwe: target=%q want ML-KEM-768 (G1 regression)", c.TargetAlgorithm)
 	}
 }
+
+// TLS version handling (wave-2 V9/V10): the TLSv1.2/1.3 switch was
+// exact-case only while every other classification path is
+// case-insensitive, and TLSv1.2 carried no migration target.
+func TestTLSVersionCaseAndTarget(t *testing.T) {
+	for _, name := range []string{"TLSv1.2", "tlsv1.2", "TLSV1.2", "TLS1.2", "tls1.2"} {
+		c := ClassifyAlgorithm(name, "protocol", 0)
+		if c.Risk != RiskVulnerable {
+			t.Errorf("%s: risk=%s want vulnerable", name, c.Risk)
+		}
+		if c.TargetAlgorithm != "TLS 1.3" {
+			t.Errorf("%s: target=%q want \"TLS 1.3\"", name, c.TargetAlgorithm)
+		}
+	}
+	for _, name := range []string{"TLSv1.3", "tlsv1.3", "TLS1.3"} {
+		c := ClassifyAlgorithm(name, "protocol", 0)
+		if c.Risk != RiskResistant {
+			t.Errorf("%s: risk=%s want resistant", name, c.Risk)
+		}
+	}
+	for _, name := range []string{"tlsv1.0", "TLS1.1"} {
+		c := ClassifyAlgorithm(name, "protocol", 0)
+		if c.Risk != RiskDeprecated {
+			t.Errorf("%s: risk=%s want deprecated", name, c.Risk)
+		}
+	}
+}

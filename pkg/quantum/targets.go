@@ -62,6 +62,9 @@ var migrationTargets = map[string]MigrationTarget{
 	// "groups"/"kex" config-scanner vocabulary).
 	"TLSV1.0": {Algorithm: "TLS 1.3", Standard: ""},
 	"TLSV1.1": {Algorithm: "TLS 1.3", Standard: ""},
+	// TLS 1.2 is classically fine but has no PQC key-exchange path of its
+	// own — same TLS 1.3 target as its deprecated siblings (wave-2 V10).
+	"TLSV1.2": {Algorithm: "TLS 1.3", Standard: ""},
 	// SSLv3/SSLv2: same "not a FIPS standard, TLS 1.3 is the precondition"
 	// reasoning as TLS 1.0/1.1 above.
 	"SSLV3": {Algorithm: "TLS 1.3", Standard: ""},
