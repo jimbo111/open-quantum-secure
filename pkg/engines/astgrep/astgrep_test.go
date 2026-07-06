@@ -2,6 +2,7 @@ package astgrep
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -324,4 +325,52 @@ func readDir(path string) ([]string, error) {
 
 func hasYMLSuffix(name string) bool {
 	return len(name) > 4 && name[len(name)-4:] == ".yml"
+}
+
+// TestFindBinary_RejectsSystemSGCommand guards against a real, observed CI
+// failure: "sg" is also the Unix substitute-group-ID command (shadow-utils),
+// present on virtually every Linux box including bare GitHub Actions runners
+// that never installed ast-grep. Blindly trusting exec.LookPath("sg") makes
+// Available() a false positive, and Scan() then invokes the wrong binary
+// entirely — observed as "sg: group 'scan' does not exist" in CI, because
+// astgrep's first CLI arg ("scan") gets interpreted as a Unix group name.
+func TestFindBinary_RejectsSystemSGCommand(t *testing.T) {
+	dir := t.TempDir()
+	fakeSG := filepath.Join(dir, "sg")
+	// Mimics the real coreutils/shadow-utils sg: errors on an unrecognized
+	// "group", says nothing about ast-grep.
+	script := "#!/bin/sh\necho \"sg: group '$1' does not exist\" >&2\nexit 1\n"
+	if err := os.WriteFile(fakeSG, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake sg: %v", err)
+	}
+	// Isolate PATH so a real ast-grep/sg installed on the dev/CI machine
+	// running this test suite can't mask the fake — this test exists
+	// specifically because a real "sg" (the Unix command) sits on PATH in
+	// bare CI environments.
+	t.Setenv("PATH", dir)
+
+	e := &Engine{}
+	got := e.findBinary(nil)
+	if got != "" {
+		t.Errorf("findBinary resolved the system sg command as ast-grep: %q", got)
+	}
+}
+
+// TestFindBinary_AcceptsRealAstGrepNamedSG is the positive control: a
+// genuine ast-grep binary invoked under its short "sg" alias must still be
+// recognized.
+func TestFindBinary_AcceptsRealAstGrepNamedSG(t *testing.T) {
+	dir := t.TempDir()
+	fakeSG := filepath.Join(dir, "sg")
+	script := "#!/bin/sh\necho 'ast-grep 0.38.6'\n"
+	if err := os.WriteFile(fakeSG, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake ast-grep-as-sg: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	e := &Engine{}
+	got := e.findBinary(nil)
+	if got != fakeSG {
+		t.Errorf("findBinary(nil) = %q, want %q (real ast-grep under the sg alias)", got, fakeSG)
+	}
 }

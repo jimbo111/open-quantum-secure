@@ -354,8 +354,30 @@ func primitiveFromRuleID(ruleID string) string {
 
 // findBinary locates ast-grep, checking engineDirs then PATH.
 // ast-grep ships as both "ast-grep" and the shorter "sg".
+//
+// "sg" is ALSO the Unix "substitute group ID" command (shadow-utils),
+// present on virtually every Linux box including bare CI runners that
+// never installed ast-grep. Blindly trusting exec.LookPath("sg") makes
+// Available() a false positive there, and Scan() then runs the wrong
+// binary — observed in CI as "sg: group 'scan' does not exist", because
+// astgrep's first CLI arg ("scan") gets read as a Unix group name. The
+// unambiguous "ast-grep" name is trusted outright; a resolved "sg" is
+// verified via version probe before being trusted.
 func (e *Engine) findBinary(extraDirs []string) string {
-	return engines.FindBinary(extraDirs, "ast-grep", "sg")
+	if p := engines.FindBinary(extraDirs, "ast-grep"); p != "" {
+		return p
+	}
+	if p := engines.FindBinary(extraDirs, "sg"); p != "" && looksLikeAstGrep(p) {
+		return p
+	}
+	return ""
+}
+
+// looksLikeAstGrep reports whether the binary at path identifies itself as
+// ast-grep in its version banner. Guards the ambiguous "sg" name against
+// the unrelated Unix sg(1) command (see findBinary).
+func looksLikeAstGrep(path string) bool {
+	return strings.Contains(strings.ToLower(engines.ProbeVersion(path)), "ast-grep")
 }
 
 // findRulesDir returns the path to an external astgrep-rules directory if present.
