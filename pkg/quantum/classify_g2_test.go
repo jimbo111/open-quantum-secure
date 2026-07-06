@@ -13,10 +13,13 @@ import (
 // ─── A2/F1: bare pre-standard PQC names → RiskDeprecated ────────────────────
 
 // TestClassifyPreStandardPQC_Bare covers the bare NIST Round 3 submission
-// names (Kyber/Dilithium/SPHINCS+/SPHINCS/Falcon). Before this fix these fell
-// through to RiskVulnerable/RiskUnknown with an "unrecognized algorithm"
-// message, even though the migration-target lookup already knew the correct
-// FIPS replacement (review finding A2/F1: self-contradictory output).
+// names that are superseded by an ALREADY-FINAL FIPS standard
+// (Kyber/Dilithium/SPHINCS+/SPHINCS). Before this fix these fell through to
+// RiskVulnerable/RiskUnknown with an "unrecognized algorithm" message, even
+// though the migration-target lookup already knew the correct FIPS
+// replacement (review finding A2/F1: self-contradictory output). Falcon is
+// covered separately below — it is NOT superseded by a final standard yet,
+// so it gets RiskSafe (HQC pattern), not RiskDeprecated.
 func TestClassifyPreStandardPQC_Bare(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -28,7 +31,6 @@ func TestClassifyPreStandardPQC_Bare(t *testing.T) {
 		{"Dilithium signature", "Dilithium", "signature", "ML-DSA-65"},
 		{"SPHINCS+ signature", "SPHINCS+", "signature", "SLH-DSA-SHA2-128f"},
 		{"SPHINCS signature", "SPHINCS", "signature", "SLH-DSA-SHA2-128f"},
-		{"Falcon signature", "Falcon", "signature", "FN-DSA-512"},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -54,7 +56,7 @@ func TestClassifyPreStandardPQC_Bare(t *testing.T) {
 // text does not claim the underlying cryptography is broken (unlike MD5/DES) —
 // it should say "pre-standard"/"superseded"/"pending", not "broken".
 func TestClassifyPreStandardPQC_RecommendationHonest(t *testing.T) {
-	for _, alg := range []string{"Kyber", "Dilithium", "SPHINCS+", "SPHINCS", "Falcon"} {
+	for _, alg := range []string{"Kyber", "Dilithium", "SPHINCS+", "SPHINCS"} {
 		alg := alg
 		t.Run(alg, func(t *testing.T) {
 			got := ClassifyAlgorithm(alg, "signature", 0)
@@ -72,20 +74,46 @@ func TestClassifyPreStandardPQC_RecommendationHonest(t *testing.T) {
 	}
 }
 
-// TestClassifyPreStandardPQC_FalconPendingCaveat verifies Falcon's
-// recommendation explicitly notes FIPS 206 is not yet finalized (Falcon has
-// no finalized replacement standard yet, unlike Kyber/Dilithium/SPHINCS+).
-func TestClassifyPreStandardPQC_FalconPendingCaveat(t *testing.T) {
-	got := ClassifyAlgorithm("Falcon", "signature", 0)
-	if !strings.Contains(got.Recommendation, "FIPS 206") || !strings.Contains(strings.ToLower(got.Recommendation), "pending") {
-		t.Errorf("Falcon recommendation = %q, want mention of FIPS 206 + pending", got.Recommendation)
+// TestClassifyFalcon_SafeStandardPending verifies Falcon follows the HQC
+// pattern (RiskSafe/SeverityInfo with an informational recommendation)
+// rather than RiskDeprecated: unlike Kyber/Dilithium/SPHINCS+, whose
+// replacement FIPS standards (203/204/205) are already final, Falcon's
+// FN-DSA/FIPS 206 is still pending — there is no finalized name yet for it
+// to have been superseded by. Approved doctrine, see fix-g2-report.md
+// Concerns section (originally raised, then confirmed, in this fix).
+func TestClassifyFalcon_SafeStandardPending(t *testing.T) {
+	tests := []struct{ name, algName, primitive string }{
+		{"Falcon bare", "Falcon", "signature"},
+		{"Falcon-512", "Falcon-512", "signature"},
+		{"Falcon-1024", "Falcon-1024", "signature"},
+		{"Falcon512 no hyphen", "Falcon512", "signature"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassifyAlgorithm(tt.algName, tt.primitive, 0)
+			if got.Risk != RiskSafe {
+				t.Errorf("ClassifyAlgorithm(%q, %q, 0).Risk = %q, want %q", tt.algName, tt.primitive, got.Risk, RiskSafe)
+			}
+			if got.Severity != SeverityInfo {
+				t.Errorf("ClassifyAlgorithm(%q, %q, 0).Severity = %q, want %q", tt.algName, tt.primitive, got.Severity, SeverityInfo)
+			}
+			if !strings.Contains(got.Recommendation, "FIPS 206") || !strings.Contains(strings.ToLower(got.Recommendation), "pending") {
+				t.Errorf("ClassifyAlgorithm(%q, %q, 0).Recommendation = %q, want mention of FIPS 206 + pending", tt.algName, tt.primitive, got.Recommendation)
+			}
+			if got.TargetAlgorithm != "" || got.TargetStandard != "" {
+				t.Errorf("ClassifyAlgorithm(%q, %q, 0) TargetAlgorithm/TargetStandard = %q/%q, want empty (HQC pattern — no migration target)",
+					tt.algName, tt.primitive, got.TargetAlgorithm, got.TargetStandard)
+			}
+		})
 	}
 }
 
 // TestClassifyPreStandardPQC_Parameterized covers liboqs-style parameterized
 // forms with NO separator before the digit suffix (Kyber512, Dilithium3) —
 // these must resolve via extractBaseName's longest-prefix matching, not the
-// exact-name table. Hyphenated forms (Falcon-512) are included too.
+// exact-name table. Falcon's parameterized forms are covered separately in
+// TestClassifyFalcon_SafeStandardPending (different expected Risk).
 func TestClassifyPreStandardPQC_Parameterized(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -98,8 +126,6 @@ func TestClassifyPreStandardPQC_Parameterized(t *testing.T) {
 		{"Dilithium2", "Dilithium2", "signature"},
 		{"Dilithium3", "Dilithium3", "signature"},
 		{"Dilithium5", "Dilithium5", "signature"},
-		{"Falcon-512", "Falcon-512", "signature"},
-		{"Falcon-1024", "Falcon-1024", "signature"},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -130,8 +156,9 @@ func TestPreStandardPQCPrefixes_AllInDeprecatedAlgorithms(t *testing.T) {
 // ─── Regression: prefix-matching hazards from adding pre-standard PQC names ─
 
 // TestRegression_HybridAndFinalNamesStillSafe verifies that adding
-// Kyber/Dilithium/SPHINCS+/SPHINCS/Falcon to deprecatedAlgorithms cannot
-// break the ALREADY-modeled safe names that sit right next to them:
+// Kyber/Dilithium/SPHINCS+/SPHINCS to deprecatedAlgorithms (and re-adding
+// Falcon to pqcSafeFamilies with its dedicated HQC-style branch) cannot break
+// the ALREADY-modeled safe names that sit right next to them:
 // curveSM2MLKEM768 (SM2 hybrid — must stay safe even after SM2 is added to
 // quantumVulnerableFamilies below), FN-DSA (Falcon's eventual FIPS 206 name),
 // and SLH-DSA (SPHINCS+'s FIPS 205 name). See review finding B2 caution note.

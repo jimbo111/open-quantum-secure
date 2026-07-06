@@ -68,10 +68,13 @@ var pqcSafeFamilies = map[string]bool{
 	"HQC":     true, // NIST PQC 5th standard (selected March 2025), draft expected 2026
 	"XMSS":    true,
 	"LMS":     true,
-	// "Falcon" (bare, pre-standard NIST Round 3 name) is intentionally NOT
-	// listed here — it now classifies as RiskDeprecated via
-	// deprecatedAlgorithms (review finding A2), pointing users to FN-DSA.
-	// FN-DSA itself (the FIPS 206 name) remains RiskSafe below.
+	// Falcon: NIST-selected (IR 8413) lattice signature, same "selected but
+	// FIPS not yet final" situation as HQC above — gets the same dedicated
+	// RiskSafe + informational-recommendation branch in ClassifyAlgorithm
+	// (NOT RiskDeprecated: Kyber/Dilithium/SPHINCS+ are superseded by
+	// ALREADY-FINAL FIPS 203/204/205 and stay deprecated; Falcon has no
+	// finalized replacement yet to be superseded by). See fix-g2-report.md.
+	"Falcon": true,
 	"FN-DSA": true, // FIPS 206 standardised name for Falcon; FIPS 206 itself is still draft/pending
 	// K-PQC Round 4 finalists
 	"SMAUG-T": true, // KEM, lattice-based
@@ -207,31 +210,39 @@ var deprecatedAlgorithms = map[string]bool{
 	"X25519Kyber768Draft00":  true,
 	"X25519Kyber512Draft00":  true,
 	"X25519Kyber1024Draft00": true,
-	// Pre-standard NIST Round 3 submission names, superseded by finalized FIPS
-	// standards (Falcon's FN-DSA/FIPS 206 is the one exception still pending —
-	// see deprecatedRecommendation's FALCON case). The underlying cryptography
-	// is quantum-safe; these are flagged so a finding reads "superseded, here
-	// is the current name" instead of "unrecognized, quantum-vulnerable"
-	// (review finding A2/F1). Parameterized forms with no '-'/'_' separator
-	// before the digit suffix (Kyber512/768/1024, Dilithium2/3/5 — liboqs
-	// naming) do NOT resolve via this exact-match table; they resolve via the
-	// preStandardPQCPrefixes longest-prefix match in extractBaseName below.
+	// Pre-standard NIST Round 3 submission names, superseded by ALREADY-FINAL
+	// FIPS standards. The underlying cryptography is quantum-safe; these are
+	// flagged so a finding reads "superseded, here is the current name"
+	// instead of "unrecognized, quantum-vulnerable" (review finding A2/F1).
+	// Parameterized forms with no '-'/'_' separator before the digit suffix
+	// (Kyber512/768/1024, Dilithium2/3/5 — liboqs naming) do NOT resolve via
+	// this exact-match table; they resolve via the preStandardPQCPrefixes
+	// longest-prefix match in extractBaseName below.
+	//
+	// Falcon is intentionally NOT here: its eventual FIPS 206 standard
+	// (FN-DSA) is still pending, so it doesn't fit "superseded by an
+	// already-final standard" — it gets the HQC-style RiskSafe +
+	// informational-recommendation treatment instead (pqcSafeFamilies above,
+	// dedicated branch in ClassifyAlgorithm). See fix-g2-report.md Concerns.
 	"Kyber":     true,
 	"Dilithium": true,
 	"SPHINCS+":  true,
 	"SPHINCS":   true,
-	"Falcon":    true,
 }
 
 // preStandardPQCPrefixes enables longest-prefix matching (in extractBaseName)
 // for pre-standard PQC names whose parameterized forms have no '-'/'_'
 // separator before the digit suffix (liboqs naming: "Kyber512", "Dilithium2").
-// Hyphenated forms ("Falcon-512", "SPHINCS+-128s") already resolve via
-// extractBaseName's default '-'/'_' split and don't strictly need this list,
-// but are included for robustness. Every entry here MUST also be a key in
-// deprecatedAlgorithms — TestPreStandardPQCPrefixes_AllInDeprecatedAlgorithms
-// guards against drift. Sorted by length descending in init().
-var preStandardPQCPrefixes = []string{"Kyber", "Dilithium", "SPHINCS+", "SPHINCS", "Falcon"}
+// Hyphenated forms ("SPHINCS+-128s") already resolve via extractBaseName's
+// default '-'/'_' split and don't strictly need this list, but are included
+// for robustness. Every entry here MUST also be a key in deprecatedAlgorithms
+// — TestPreStandardPQCPrefixes_AllInDeprecatedAlgorithms guards against
+// drift. Sorted by length descending in init(). Falcon is deliberately
+// absent (see deprecatedAlgorithms doc comment above) — its parameterized
+// forms ("Falcon-512"/"Falcon-1024"/"Falcon512") resolve via the
+// pqcSafeFamiliesSorted prefix match instead, since "Falcon" lives in
+// pqcSafeFamilies now.
+var preStandardPQCPrefixes = []string{"Kyber", "Dilithium", "SPHINCS+", "SPHINCS"}
 
 // ClassifyAlgorithm assesses the quantum risk of a cryptographic algorithm.
 func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
@@ -261,6 +272,19 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 			Risk:           RiskSafe,
 			Severity:       SeverityInfo,
 			Recommendation: "HQC is a NIST-selected PQC KEM (code-based). Provides non-lattice backup to ML-KEM. Standard expected 2027.",
+		}
+	}
+	// Falcon: same "NIST-selected, FIPS not yet final" situation as HQC above
+	// — RiskSafe with an informational recommendation, NOT RiskDeprecated.
+	// Unlike Kyber/Dilithium/SPHINCS+ (deprecatedAlgorithms below), whose
+	// replacement standards (FIPS 203/204/205) are already final, Falcon's
+	// FN-DSA/FIPS 206 is still pending — there is no finalized name yet for
+	// it to have been superseded BY.
+	if baseName == "Falcon" {
+		return Classification{
+			Risk:           RiskSafe,
+			Severity:       SeverityInfo,
+			Recommendation: "Falcon is a NIST-selected PQC signature scheme (lattice-based). FN-DSA (FIPS 206) standard pending — plan migration to FN-DSA-512/1024 once final.",
 		}
 	}
 	if pqcSafeFamilies[baseName] {
@@ -716,6 +740,10 @@ func isLikelyHash(upper string) bool {
 	return false
 }
 
+// deprecatedRecommendation has no "FALCON" case: Falcon no longer reaches
+// this function — it's RiskSafe via a dedicated branch in ClassifyAlgorithm
+// (HQC-style; see that branch's comment for why Falcon isn't grouped with
+// Kyber/Dilithium/SPHINCS+ below).
 func deprecatedRecommendation(name string) string {
 	switch strings.ToUpper(name) {
 	case "MD5", "MD4", "MD2":
@@ -736,8 +764,6 @@ func deprecatedRecommendation(name string) string {
 		return "Dilithium is the pre-standardization NIST Round 3 name for this lattice signature scheme — quantum-safe cryptography, not classically broken — now finalized as ML-DSA (FIPS 204). Migrate references/library calls to ML-DSA-65."
 	case "SPHINCS+", "SPHINCS":
 		return "SPHINCS+ is the pre-standardization name for this hash-based signature scheme — quantum-safe cryptography, not classically broken — now finalized as SLH-DSA (FIPS 205). Migrate references/library calls to SLH-DSA."
-	case "FALCON":
-		return "Falcon is the NIST Round 3 selection name for this lattice signature scheme — quantum-safe cryptography, not classically broken. Its FIPS 206 standard (FN-DSA) is still pending finalization; migrate references to FN-DSA once FIPS 206 publishes."
 	}
 	return "This algorithm is deprecated. Migrate to a modern alternative."
 }

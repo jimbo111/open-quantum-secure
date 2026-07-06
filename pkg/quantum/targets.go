@@ -61,10 +61,11 @@ var migrationTargets = map[string]MigrationTarget{
 	"KYBER":     {Algorithm: "ML-KEM-768", Standard: "FIPS 203"},
 	"SPHINCS+":  {Algorithm: "SLH-DSA-SHA2-128f", Standard: "FIPS 205"},
 	"SPHINCS":   {Algorithm: "SLH-DSA-SHA2-128f", Standard: "FIPS 205"},
-	// Falcon's replacement standard (FIPS 206/FN-DSA) is still pending
-	// finalization — unlike Kyber/Dilithium/SPHINCS+ above, whose FIPS
-	// standards are already final. See deprecatedRecommendation's FALCON case.
-	"FALCON": {Algorithm: "FN-DSA-512", Standard: "FIPS 206"},
+	// No "FALCON" entry: Falcon's replacement standard (FIPS 206/FN-DSA) is
+	// still pending finalization — unlike Kyber/Dilithium/SPHINCS+ above,
+	// whose FIPS standards are already final — so Falcon is RiskSafe (HQC
+	// pattern, no migration target needed) rather than RiskDeprecated. See
+	// the Falcon branch in classify.go's ClassifyAlgorithm.
 
 	// Chinese/Russian national standards (review finding B2).
 	// SM2 is dual-purpose (signature + key exchange), same as RSA above; the
