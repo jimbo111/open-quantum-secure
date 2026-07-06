@@ -150,11 +150,29 @@ func TestMatchCryptoParams(t *testing.T) {
 			wantMatch: true,
 		},
 
-		// TLS protocol
+		// TLS protocol. Algorithm.Name carries the version itself (not just
+		// Mode) so pkg/quantum.ClassifyAlgorithm -- which has no Mode
+		// parameter -- can classify TLSv1.0 (deprecated) differently from
+		// TLSv1.2/TLSv1.3. Previously all four versions collapsed to the
+		// same Algorithm:"TLS" (review finding B6).
 		{
 			name:      "protocol=TLSv1.0",
 			kv:        KeyValue{Key: "protocol", Value: "TLSv1.0", Line: 2},
-			wantAlg:   "TLS",
+			wantAlg:   "TLSv1.0",
+			wantPrim:  "protocol",
+			wantMatch: true,
+		},
+		{
+			name:      "protocol=TLSv1.2",
+			kv:        KeyValue{Key: "protocol", Value: "TLSv1.2", Line: 2},
+			wantAlg:   "TLSv1.2",
+			wantPrim:  "protocol",
+			wantMatch: true,
+		},
+		{
+			name:      "protocol=TLSv1.3",
+			kv:        KeyValue{Key: "protocol", Value: "TLSv1.3", Line: 2},
+			wantAlg:   "TLSv1.3",
 			wantPrim:  "protocol",
 			wantMatch: true,
 		},

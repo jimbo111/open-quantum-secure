@@ -204,6 +204,15 @@ var deprecatedAlgorithms = map[string]bool{
 	"RC2": true, "RC4": true, "RC5": true,
 	"Blowfish": true,
 	"HAS-160": true,
+	// TLS 1.0/1.1 are formally deprecated (RFC 8996) — classically broken
+	// (POODLE/BEAST-class weaknesses) regardless of quantum computing.
+	// configscanner's "protocol" vocabulary emits these exact names (see
+	// pkg/engines/configscanner/vocabulary.go) so the version distinction
+	// survives into classification instead of collapsing into a single
+	// undifferentiated "TLS" finding (review finding B6). TLSv1.2/1.3 are
+	// NOT classically broken and get a dedicated branch below instead.
+	"TLSv1.0": true,
+	"TLSv1.1": true,
 	// Deprecated IETF draft hybrid KEMs (pre-FIPS 203). These are NOT quantum-safe:
 	// the Kyber component was the pre-standardisation draft, superseded by ML-KEM.
 	// Callers should migrate to X25519MLKEM768 (codepoint 0x11EC).
@@ -261,6 +270,30 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 			Recommendation:  deprecatedRecommendation(baseName),
 			TargetAlgorithm: t.Algorithm,
 			TargetStandard:  t.Standard,
+		}
+	}
+
+	// 1a. TLS protocol version findings (config-scanner's "protocol"
+	// vocabulary — see vocabulary.go). TLSv1.0/1.1 are handled above via
+	// deprecatedAlgorithms (classically broken). TLSv1.2 is classically fine
+	// but has no post-quantum key-exchange option of its own — flagged as a
+	// note-level conditional risk, not a hard failure. TLSv1.3 is the current
+	// baseline (info/ok) — whether a PQC hybrid group is actually negotiated
+	// is a separate, more specific finding (tls-probe / the "groups"/"kex"
+	// vocabulary), not something this protocol-version finding can see.
+	switch baseName {
+	case "TLSv1.2":
+		return Classification{
+			Risk:           RiskVulnerable,
+			Severity:       SeverityMedium,
+			HNDLRisk:       HNDLImmediate,
+			Recommendation: "TLS 1.2 has no post-quantum key-exchange option — its classical ECDHE/RSA key exchange is Harvest-Now-Decrypt-Later exposed. Migrate to TLS 1.3 and negotiate a hybrid PQC group (e.g. X25519MLKEM768).",
+		}
+	case "TLSv1.3":
+		return Classification{
+			Risk:           RiskResistant,
+			Severity:       SeverityInfo,
+			Recommendation: "TLS 1.3 is the current protocol baseline (removes weak ciphers, mandates forward secrecy). For quantum-safe key exchange, verify a hybrid PQC group (e.g. X25519MLKEM768) is actually negotiated — see tls-probe findings for the handshake result.",
 		}
 	}
 
@@ -758,6 +791,8 @@ func deprecatedRecommendation(name string) string {
 		return "Blowfish has a 64-bit block size (birthday attacks). Migrate to AES-256."
 	case "HAS-160":
 		return "HAS-160 is deprecated (equivalent to SHA-1). Migrate to SHA-256 or LSH-256."
+	case "TLSV1.0", "TLSV1.1":
+		return "TLS 1.0/1.1 are formally deprecated (RFC 8996) — classically broken (POODLE/BEAST-class weaknesses) regardless of quantum computing. Migrate to TLS 1.3 and negotiate a hybrid PQC group (e.g. X25519MLKEM768)."
 	case "KYBER":
 		return "Kyber is the pre-standardization NIST Round 3 name for this lattice KEM — quantum-safe cryptography, not classically broken — now finalized as ML-KEM (FIPS 203). Migrate references/library calls to ML-KEM-768."
 	case "DILITHIUM":

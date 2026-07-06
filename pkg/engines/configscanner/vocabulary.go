@@ -184,10 +184,19 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "protocol", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
 	{KeyPattern: "protocol", ValueHints: []string{"mlkem", "ml-kem"}, Algorithm: "ML-KEM", Primitive: "kem"},
 	{KeyPattern: "protocol", ValueHints: []string{"sslv3", "ssl3", "ssl 3"}, Algorithm: "SSLv3", Primitive: "protocol"},
-	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.0", "tls1.0", "tls 1.0"}, Algorithm: "TLS", Primitive: "protocol"},
-	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.1", "tls1.1", "tls 1.1"}, Algorithm: "TLS", Primitive: "protocol"},
-	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.2", "tls1.2", "tls 1.2"}, Algorithm: "TLS", Primitive: "protocol"},
-	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.3", "tls1.3", "tls 1.3"}, Algorithm: "TLS", Primitive: "protocol"},
+	// TLS entries carry the version in Algorithm.Name itself (not just a Mode
+	// hint) because pkg/quantum.ClassifyAlgorithm classifies on (name,
+	// primitive, keySize) and has no Mode parameter — Mode is populated
+	// elsewhere (cipherscope's AES-GCM/CBC) but is never read by the
+	// classifier, so a Mode-only encoding would leave the version unusable
+	// downstream. Distinct names let ClassifyAlgorithm tell TLSv1.0/1.1
+	// (classically deprecated), TLSv1.2 (classically fine but no PQC
+	// key-exchange option), and TLSv1.3 (current baseline) apart. See review
+	// finding B6 (previously all four emitted the same Algorithm:"TLS").
+	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.0", "tls1.0", "tls 1.0"}, Algorithm: "TLSv1.0", Primitive: "protocol"},
+	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.1", "tls1.1", "tls 1.1"}, Algorithm: "TLSv1.1", Primitive: "protocol"},
+	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.2", "tls1.2", "tls 1.2"}, Algorithm: "TLSv1.2", Primitive: "protocol"},
+	{KeyPattern: "protocol", ValueHints: []string{"tlsv1.3", "tls1.3", "tls 1.3"}, Algorithm: "TLSv1.3", Primitive: "protocol"},
 
 	// --- key size keys (value parsed as integer) ---
 	{KeyPattern: "key.size", Algorithm: "AES", Primitive: "symmetric"},

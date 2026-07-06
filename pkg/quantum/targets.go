@@ -55,6 +55,13 @@ var migrationTargets = map[string]MigrationTarget{
 	"RC5":        {Algorithm: "AES-256-GCM", Standard: ""},
 	"BLOWFISH":   {Algorithm: "AES-256-GCM", Standard: ""},
 	"HAS-160":    {Algorithm: "SHA-256", Standard: ""},
+	// TLS 1.0/1.1: not a NIST FIPS standard, so Standard is blank like the
+	// other "modern but not PQC" entries above. TLS 1.3 is the precondition
+	// for negotiating a hybrid PQC group — the KEM/signature findings that
+	// actually carry PQC risk are reported separately (tls-probe / the
+	// "groups"/"kex" config-scanner vocabulary).
+	"TLSV1.0": {Algorithm: "TLS 1.3", Standard: ""},
+	"TLSV1.1": {Algorithm: "TLS 1.3", Standard: ""},
 
 	// Pre-standard PQC → current NIST names
 	"DILITHIUM": {Algorithm: "ML-DSA-65", Standard: "FIPS 204"},
