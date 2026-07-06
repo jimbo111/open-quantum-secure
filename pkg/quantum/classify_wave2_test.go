@@ -58,3 +58,26 @@ func TestBareGOSTNotVulnerable(t *testing.T) {
 		t.Errorf("bare GOST classified vulnerable; want unknown (ambiguous family)")
 	}
 }
+
+// JOSE/JWE routing (wave-2 C24): the JWE "enc" header names symmetric AEAD
+// (A256GCM = AES-256-GCM). Symmetric-named algorithms must never be routed
+// into the asymmetric-vulnerable branch by a pke-ish primitive tag, and the
+// "enc" primitive is not public-key encryption at all.
+func TestJOSESymmetricNotVulnerable(t *testing.T) {
+	for _, tc := range []struct{ name, prim string }{
+		{"A256GCM", "enc"},
+		{"A128CBC-HS256", "enc"},
+		{"AES-256-GCM", "enc"},
+		{"AES", "encryption"},
+	} {
+		c := ClassifyAlgorithm(tc.name, tc.prim, 0)
+		if c.Risk == RiskVulnerable {
+			t.Errorf("%s/%s: classified quantum-vulnerable; symmetric AEAD must never take the Shor path (rec=%.60q)", tc.name, tc.prim, c.Recommendation)
+		}
+	}
+	// G1 behavior preserved: JWA key-management names still get the KEM target.
+	c := ClassifyAlgorithm("RSA-OAEP-256", "jwe", 2048)
+	if c.TargetAlgorithm != "ML-KEM-768" {
+		t.Errorf("RSA-OAEP-256/jwe: target=%q want ML-KEM-768 (G1 regression)", c.TargetAlgorithm)
+	}
+}

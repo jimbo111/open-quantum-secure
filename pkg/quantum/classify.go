@@ -372,6 +372,14 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 			}
 		}
 	case "pke", "key-agree", "kem":
+		// Name evidence beats the primitive tag: a clearly symmetric or
+		// hash name mislabeled with a pke-ish primitive (JOSE tooling,
+		// loose engine metadata) must not take the Shor path (wave-2 C24).
+		if bu := strings.ToUpper(baseName); isLikelySymmetric(bu) || isLikelySymmetric(upperName) {
+			return classifySymmetric(baseName, upperName, keySize, false)
+		} else if isLikelyHash(bu) || isLikelyHash(upperName) {
+			return classifySymmetric(baseName, upperName, keySize, true)
+		}
 		if !pqcSafeFamilies[baseName] {
 			t := LookupTarget(baseName)
 			return Classification{
@@ -391,11 +399,13 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 		return classifySymmetric(baseName, upperName, keySize, false)
 	}
 
-	// 5. Heuristic: check name patterns
-	if isLikelySymmetric(upperName) {
+	// 5. Heuristic: check name patterns (both the raw name and the resolved
+	// base name — JWA tokens like A256GCM resolve to base "AES" without the
+	// raw name carrying an AES prefix).
+	if isLikelySymmetric(upperName) || isLikelySymmetric(strings.ToUpper(baseName)) {
 		return classifySymmetric(baseName, upperName, keySize, false)
 	}
-	if isLikelyHash(upperName) {
+	if isLikelyHash(upperName) || isLikelyHash(strings.ToUpper(baseName)) {
 		return classifySymmetric(baseName, upperName, keySize, true)
 	}
 
@@ -576,6 +586,25 @@ func classifySymmetric(baseName, upperName string, keySize int, isHash bool) Cla
 	}
 }
 
+// jwaAlgNames maps JWA (RFC 7518) tokens to their canonical base names.
+// These are exact tokens, not prefixes of the names in the family tables,
+// so without the explicit mapping the RSA forms fall through to the bare
+// "RSA" prefix match and get signature migration text/target for an
+// encryption finding (review finding A3), and the symmetric AEAD "enc"
+// values (A256GCM = AES-256-GCM) carry no AES prefix at all and would be
+// unrecognizable (wave-2 review C24). Package-level so it is built once,
+// not per extractBaseName call (wave-2 C29).
+var jwaAlgNames = map[string]string{
+	"RSA-OAEP":     "RSAES-OAEP",
+	"RSA-OAEP-256": "RSAES-OAEP",
+	"RSA1_5":       "RSAES-PKCS1",
+	// Content-encryption ("enc" header) and key-wrap values — all AES.
+	"A128GCM": "AES", "A192GCM": "AES", "A256GCM": "AES",
+	"A128CBC-HS256": "AES", "A192CBC-HS384": "AES", "A256CBC-HS512": "AES",
+	"A128KW": "AES", "A192KW": "AES", "A256KW": "AES",
+	"A128GCMKW": "AES", "A192GCMKW": "AES", "A256GCMKW": "AES",
+}
+
 // extractBaseName gets the algorithm family name from a full identifier.
 // "AES-256-GCM" → "AES", "RSA-2048" → "RSA", "SHA-256" → "SHA-256"
 // Korean multi-part names: "SMAUG-T-128" → "SMAUG-T", "HAETAE-2" → "HAETAE",
@@ -594,18 +623,7 @@ func extractBaseName(name string) string {
 		}
 	}
 
-	// JWA (RFC 7518) "alg" values for RSA encryption. These are exact tokens,
-	// not prefixes/suffixes of "RSAES-OAEP"/"RSAES-PKCS1" (the names actually
-	// present in quantumVulnerableFamilies/migrationTargets), so without this
-	// explicit mapping they fall through to the bare "RSA" prefix match below
-	// and get routed through RSA *signature* migration text/target for an
-	// encryption finding (review SCANNER_REVIEW_2026-07-05.md finding A3).
-	jwaRSAEncryptionNames := map[string]string{
-		"RSA-OAEP":     "RSAES-OAEP",
-		"RSA-OAEP-256": "RSAES-OAEP",
-		"RSA1_5":       "RSAES-PKCS1",
-	}
-	if base, ok := jwaRSAEncryptionNames[upper]; ok {
+	if base, ok := jwaAlgNames[upper]; ok {
 		return base
 	}
 
@@ -743,7 +761,10 @@ func symmetricKeySize(upperName string) int {
 
 func normalizePrimitive(p string) string {
 	switch strings.ToLower(p) {
-	case "pke", "public-key", "public_key", "encryption", "jwe", "key-encryption", "enc":
+	// NOTE: JOSE's "enc" header is deliberately ABSENT here — it names
+	// symmetric AEAD content encryption (A256GCM etc.), not public-key
+	// encryption (wave-2 review C24).
+	case "pke", "public-key", "public_key", "encryption", "jwe", "key-encryption":
 		return "pke"
 	case "kem", "key-encapsulation":
 		return "kem"
