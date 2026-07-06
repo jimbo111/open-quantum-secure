@@ -50,7 +50,7 @@ func TestGenerateSnippet(t *testing.T) {
 			targetAlg:    "ML-KEM-768",
 			wantLang:     "java",
 			wantBefore:   "ECDH",
-			wantAfter:    "BCPQC",
+			wantAfter:    "MLKEMParameterSpec",
 		},
 		// 4. Rust file + X25519 → Rust KEM snippet
 		{
@@ -113,7 +113,7 @@ func TestGenerateSnippet(t *testing.T) {
 			targetAlg:    "ML-DSA-65",
 			wantLang:     "javascript",
 			wantBefore:   "createSign",
-			wantAfter:    "liboqs-node",
+			wantAfter:    "node:crypto",
 		},
 		// 10. TS file + ECDH → TypeScript snippet
 		{
@@ -124,7 +124,7 @@ func TestGenerateSnippet(t *testing.T) {
 			targetAlg:    "ML-KEM-768",
 			wantLang:     "typescript",
 			wantBefore:   "createECDH",
-			wantAfter:    "liboqs-node",
+			wantAfter:    "node:crypto",
 		},
 		// 11. C file + ECDSA → C snippet
 		{
@@ -444,6 +444,36 @@ func TestConfigServerTypeSnippets(t *testing.T) {
 			wantBefore:   "bind *:443",
 			wantAfter:    "X25519MLKEM768",
 		},
+		// sshd_config (extensionless — recognised via isExtensionlessConfigPath)
+		// must get an OpenSSH KexAlgorithms snippet, never nginx directives (B5).
+		{
+			name:         "sshd_config ECDH -> OpenSSH KexAlgorithms snippet",
+			filePath:     "/etc/ssh/sshd_config",
+			classicalAlg: "ECDH",
+			primitive:    "key-exchange",
+			wantBefore:   "KexAlgorithms",
+			wantAfter:    "mlkem768x25519-sha256",
+		},
+		// sshd_config.d drop-in file (has a .conf extension, so langFromExt
+		// alone would resolve it as config; server-type detection must still
+		// recognise the sshd_config.d path segment).
+		{
+			name:         "sshd_config.d drop-in -> OpenSSH KexAlgorithms snippet",
+			filePath:     "/etc/ssh/sshd_config.d/10-pqc.conf",
+			classicalAlg: "ECDH",
+			primitive:    "key-exchange",
+			wantBefore:   "KexAlgorithms",
+			wantAfter:    "sntrup761x25519-sha512",
+		},
+		// Client-side ssh_config (extensionless).
+		{
+			name:         "ssh_config ECDH -> OpenSSH KexAlgorithms snippet",
+			filePath:     "/etc/ssh/ssh_config",
+			classicalAlg: "ECDH",
+			primitive:    "key-exchange",
+			wantBefore:   "KexAlgorithms",
+			wantAfter:    "mlkem768x25519-sha256",
+		},
 	}
 
 	for _, tc := range tests {
@@ -465,6 +495,60 @@ func TestConfigServerTypeSnippets(t *testing.T) {
 	}
 }
 
+// TestSSHConfigNeverGetsNginxDirectives is a targeted regression test for B5:
+// SSH config files must never render nginx's ssl_ecdh_curve directive, and
+// unrecognised config paths must fall back to generic guidance rather than
+// silently defaulting to nginx.
+func TestSSHConfigNeverGetsNginxDirectives(t *testing.T) {
+	paths := []string{
+		"/etc/ssh/sshd_config",
+		"/etc/ssh/ssh_config",
+		"/etc/ssh/sshd_config.d/10-pqc.conf",
+	}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			s := GenerateSnippet(p, "ECDH", "key-exchange", "")
+			if s == nil {
+				t.Fatal("want non-nil snippet, got nil")
+			}
+			if strings.Contains(s.Before, "ssl_ecdh_curve") || strings.Contains(s.After, "ssl_ecdh_curve") {
+				t.Errorf("SSH config snippet must not contain nginx's ssl_ecdh_curve directive:\nBefore:\n%s\nAfter:\n%s", s.Before, s.After)
+			}
+		})
+	}
+}
+
+// TestUnrecognisedConfigPathIsGeneric verifies that a config path matching no
+// known server (nginx/apache/haproxy/ssh) gets generic migration guidance —
+// not a silent nginx default (B5).
+func TestUnrecognisedConfigPathIsGeneric(t *testing.T) {
+	t.Run("kem", func(t *testing.T) {
+		s := GenerateSnippet("/etc/myapp/server.conf", "ECDH", "key-exchange", "")
+		if s == nil {
+			t.Fatal("want non-nil snippet, got nil")
+		}
+		if strings.Contains(s.Before, "ssl_ecdh_curve") || strings.Contains(s.After, "ssl_ecdh_curve") {
+			t.Errorf("unrecognised config path must not default to nginx directives:\nBefore:\n%s\nAfter:\n%s", s.Before, s.After)
+		}
+		if !strings.Contains(s.After, "X25519MLKEM768") {
+			t.Errorf("generic KEM guidance should still name the recommended hybrid group:\n%s", s.After)
+		}
+	})
+
+	t.Run("sign", func(t *testing.T) {
+		s := GenerateSnippet("/etc/myapp/server.conf", "RSA", "signature", "ML-DSA-65")
+		if s == nil {
+			t.Fatal("want non-nil snippet, got nil")
+		}
+		if strings.Contains(s.Before, "ssl_certificate") || strings.Contains(s.After, "ssl_certificate") {
+			t.Errorf("unrecognised config path must not default to nginx directives:\nBefore:\n%s\nAfter:\n%s", s.Before, s.After)
+		}
+		if !strings.Contains(s.After, "ML-DSA-65") {
+			t.Errorf("generic sign guidance should still name the recommended target algorithm:\n%s", s.After)
+		}
+	})
+}
+
 // TestGoKEMNoStrayBlankLine verifies that a non-TLS Go KEM snippet does not
 // contain a triple newline (\n\n\n) caused by an empty note prefix.
 func TestGoKEMNoStrayBlankLine(t *testing.T) {
@@ -480,17 +564,23 @@ func TestGoKEMNoStrayBlankLine(t *testing.T) {
 }
 
 // TestJavaBCAlgStrip verifies that numeric variant suffixes are stripped for
-// Bouncy Castle's getInstance call (ML-KEM-768 → ML-KEM, ML-DSA-65 → ML-DSA).
+// Bouncy Castle's getInstance call (ML-KEM-768 → ML-KEM, ML-DSA-65 → ML-DSA),
+// that the standard "BC" provider is registered (not the legacy BCPQC
+// provider), and that KeyPairGenerator.initialize() is called with the
+// parameter spec matching the requested strength so it isn't silently
+// discarded (B5).
 func TestJavaBCAlgStrip(t *testing.T) {
 	tests := []struct {
-		alg     string
-		family  string
-		wantAlg string // expected in After snippet
+		alg           string
+		family        string
+		wantAlg       string // expected JCA algorithm name in After snippet
+		wantParamSpec string // expected ParameterSpec.field in After snippet
 	}{
-		{"ML-KEM-768", "kem", "ML-KEM"},
-		{"ML-DSA-65", "sign", "ML-DSA"},
-		{"ML-KEM-1024", "kem", "ML-KEM"},
-		{"ML-DSA-87", "sign", "ML-DSA"},
+		{"ML-KEM-768", "kem", "ML-KEM", "MLKEMParameterSpec.ml_kem_768"},
+		{"ML-DSA-65", "sign", "ML-DSA", "MLDSAParameterSpec.ml_dsa_65"},
+		{"ML-KEM-1024", "kem", "ML-KEM", "MLKEMParameterSpec.ml_kem_1024"},
+		{"ML-DSA-87", "sign", "ML-DSA", "MLDSAParameterSpec.ml_dsa_87"},
+		{"ML-DSA-44", "sign", "ML-DSA", "MLDSAParameterSpec.ml_dsa_44"},
 	}
 
 	for _, tc := range tests {
@@ -505,8 +595,14 @@ func TestJavaBCAlgStrip(t *testing.T) {
 			if s == nil {
 				t.Fatal("want snippet, got nil")
 			}
-			if !strings.Contains(s.After, `"`+tc.wantAlg+`"`) {
-				t.Errorf("After does not contain %q:\n%s", tc.wantAlg, s.After)
+			if !strings.Contains(s.After, `"`+tc.wantAlg+`", "BC"`) {
+				t.Errorf("After does not register the standard \"BC\" provider for %q:\n%s", tc.wantAlg, s.After)
+			}
+			if strings.Contains(s.After, "BCPQC") || strings.Contains(s.After, "BouncyCastlePQCProvider") {
+				t.Errorf("After still references the legacy BCPQC provider:\n%s", s.After)
+			}
+			if !strings.Contains(s.After, ".initialize("+tc.wantParamSpec+")") {
+				t.Errorf("After does not call initialize(%s) — requested strength would be silently discarded:\n%s", tc.wantParamSpec, s.After)
 			}
 		})
 	}
@@ -801,6 +897,134 @@ func FuzzGenerateSnippet(f *testing.F) {
 			if got.After == "" {
 				t.Errorf("non-nil snippet has empty After: filePath=%q classicalAlg=%q", filePath, classicalAlg)
 			}
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// B5: migration snippet currency — stale "no native PQC support" claims,
+// wrong Java provider, and SSH-gets-nginx-directives were all fixed together.
+// These tests pin the corrected, verified API references and forbid the
+// stale claims from ever regressing back in.
+// ---------------------------------------------------------------------------
+
+// staleClaims are phrases that were factually wrong as of this fix (verified
+// against .NET 10 / CryptoKit iOS 26 / Node.js 24.7 / Bouncy Castle current
+// docs) and must never reappear in a snippet's After text.
+var staleClaims = []string{
+	"no native PQC support",
+	"no built-in PQC",
+	"BCPQC",
+	"BouncyCastlePQCProvider",
+}
+
+func assertNoStaleClaims(t *testing.T, after string) {
+	t.Helper()
+	for _, claim := range staleClaims {
+		if strings.Contains(after, claim) {
+			t.Errorf("After contains stale claim %q:\n%s", claim, after)
+		}
+	}
+}
+
+// TestCSharpModernAPI verifies the C# snippet uses .NET 10's native MLKem/
+// MLDsa classes (System.Security.Cryptography) as the primary recommendation,
+// with BouncyCastle mentioned only as a pre-.NET-10 fallback — replacing the
+// stale "no built-in PQC support" claim.
+func TestCSharpModernAPI(t *testing.T) {
+	t.Run("sign", func(t *testing.T) {
+		s := GenerateSnippet("Signer.cs", "RSA", "signature", "ML-DSA-65")
+		if s == nil {
+			t.Fatal("want snippet, got nil")
+		}
+		assertNoStaleClaims(t, s.After)
+		if !strings.Contains(s.After, "MLDsa.GenerateKey(MLDsaAlgorithm.MLDsa65)") {
+			t.Errorf("After does not use the verified MLDsa.GenerateKey API:\n%s", s.After)
+		}
+		if !strings.Contains(s.After, "BouncyCastle") {
+			t.Errorf("After should still mention BouncyCastle as a pre-.NET-10 fallback:\n%s", s.After)
+		}
+	})
+
+	t.Run("kem", func(t *testing.T) {
+		s := GenerateSnippet("Exchange.cs", "ECDH", "key-exchange", "ML-KEM-768")
+		if s == nil {
+			t.Fatal("want snippet, got nil")
+		}
+		assertNoStaleClaims(t, s.After)
+		if !strings.Contains(s.After, "MLKem.GenerateKey(MLKemAlgorithm.MLKem768)") {
+			t.Errorf("After does not use the verified MLKem.GenerateKey API:\n%s", s.After)
+		}
+		if !strings.Contains(s.After, "Encapsulate") || !strings.Contains(s.After, "Decapsulate") {
+			t.Errorf("After does not demonstrate Encapsulate/Decapsulate:\n%s", s.After)
+		}
+	})
+}
+
+// TestSwiftModernAPI verifies the Swift snippet uses CryptoKit's ML-KEM/ML-DSA
+// types (iOS 26 / macOS 26) as the primary recommendation, with swift-crypto
+// mentioned as a cross-platform/older-OS fallback — replacing the stale
+// "Swift has no native PQC ... yet" claims.
+func TestSwiftModernAPI(t *testing.T) {
+	t.Run("sign", func(t *testing.T) {
+		s := GenerateSnippet("Signer.swift", "RSA", "signature", "ML-DSA-65")
+		if s == nil {
+			t.Fatal("want snippet, got nil")
+		}
+		assertNoStaleClaims(t, s.After)
+		if !strings.Contains(s.After, "MLDSA65.PrivateKey()") {
+			t.Errorf("After does not use the verified MLDSA65.PrivateKey API:\n%s", s.After)
+		}
+		if !strings.Contains(s.After, "swift-crypto") {
+			t.Errorf("After should mention swift-crypto as a cross-platform/older-OS fallback:\n%s", s.After)
+		}
+	})
+
+	t.Run("kem", func(t *testing.T) {
+		s := GenerateSnippet("Exchange.swift", "ECDH", "key-exchange", "ML-KEM-768")
+		if s == nil {
+			t.Fatal("want snippet, got nil")
+		}
+		assertNoStaleClaims(t, s.After)
+		if !strings.Contains(s.After, "MLKEM768.PrivateKey()") {
+			t.Errorf("After does not use the verified MLKEM768.PrivateKey API:\n%s", s.After)
+		}
+		if !strings.Contains(s.After, "encapsulate()") || !strings.Contains(s.After, "decapsulate(") {
+			t.Errorf("After does not demonstrate encapsulate()/decapsulate():\n%s", s.After)
+		}
+	})
+}
+
+// TestJSModernAPI verifies the JS/TS snippet uses Node.js 24.7+'s native
+// node:crypto encapsulate/decapsulate and ML-DSA sign/verify as the primary
+// recommendation, with @noble/post-quantum mentioned as a browser/older-Node
+// fallback — replacing the stale "Node.js has no native PQC signing yet" claim.
+func TestJSModernAPI(t *testing.T) {
+	t.Run("sign", func(t *testing.T) {
+		s := GenerateSnippet("signer.js", "RSA", "signature", "ML-DSA-65")
+		if s == nil {
+			t.Fatal("want snippet, got nil")
+		}
+		assertNoStaleClaims(t, s.After)
+		if !strings.Contains(s.After, "'ml-dsa-65'") {
+			t.Errorf("After does not use the verified ml-dsa-65 key type:\n%s", s.After)
+		}
+		if !strings.Contains(s.After, "@noble/post-quantum") {
+			t.Errorf("After should mention @noble/post-quantum as a browser/older-Node fallback:\n%s", s.After)
+		}
+	})
+
+	t.Run("kem", func(t *testing.T) {
+		s := GenerateSnippet("exchange.ts", "ECDH", "key-exchange", "ML-KEM-768")
+		if s == nil {
+			t.Fatal("want snippet, got nil")
+		}
+		assertNoStaleClaims(t, s.After)
+		if !strings.Contains(s.After, "encapsulate(") || !strings.Contains(s.After, "decapsulate(") {
+			t.Errorf("After does not demonstrate encapsulate()/decapsulate():\n%s", s.After)
+		}
+		if !strings.Contains(s.After, "'ml-kem-768'") {
+			t.Errorf("After does not use the verified ml-kem-768 key type:\n%s", s.After)
 		}
 	})
 }
