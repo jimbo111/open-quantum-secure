@@ -656,6 +656,14 @@ func (o *Orchestrator) scanPipeline(ctx context.Context, opts engines.ScanOption
 // same algorithm at the same file+line, we keep the richer finding and record
 // corroboration. Corroborated findings get boosted confidence.
 func dedupe(all []findings.UnifiedFinding) []findings.UnifiedFinding {
+	// Fold generic protocol names ("TLS"/"SSL") into a versioned sibling
+	// ("TLSv1.2", "SSLv3", ...) at the same file+line BEFORE computing
+	// DedupeKey, so the two share a key and merge via the normal path below
+	// instead of surfacing as a contradictory duplicate pair. See
+	// foldGenericProtocolNames doc comment for why this can't just live in
+	// DedupeKey() itself.
+	foldGenericProtocolNames(all)
+
 	type entry struct {
 		finding *findings.UnifiedFinding
 		index   int
@@ -702,6 +710,83 @@ func dedupe(all []findings.UnifiedFinding) []findings.UnifiedFinding {
 		result = append(result, *seen[key].finding)
 	}
 	return result
+}
+
+// genericProtocolNames are version-less protocol Algorithm.Name values that
+// a versioned finding at the same file+line should absorb.
+var genericProtocolNames = map[string]bool{
+	"TLS": true,
+	"SSL": true,
+}
+
+// versionedProtocolNames are the specific protocol versions a generic name
+// can fold into. Must stay in sync with the names pkg/quantum/classify.go
+// classifies via deprecatedAlgorithms / the dedicated TLSv1.2/1.3 branch.
+var versionedProtocolNames = map[string]bool{
+	"TLSv1.0": true, "TLSv1.1": true, "TLSv1.2": true, "TLSv1.3": true,
+	"SSLv2": true, "SSLv3": true,
+}
+
+// foldGenericProtocolNames rewrites a generic protocol Algorithm.Name
+// ("TLS"/"SSL") to the versioned form ("TLSv1.2", "SSLv3", ...) in place
+// when exactly one distinct versioned name is present at the same
+// file+line (InnerPath included, matching DedupeKey's own file-key
+// composition). This must run BEFORE DedupeKey-based grouping in dedupe():
+// DedupeKey() is file|line|alg|<Algorithm.Name>, and after the B6 fix
+// (config-scanner now emits "TLSv1.2" instead of "TLS") a generic-name
+// finding from a pattern engine like cryptoscan (which doesn't parse a
+// version out of source text) produces a DIFFERENT key than the versioned
+// finding at the same line, so they stop merging and surface as two
+// contradictory findings for one config line -- one "quantum-vulnerable",
+// one "unknown". This can't be fixed inside DedupeKey() itself (a leaf
+// package with no protocol-version-specific knowledge); it belongs in the
+// orchestrator's cross-engine reconciliation step instead.
+//
+// Deliberately conservative: only folds a GENERIC name into a VERSIONED
+// one, never a versioned name into another versioned name (two different
+// TLS versions at the same line are never assumed to be "the same
+// finding") -- and only when the versioned set at that line is
+// unambiguous (exactly one distinct version). Zero or two-or-more distinct
+// versions at the same line are left untouched rather than guessing.
+func foldGenericProtocolNames(all []findings.UnifiedFinding) {
+	type lineKey struct {
+		file string
+		line int
+	}
+	fileKeyFor := func(f *findings.UnifiedFinding) string {
+		if f.Location.InnerPath != "" {
+			return f.Location.File + "!" + f.Location.InnerPath
+		}
+		return f.Location.File
+	}
+
+	versionsByLine := make(map[lineKey]map[string]bool)
+	for i := range all {
+		f := &all[i]
+		if f.Algorithm == nil || !versionedProtocolNames[f.Algorithm.Name] {
+			continue
+		}
+		lk := lineKey{file: fileKeyFor(f), line: f.Location.Line}
+		if versionsByLine[lk] == nil {
+			versionsByLine[lk] = make(map[string]bool)
+		}
+		versionsByLine[lk][f.Algorithm.Name] = true
+	}
+
+	for i := range all {
+		f := &all[i]
+		if f.Algorithm == nil || !genericProtocolNames[f.Algorithm.Name] {
+			continue
+		}
+		lk := lineKey{file: fileKeyFor(f), line: f.Location.Line}
+		versions := versionsByLine[lk]
+		if len(versions) != 1 {
+			continue // no versioned sibling, or ambiguous -- leave as-is
+		}
+		for v := range versions {
+			f.Algorithm.Name = v
+		}
+	}
 }
 
 // mergeAlgorithm fills in missing fields from a secondary finding. Conflict
