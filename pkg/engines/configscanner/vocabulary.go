@@ -227,6 +227,21 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "signature", ValueHints: []string{"rsa"}, Algorithm: "RSA", Primitive: "signature"},
 	{KeyPattern: "signature", ValueHints: []string{"ecdsa"}, Algorithm: "ECDSA", Primitive: "signature"},
 	{KeyPattern: "signature", ValueHints: []string{"ed25519"}, Algorithm: "Ed25519", Primitive: "signature"},
+
+	// --- JWT/JWS 'alg' claim (RFC 7518 §3.1) ---
+	// The registered claim name is the 3-character key "alg" (e.g. {"alg":
+	// "RS256"}), which is shorter than the 9-character substring "algorithm"
+	// that every entry above requires — strings.Contains("alg", "algorithm")
+	// can never be true, so this extremely common, security-relevant key was
+	// previously unreachable by any vocabulary entry (review finding B7/audit
+	// §2). Adding a standalone "alg" KeyPattern is only safe now that key
+	// matching is segment-boundary-aware (keyMatchesPattern): "alg" matches
+	// the whole segment "alg" in "jwt.alg" but does NOT match as a substring
+	// of "algorithm" (no boundary after "alg" inside "algorithm").
+	{KeyPattern: "alg", ValueHints: []string{"rs256", "rs384", "rs512"}, Algorithm: "RSA", Primitive: "signature"},
+	{KeyPattern: "alg", ValueHints: []string{"ps256", "ps384", "ps512"}, Algorithm: "RSASSA-PSS", Primitive: "signature"},
+	{KeyPattern: "alg", ValueHints: []string{"es256", "es384", "es512"}, Algorithm: "ECDSA", Primitive: "signature"},
+	{KeyPattern: "alg", ValueHints: []string{"hs256", "hs384", "hs512"}, Algorithm: "HMAC", Primitive: "mac"},
 }
 
 // keySizePatterns lists KeyPattern values for which the value is parsed as an
@@ -295,6 +310,75 @@ func isAlphaNumeric(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
+// insertCamelCaseBoundaries inserts a '.' separator before each ASCII
+// lower-or-digit-to-upper transition in s (e.g. "sslProtocol" ->
+// "ssl.Protocol", "expectedAlgorithms" -> "expected.Algorithms"). This must
+// run on the ORIGINAL-case string — the case transition that marks a
+// camelCase boundary is destroyed by strings.ToLower, so this has to happen
+// before lowering, not after. Non-ASCII runes are left untouched (never
+// treated as upper/lower for this purpose), which is conservative: it never
+// invents a boundary that could turn a false positive into a false negative
+// for non-Latin keys.
+func insertCamelCaseBoundaries(s string) string {
+	runes := []rune(s)
+	if len(runes) < 2 {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 4)
+	b.WriteRune(runes[0])
+	for i := 1; i < len(runes); i++ {
+		prev, cur := runes[i-1], runes[i]
+		if isASCIIUpper(cur) && (isASCIILower(prev) || isASCIIDigit(prev)) {
+			b.WriteByte('.')
+		}
+		b.WriteRune(cur)
+	}
+	return b.String()
+}
+
+func isASCIIUpper(r rune) bool { return r >= 'A' && r <= 'Z' }
+func isASCIILower(r rune) bool { return r >= 'a' && r <= 'z' }
+func isASCIIDigit(r rune) bool { return r >= '0' && r <= '9' }
+
+// keyMatchesPattern reports whether pattern matches a whole segment of key,
+// where segments are separated by ./[/]/_/- or a camelCase transition. This
+// replaces a bare strings.Contains(lowerKey, pattern) check, which
+// false-positived on any key that merely contained pattern as a substring
+// regardless of word boundaries — e.g. the flattened JSON key
+// "expectedAlgorithms[0]" (from a ground-truth manifest's OWN
+// {"expectedAlgorithms": [...]} schema) matched the "algorithm" vocabulary
+// entry purely because "expectedAlgorithms" contains "algorithm" as a
+// substring (review finding B7). Segment-bounding preserves the intended
+// matches — "encryption_algorithm", "spring.ssl.algorithm", camelCase
+// "sslProtocol" — while rejecting unrelated glued compounds.
+//
+// Multi-token patterns that embed their own separator (e.g. "cipher-suite",
+// "key_size") are handled the same way: containsWordBoundary requires the
+// pattern's own separator characters to appear literally in key too, so
+// these still only match when the full compound substring is present and
+// bounded on both ends.
+//
+// Compound patterns additionally tolerate a single trailing plural "s" (e.g.
+// "cipher-suite" matches the real-world key "cipher-suites"), since strict
+// boundary matching would otherwise regress that common plural form relative
+// to the old bare-substring behavior. This tolerance is deliberately NOT
+// extended to single-word patterns like "algorithm"/"cipher"/"protocol" --
+// doing so would resurrect exactly the bug this function fixes: "algorithm"
+// is a substring of "algorithms", and "expectedAlgorithms" (camelCase-split
+// to segment "algorithms") must NOT match. Gating the plural tolerance on
+// "pattern contains its own separator" cleanly distinguishes the two cases.
+func keyMatchesPattern(key, pattern string) bool {
+	segmented := strings.ToLower(insertCamelCaseBoundaries(key))
+	if containsWordBoundary(segmented, pattern) {
+		return true
+	}
+	if strings.ContainsAny(pattern, "-_.") {
+		return containsWordBoundary(segmented, pattern+"s")
+	}
+	return false
+}
+
 // KeyValue represents a parsed config key-value pair with its source location.
 type KeyValue struct {
 	Key   string
@@ -308,11 +392,10 @@ type KeyValue struct {
 func matchCryptoParams(filePath string, kvPairs []KeyValue) []findings.UnifiedFinding {
 	var result []findings.UnifiedFinding
 	for _, kv := range kvPairs {
-		lowerKey := strings.ToLower(kv.Key)
 		lowerVal := strings.ToLower(kv.Value)
 
 		for _, param := range cryptoParams {
-			if !strings.Contains(lowerKey, param.KeyPattern) {
+			if !keyMatchesPattern(kv.Key, param.KeyPattern) {
 				continue
 			}
 

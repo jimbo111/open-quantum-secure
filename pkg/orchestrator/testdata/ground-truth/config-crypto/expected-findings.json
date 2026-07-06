@@ -1,5 +1,5 @@
 {
-  "description": "Spring Boot config with crypto settings",
+  "description": "Spring Boot config with crypto settings. Note: this directory previously scanned this very manifest as a config file (dir name contains 'crypto') and its own 'expectedAlgorithms' key false-positived against the 'algorithm' vocabulary (review finding B7) -- fixed by segment-bound key matching in pkg/engines/configscanner/vocabulary.go, so this file no longer produces a finding. minFindings/expectedAlgorithms are unchanged: application.yml alone still satisfies both (AES x2, TLS via the TLSv1.2 protocol finding).",
   "minFindings": 1,
   "expectedAlgorithms": ["AES", "TLS"]
 }
