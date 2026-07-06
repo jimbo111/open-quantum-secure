@@ -1,17 +1,14 @@
 package semgrep
 
 import (
-	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -77,15 +74,9 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		opts.TargetPath,
 	}
 
-	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
-	cmd.Stderr = &stderr
-	// Bound ctx-cancel cleanup; see audit F1.
-	cmd.WaitDelay = 2 * time.Second
-
 	// Semgrep exits 1 when findings are present — tolerate non-zero exit.
 	// But propagate context cancellation and detect real failures.
-	runErr := cmd.Run()
+	stderrMsg, runErr := engines.RunSubprocessNoStdout(ctx, e.binaryPath, args...)
 	if runErr != nil && ctx.Err() != nil {
 		return nil, fmt.Errorf("semgrep: %w", ctx.Err())
 	}
@@ -93,14 +84,14 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	data, err := os.ReadFile(tmpPath)
 	if err != nil {
 		if runErr != nil {
-			return nil, fmt.Errorf("semgrep failed (stderr: %s): %w", engines.RedactStderr(stderr.String()), runErr)
+			return nil, fmt.Errorf("semgrep failed (stderr: %s): %w", stderrMsg, runErr)
 		}
 		return nil, fmt.Errorf("semgrep: read sarif output: %w", err)
 	}
 
 	if len(data) == 0 {
-		if msg := engines.RedactStderr(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("semgrep: no output produced, stderr: %s", msg)
+		if stderrMsg != "" {
+			return nil, fmt.Errorf("semgrep: no output produced, stderr: %s", stderrMsg)
 		}
 		return nil, nil
 	}

@@ -1,13 +1,10 @@
 package cbomkit
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -69,20 +66,11 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 
 	args := []string{"scan", "--dir", opts.TargetPath, "--format", "json", "--output", tmpPath}
 
-	var stderrBuf bytes.Buffer
-	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
-	cmd.Stderr = &stderrBuf
-	// Bound ctx-cancel cleanup: grand-children that inherit the stderr pipe
-	// (e.g. double-forked helpers) can keep the pipe open past Kill, causing
-	// Run() to block on the reader goroutine for the full subprocess lifetime.
-	// WaitDelay force-closes the pipe 2s after kill. See audit F1.
-	cmd.WaitDelay = 2 * time.Second
-
 	// cbomkit-theia exits non-zero in practice when some internal scanners
 	// partially fail while others produce valid output. Read the output file
 	// regardless of exit code and let presence-of-data drive the decision —
 	// mirrors cdxgen's pattern.
-	runErr := cmd.Run()
+	stderrMsg, runErr := engines.RunSubprocessNoStdout(ctx, e.binaryPath, args...)
 
 	// Propagate context cancellation before reading stale/empty output.
 	if ctx.Err() != nil {
@@ -92,9 +80,8 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 	data, err := os.ReadFile(tmpPath)
 	if err != nil || len(data) == 0 {
 		if runErr != nil {
-			msg := engines.RedactStderr(stderrBuf.String())
-			if msg != "" {
-				return nil, fmt.Errorf("cbomkit-theia exited with no output: %w: %s", runErr, msg)
+			if stderrMsg != "" {
+				return nil, fmt.Errorf("cbomkit-theia exited with no output: %w: %s", runErr, stderrMsg)
 			}
 			return nil, fmt.Errorf("cbomkit-theia exited with no output: %w", runErr)
 		}

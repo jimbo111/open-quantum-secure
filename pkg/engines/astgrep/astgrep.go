@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -98,13 +96,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		args = append(args, "--rule", rulesFile)
 	}
 
-	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
-	cmd.Stderr = &stderr
-	// Bound ctx-cancel cleanup; see audit F1.
-	cmd.WaitDelay = 2 * time.Second
-
-	out, err := cmd.Output()
+	out, stderrMsg, err := engines.RunSubprocess(ctx, e.binaryPath, args...)
 	if err != nil {
 		// Propagate context cancellation before attempting to parse partial output.
 		if ctx.Err() != nil {
@@ -113,8 +105,8 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		// ast-grep exits non-zero when findings are present (similar to grep).
 		// Only fail if output is empty.
 		if len(out) == 0 {
-			if msg := engines.RedactStderr(stderr.String()); msg != "" {
-				return nil, fmt.Errorf("astgrep failed: %w: %s", err, msg)
+			if stderrMsg != "" {
+				return nil, fmt.Errorf("astgrep failed: %w: %s", err, stderrMsg)
 			}
 			return nil, fmt.Errorf("astgrep failed: %w", err)
 		}

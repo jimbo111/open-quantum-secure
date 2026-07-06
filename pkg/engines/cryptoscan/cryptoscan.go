@@ -1,13 +1,10 @@
 package cryptoscan
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/findings"
@@ -63,18 +60,12 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 
 	args := []string{"scan", opts.TargetPath, "--format", "json"}
 
-	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, e.binaryPath, args...)
-	cmd.Stderr = &stderr
-	// Bound ctx-cancel cleanup; see audit F1.
-	cmd.WaitDelay = 2 * time.Second
-
-	out, err := cmd.Output()
+	out, stderrMsg, err := engines.RunSubprocess(ctx, e.binaryPath, args...)
 	if err != nil {
 		// cryptoscan may exit non-zero with --fail-on; still try to parse output
 		if len(out) == 0 {
-			if msg := engines.RedactStderr(stderr.String()); msg != "" {
-				return nil, fmt.Errorf("cryptoscan failed: %w: %s", err, msg)
+			if stderrMsg != "" {
+				return nil, fmt.Errorf("cryptoscan failed: %w: %s", err, stderrMsg)
 			}
 			return nil, fmt.Errorf("cryptoscan failed: %w", err)
 		}
