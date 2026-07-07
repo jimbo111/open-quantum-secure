@@ -67,16 +67,17 @@ Every vulnerable or deprecated finding gets mapped to a NIST-standardized PQC re
 
 | What you have | What to use instead | Standard |
 |--------------|-------------------|----------|
-| RSA-2048 (signing) | ML-DSA-44 | FIPS 204 |
-| RSA-3072+ (signing) | ML-DSA-65 | FIPS 204 |
-| ECDSA P-256 | ML-DSA-44 | FIPS 204 |
+| RSA-2048/3072 (signing) | ML-DSA-65 | FIPS 204 |
+| RSA-4096+ (signing) | ML-DSA-87 | FIPS 204 |
+| ECDSA P-256/P-384 | ML-DSA-65 | FIPS 204 |
+| ECDSA P-521 | ML-DSA-87 | FIPS 204 |
 | ECDH / X25519 | ML-KEM-768 | FIPS 203 |
 | DH / FFDH | ML-KEM-768 | FIPS 203 |
 | MD5, SHA-1 | SHA-256 | — |
 | DES, 3DES, RC4 | AES-256-GCM | — |
 | AES-128 | AES-256 | — |
 
-The mapping is key-size aware — RSA-4096 gets ML-DSA-87 (Level 5), not the same suggestion as RSA-2048.
+The mapping is key-size aware — RSA-4096+ and ECDSA P-521 step up to ML-DSA-87 (Level 5); everything below that floors at ML-DSA-65 (never ML-DSA-44 — a Level 1 target would under-shoot the classical strength being replaced).
 
 ### Code snippets by language
 
