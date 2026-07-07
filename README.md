@@ -1,5 +1,12 @@
 # Open Quantum Secure (OQS Scanner)
 
+[![CI](https://github.com/jimbo111/open-quantum-secure/actions/workflows/ci.yml/badge.svg)](https://github.com/jimbo111/open-quantum-secure/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jimbo111/open-quantum-secure?sort=semver)](https://github.com/jimbo111/open-quantum-secure/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jimbo111/open-quantum-secure)](https://goreportcard.com/report/github.com/jimbo111/open-quantum-secure)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/jimbo111/open-quantum-secure)](go.mod)
+[![License](https://img.shields.io/github/license/jimbo111/open-quantum-secure)](LICENSE)
+[![CBOM: CycloneDX 1.7](https://img.shields.io/badge/CBOM-CycloneDX%201.7-8A2BE2)](https://cyclonedx.org/capabilities/cbom/)
+
 Scans your codebase AND live TLS/SSH endpoints for cryptographic algorithms that quantum computers will break, and tells you exactly what to replace them with — down to copy-pasteable code snippets in your language.
 
 Produces a Quantum Readiness Score (0-100), generates CycloneDX 1.7 CBOM, checks 7 compliance frameworks (CNSA 2.0, PCI DSS 4.0, NIST IR 8547, BSI, NCSC UK, ASD ISM, ANSSI), actively probes TLS endpoints for PQC support including hybrid KEM group + signature algorithm enumeration, ingests Zeek/Suricata network logs, and detects TLS 1.2 downgrade vulnerabilities.
