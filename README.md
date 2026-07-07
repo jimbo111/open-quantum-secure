@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/jimbo111/open-quantum-secure/actions/workflows/ci.yml/badge.svg)](https://github.com/jimbo111/open-quantum-secure/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/jimbo111/open-quantum-secure?sort=semver)](https://github.com/jimbo111/open-quantum-secure/releases)
+[![Downloads](https://img.shields.io/github/downloads/jimbo111/open-quantum-secure/total)](https://github.com/jimbo111/open-quantum-secure/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/jimbo111/open-quantum-secure)](https://goreportcard.com/report/github.com/jimbo111/open-quantum-secure)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/jimbo111/open-quantum-secure)](go.mod)
 [![License](https://img.shields.io/github/license/jimbo111/open-quantum-secure)](LICENSE)
