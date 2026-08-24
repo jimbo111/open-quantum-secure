@@ -36,20 +36,30 @@ type sarifDriver struct {
 }
 
 type sarifRule struct {
-	ID               string             `json:"id"`
-	Name             string             `json:"name,omitempty"`
-	ShortDescription *sarifMessage      `json:"shortDescription,omitempty"`
-	HelpURI          string             `json:"helpUri,omitempty"`
-	Properties       map[string]any     `json:"properties,omitempty"`
+	ID               string                   `json:"id"`
+	Name             string                   `json:"name,omitempty"`
+	ShortDescription *sarifMessage            `json:"shortDescription,omitempty"`
+	FullDescription  *sarifMessage            `json:"fullDescription,omitempty"`
+	Help             *sarifMultiformatMessage `json:"help,omitempty"`
+	HelpURI          string                   `json:"helpUri,omitempty"`
+	Properties       map[string]any           `json:"properties,omitempty"`
+}
+
+// sarifMultiformatMessage is a SARIF multiformatMessageString (§3.12):
+// plain text plus optional GitHub-rendered markdown.
+type sarifMultiformatMessage struct {
+	Text     string `json:"text"`
+	Markdown string `json:"markdown,omitempty"`
 }
 
 type sarifResult struct {
-	RuleID     string            `json:"ruleId"`
-	Level      string            `json:"level"` // "error", "warning", "note", "none"
-	Message    sarifMessage      `json:"message"`
-	Locations  []sarifLocation   `json:"locations,omitempty"`
-	CodeFlows  []sarifCodeFlow   `json:"codeFlows,omitempty"`
-	Properties map[string]any    `json:"properties,omitempty"`
+	RuleID              string            `json:"ruleId"`
+	Level               string            `json:"level"` // "error", "warning", "note", "none"
+	Message             sarifMessage      `json:"message"`
+	Locations           []sarifLocation   `json:"locations,omitempty"`
+	CodeFlows           []sarifCodeFlow   `json:"codeFlows,omitempty"`
+	PartialFingerprints map[string]string `json:"partialFingerprints,omitempty"`
+	Properties          map[string]any    `json:"properties,omitempty"`
 }
 
 type sarifCodeFlow struct {
@@ -130,6 +140,13 @@ func WriteSARIF(w io.Writer, result ScanResult) error {
 func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[string]string) sarifResult {
 	ruleID := ruleIndex[ruleKeyForFinding(f)]
 	msg := buildMessage(f)
+	// GitHub code scanning renders result.message.text (and rule help) but
+	// NOT the properties bag — append remediation guidance to the message so
+	// alerts show what to do, not just what was found. First line stays the
+	// detection summary; remediation follows on subsequent lines.
+	if rem := remediationText(f); rem != "" {
+		msg += "\n" + rem
+	}
 	level := levelForFinding(f)
 
 	// Make path relative to scan target for SARIF (forward slashes per RFC 3986)
@@ -163,6 +180,12 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 		Message: sarifMessage{Text: msg},
 		Locations: []sarifLocation{
 			{PhysicalLocation: physLoc},
+		},
+		// partialFingerprints keeps GitHub code scanning alerts stable
+		// across scans (line drift, re-ordered results). The versioned key
+		// follows the SARIF convention (name/version).
+		PartialFingerprints: map[string]string{
+			"oqsDedupeKey/v1": f.DedupeKey(),
 		},
 	}
 
@@ -232,6 +255,62 @@ func findingToSARIF(f findings.UnifiedFinding, scanTarget string, ruleIndex map[
 	result.Properties = props
 
 	return result
+}
+
+// remediationText builds the plain-text remediation lines for a finding:
+// the per-algorithm recommendation plus the PQC migration target. Returns
+// "" when the finding carries no remediation content.
+func remediationText(f findings.UnifiedFinding) string {
+	var lines []string
+	if f.Recommendation != "" {
+		lines = append(lines, "Recommendation: "+f.Recommendation)
+	}
+	if f.TargetAlgorithm != "" {
+		line := "Migrate to: " + f.TargetAlgorithm
+		if f.TargetStandard != "" {
+			line += " (" + f.TargetStandard + ")"
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// remediationMarkdown is the markdown twin of remediationText, rendered by
+// GitHub code scanning in the rule help panel.
+func remediationMarkdown(f findings.UnifiedFinding) string {
+	var lines []string
+	if f.Recommendation != "" {
+		lines = append(lines, "**Recommendation:** "+f.Recommendation)
+	}
+	if f.TargetAlgorithm != "" {
+		line := "**Migrate to:** `" + f.TargetAlgorithm + "`"
+		if f.TargetStandard != "" {
+			line += " (" + f.TargetStandard + ")"
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n\n")
+}
+
+// ruleHelpFor populates fullDescription + help for a SARIF rule from the
+// first finding seen for that rule. GitHub code scanning shows rule help in
+// the alert detail view — without it, alerts carry no remediation guidance.
+func ruleHelpFor(rule *sarifRule, f findings.UnifiedFinding, shortDesc string) {
+	rem := remediationText(f)
+	full := shortDesc
+	if f.QuantumRisk != "" && string(f.QuantumRisk) != "unknown" {
+		full += " (quantum risk: " + string(f.QuantumRisk) + ")"
+	}
+	if rem != "" {
+		full += ". " + strings.ReplaceAll(rem, "\n", " ")
+	}
+	rule.FullDescription = &sarifMessage{Text: full}
+	if rem != "" {
+		rule.Help = &sarifMultiformatMessage{
+			Text:     rem,
+			Markdown: remediationMarkdown(f),
+		}
+	}
 }
 
 // buildMessage creates a human-readable description for a finding.
@@ -327,35 +406,41 @@ func buildRules(ff []findings.UnifiedFinding) ([]sarifRule, map[string]string) {
 		seen[key] = true
 
 		var rule sarifRule
+		var shortDesc string
 		if f.Dependency != nil {
+			shortDesc = fmt.Sprintf("Cryptographic library: %s", f.Dependency.Library)
 			rule = sarifRule{
 				ID:               "OQS-DEP-" + sanitizeID(f.Dependency.Library),
 				Name:             f.Dependency.Library,
-				ShortDescription: &sarifMessage{Text: fmt.Sprintf("Cryptographic library: %s", f.Dependency.Library)},
+				ShortDescription: &sarifMessage{Text: shortDesc},
 			}
 		} else if f.Algorithm != nil && f.Algorithm.Name != "" {
 			props := map[string]any{}
 			if f.Algorithm.Primitive != "" {
 				props["primitive"] = f.Algorithm.Primitive
 			}
+			shortDesc = fmt.Sprintf("Cryptographic algorithm: %s", f.Algorithm.Name)
 			rule = sarifRule{
 				ID:               "OQS-ALG-" + sanitizeID(f.Algorithm.Name),
 				Name:             f.Algorithm.Name,
-				ShortDescription: &sarifMessage{Text: fmt.Sprintf("Cryptographic algorithm: %s", f.Algorithm.Name)},
+				ShortDescription: &sarifMessage{Text: shortDesc},
 				Properties:       props,
 			}
 		} else {
 			ruleID := "OQS-UNKNOWN"
-			desc := "Unknown cryptographic usage"
+			shortDesc = "Unknown cryptographic usage"
 			if f.RawIdentifier != "" {
 				ruleID = "OQS-RAW-" + sanitizeID(f.RawIdentifier)
-				desc = fmt.Sprintf("Cryptographic usage: %s", f.RawIdentifier)
+				shortDesc = fmt.Sprintf("Cryptographic usage: %s", f.RawIdentifier)
 			}
 			rule = sarifRule{
 				ID:               ruleID,
-				ShortDescription: &sarifMessage{Text: desc},
+				ShortDescription: &sarifMessage{Text: shortDesc},
 			}
 		}
+		// fullDescription + help from the per-algorithm recommendation
+		// content — GitHub renders these, not the properties bag.
+		ruleHelpFor(&rule, f, shortDesc)
 
 		ruleIndex[key] = rule.ID
 		rules = append(rules, rule)

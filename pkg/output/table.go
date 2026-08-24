@@ -33,7 +33,7 @@ func WriteTable(w io.Writer, result ScanResult) error {
 	fmt.Fprintf(w, "\nOQS Scanner v%s — %s\n", result.Version, result.Target)
 	fmt.Fprintf(w, "Engines: %s\n", strings.Join(result.Engines, ", "))
 	fmt.Fprintf(w, "%s\n", strings.Repeat("─", 80))
-	fmt.Fprintf(w, "%s\n", colorize("90", "Legend: [QV]=Vulnerable [QW]=Weakened [QS]=Safe [QR]=Resistant [DEP]=Deprecated [HNDL:IMM/DEF]=Harvest-Now-Decrypt-Later [PQC]=PQC-negotiated"))
+	fmt.Fprintf(w, "%s\n", colorize("90", "Legend: [QV]=Vulnerable [QW]=Weakened [QS]=Safe [QR]=Resistant [DEP]=Deprecated [HNDL:IMM/DEF]=Harvest-Now-Decrypt-Later [PQC]=PQC-negotiated [EFFORT:S/M/C]=Migration effort (Simple/Moderate/Complex)"))
 	fmt.Fprintln(w)
 
 	// Column widths
@@ -81,6 +81,21 @@ func WriteTable(w io.Writer, result ScanResult) error {
 				parts = append(parts, f.Algorithm.Curve)
 			}
 			details = strings.Join(parts, ", ")
+		}
+
+		// Fallback: engines that could not normalise an algorithm/dependency
+		// still carry the raw matched text — render that instead of a blank
+		// IDENTIFIER cell.
+		if name == "" && f.RawIdentifier != "" {
+			name = truncate(f.RawIdentifier, 40)
+		}
+
+		// Migration target hint (compact, e.g. "→ ML-KEM-768").
+		if f.TargetAlgorithm != "" {
+			if details != "" {
+				details += " "
+			}
+			details += "→ " + f.TargetAlgorithm
 		}
 
 		// Quantum risk badge

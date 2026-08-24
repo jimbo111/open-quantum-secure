@@ -95,6 +95,11 @@ Example with data lifetime adjustment for healthcare:
 			if err != nil {
 				return fmt.Errorf("resolve path: %w", err)
 			}
+			// Fail fast on a missing/inaccessible --path (exit 2) instead of
+			// launching engines against nothing and exiting 0 with a green build.
+			if err := validateScanPath(absPath); err != nil {
+				return err
+			}
 
 			// Load config file — missing file is not an error.
 			// --no-config skips config loading (use in CI to prevent untrusted repos
@@ -274,6 +279,7 @@ Example with data lifetime adjustment for healthcare:
 			for _, e := range selected {
 				fmt.Fprintf(os.Stderr, "  • %s (tier %s, %s)\n", e.Name(), e.Tier(), strings.Join(e.SupportedLanguages(), ", "))
 			}
+			printUnavailableEnginesNote(os.Stderr, orch.Engines())
 
 			// Remote cache pre-scan: download cache if authenticated and enabled.
 			var (

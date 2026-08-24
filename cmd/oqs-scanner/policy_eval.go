@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jimbo111/open-quantum-secure/pkg/compliance"
@@ -13,6 +14,95 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/output"
 	"github.com/jimbo111/open-quantum-secure/pkg/policy"
 )
+
+// violationGroup is one console line of grouped compliance violations:
+// all violations sharing the same (Rule, Algorithm) pair, with example
+// finding locations. Only the human console rendering groups — the
+// machine-readable outputs (JSON/SARIF/CBOM/webhook counts) are untouched.
+type violationGroup struct {
+	Rule      string
+	Algorithm string
+	Message   string   // representative message (identical within a group)
+	Count     int
+	Locations []string // up to maxExampleLocations "file.go:12" examples
+}
+
+// maxExampleLocations caps how many example locations a grouped violation
+// line shows before collapsing into "+N more".
+const maxExampleLocations = 2
+
+// groupViolations collapses per-finding violations into one group per
+// (Rule, Algorithm), preserving first-occurrence order. Example locations
+// are recovered by matching the violation's Algorithm back to the findings
+// that carry that algorithm/library/raw identifier name.
+func groupViolations(violations []compliance.Violation, results []findings.UnifiedFinding) []violationGroup {
+	// Index finding locations by the name a Violation.Algorithm would carry.
+	locIndex := make(map[string][]string)
+	addLoc := func(name string, f findings.UnifiedFinding) {
+		if name == "" || f.Location.File == "" {
+			return
+		}
+		loc := filepath.Base(f.Location.File)
+		if f.Location.Line > 0 {
+			loc = fmt.Sprintf("%s:%d", loc, f.Location.Line)
+		}
+		locIndex[name] = append(locIndex[name], loc)
+	}
+	for _, f := range results {
+		if f.Algorithm != nil {
+			addLoc(f.Algorithm.Name, f)
+		} else if f.Dependency != nil {
+			addLoc(f.Dependency.Library, f)
+		} else {
+			addLoc(f.RawIdentifier, f)
+		}
+	}
+
+	var groups []violationGroup
+	index := make(map[string]int)
+	for _, v := range violations {
+		key := v.Rule + "|" + v.Algorithm
+		if i, ok := index[key]; ok {
+			groups[i].Count++
+			continue
+		}
+		index[key] = len(groups)
+		locs := locIndex[v.Algorithm]
+		if len(locs) > maxExampleLocations {
+			locs = locs[:maxExampleLocations]
+		}
+		groups = append(groups, violationGroup{
+			Rule:      v.Rule,
+			Algorithm: v.Algorithm,
+			Message:   v.Message,
+			Count:     1,
+			Locations: locs,
+		})
+	}
+	return groups
+}
+
+// formatViolationGroup renders one grouped violation as a console line body
+// (without the leading indent/prefix), e.g.
+//
+//	[cnsa2-quantum-vulnerable] RSA is quantum-vulnerable … (19 findings, e.g. main.go:7, crypto.py:12, +17 more)
+func formatViolationGroup(g violationGroup) string {
+	line := fmt.Sprintf("[%s] %s", g.Rule, g.Message)
+	if g.Count <= 1 {
+		if len(g.Locations) > 0 {
+			line += fmt.Sprintf(" (%s)", g.Locations[0])
+		}
+		return line
+	}
+	detail := fmt.Sprintf("%d findings", g.Count)
+	if len(g.Locations) > 0 {
+		detail += ", e.g. " + strings.Join(g.Locations, ", ")
+		if extra := g.Count - len(g.Locations); extra > 0 {
+			detail += fmt.Sprintf(", +%d more", extra)
+		}
+	}
+	return line + " (" + detail + ")"
+}
 
 // validateFailOn validates the --fail-on flag value.
 func validateFailOn(failOn string) error {
@@ -78,8 +168,8 @@ func evaluateCompliance(standards []string, results []findings.UnifiedFinding) e
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "%s Compliance: FAIL (%d violation(s))\n", fw.Name(), len(violations))
-		for _, v := range violations {
-			fmt.Fprintf(os.Stderr, "  [%s] %s\n", v.Rule, v.Message)
+		for _, g := range groupViolations(violations, results) {
+			fmt.Fprintf(os.Stderr, "  %s\n", formatViolationGroup(g))
 		}
 		hasViolations = true
 	}
@@ -193,8 +283,8 @@ func evaluateComplianceAdvisory(standards []string, results []findings.UnifiedFi
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "[ADVISORY] %s Compliance: FAIL (%d violation(s))\n", fw.Name(), len(violations))
-		for _, v := range violations {
-			fmt.Fprintf(os.Stderr, "[ADVISORY]   [%s] %s\n", v.Rule, v.Message)
+		for _, g := range groupViolations(violations, results) {
+			fmt.Fprintf(os.Stderr, "[ADVISORY]   %s\n", formatViolationGroup(g))
 		}
 	}
 }

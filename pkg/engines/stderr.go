@@ -1,9 +1,17 @@
 package engines
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
+
+// maxStderrLines caps how many non-empty stderr lines survive into an error
+// message. Subprocess failures frequently dump their entire --help text to
+// stderr; embedding that wall of text in a WARNING makes scan logs unreadable.
+// The first few lines carry the actual error ("unknown flag …", "Cannot read
+// rule …"); the rest is noise. Applied BEFORE the byte cap.
+const maxStderrLines = 3
 
 // maxStderrInError caps how much subprocess stderr ends up in a returned
 // error message. Engines reap stderr to give operators context when a
@@ -34,6 +42,9 @@ var bearerPattern = regexp.MustCompile(`(?i)\bbearer\s+\S+`)
 // inclusion in an error message:
 //   - credential-looking key=value / key:value tokens are masked with
 //     "<name>=<redacted>"
+//   - output is trimmed to the first maxStderrLines non-empty lines with a
+//     " …[+N more lines]" marker (child --help dumps otherwise flood scan
+//     logs) BEFORE the byte cap
 //   - total output is capped to maxStderrInError bytes and suffixed
 //     with " …[truncated]" when trimmed
 //   - trailing whitespace is stripped
@@ -45,6 +56,11 @@ func RedactStderr(stderr string) string {
 	if s == "" {
 		return ""
 	}
+	// Redaction MUST run in this order: bearerPattern first, then
+	// credentialPatterns (see the pattern comments above — reversing leaks
+	// Bearer tokens). Line truncation runs after redaction so the marker is
+	// never mistaken for content, and before the byte cap so the cap applies
+	// to the already-shortened text.
 	s = bearerPattern.ReplaceAllString(s, "<redacted>")
 	s = credentialPatterns.ReplaceAllStringFunc(s, func(match string) string {
 		// Find the separator (= or :) and replace the value portion only.
@@ -54,6 +70,7 @@ func RedactStderr(stderr string) string {
 		}
 		return match[:sepIdx+1] + "<redacted>"
 	})
+	s = truncateLines(s, maxStderrLines)
 	if len(s) > maxStderrInError {
 		// Drop split-rune bytes at the truncation boundary so the result is
 		// always valid UTF-8 — multi-byte runes straddling byte 512 would
@@ -61,4 +78,34 @@ func RedactStderr(stderr string) string {
 		s = strings.ToValidUTF8(s[:maxStderrInError], "") + " …[truncated]"
 	}
 	return s
+}
+
+// truncateLines keeps only the first max non-empty lines of s. When lines are
+// dropped, a " …[+N more lines]" marker is appended to the LAST kept line
+// (not emitted as its own line) so a second RedactStderr pass over the result
+// still counts ≤ max non-empty lines — keeping the function idempotent.
+// Inputs with ≤ max non-empty lines are returned unchanged.
+func truncateLines(s string, max int) string {
+	lines := strings.Split(s, "\n")
+	nonEmpty := 0
+	for _, ln := range lines {
+		if strings.TrimSpace(ln) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty <= max {
+		return s
+	}
+	kept := make([]string, 0, max)
+	for _, ln := range lines {
+		if strings.TrimSpace(ln) == "" {
+			continue
+		}
+		kept = append(kept, strings.TrimRight(ln, " \t"))
+		if len(kept) == max {
+			break
+		}
+	}
+	kept[len(kept)-1] += fmt.Sprintf(" …[+%d more lines]", nonEmpty-max)
+	return strings.Join(kept, "\n")
 }

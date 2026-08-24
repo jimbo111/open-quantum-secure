@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -10,6 +11,77 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/ctlookup"
 )
+
+// validateScanPath rejects a --path value that does not exist or cannot be
+// accessed BEFORE any engine is launched. Without this check a typo'd path
+// in CI runs every engine against nothing, prints a wall of child-engine
+// stderr, reports "No findings detected", and exits 0 — a green build on a
+// path that was never scanned. The returned error surfaces as exit code 2
+// (scan could not complete).
+func validateScanPath(absPath string) error {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("scan path does not exist: %s", absPath)
+		}
+		return fmt.Errorf("scan path is not accessible: %s: %v", absPath, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("scan path is not a directory: %s", absPath)
+	}
+	return nil
+}
+
+// scaEngineNames are the Tier 3 SCA / supply-chain engines that produce
+// dependency + SBOM inventory findings. astEngineNames are the source-AST
+// engines. Used by printUnavailableEnginesNote to explain coverage gaps.
+var (
+	scaEngineNames = []string{"cryptodeps", "cdxgen", "syft", "cbomkit-theia"}
+	astEngineNames = []string{"astgrep", "semgrep"}
+)
+
+// printUnavailableEnginesNote prints a single stderr note when some
+// registered engines are not installed, so a scan that silently runs with a
+// reduced engine set (e.g. zero SBOM findings on a repo full of go.mod /
+// package.json files) tells the user WHY and how to fix it.
+func printUnavailableEnginesNote(w io.Writer, all []engines.Engine) {
+	available := make(map[string]bool, len(all))
+	var missing []string
+	for _, e := range all {
+		if e.Available() {
+			available[e.Name()] = true
+		} else {
+			missing = append(missing, e.Name())
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	anyAvailable := func(names []string) bool {
+		for _, n := range names {
+			if available[n] {
+				return true
+			}
+		}
+		return false
+	}
+
+	var gaps []string
+	if !anyAvailable(astEngineNames) {
+		gaps = append(gaps, "source AST analysis")
+	}
+	if !anyAvailable(scaEngineNames) {
+		gaps = append(gaps, "dependency/SBOM inventory")
+	}
+
+	note := fmt.Sprintf("Note: %d engine(s) unavailable (%s) — run 'oqs-scanner engines doctor'.",
+		len(missing), strings.Join(missing, ", "))
+	if len(gaps) > 0 {
+		note += " Missing coverage: " + strings.Join(gaps, ", ")
+	}
+	fmt.Fprintln(w, note)
+}
 
 // validateLifetimeAndProbeFlags runs the shared validation prologue that
 // scanCmd and diffCmd both perform on data-lifetime + TLS probe flags.
