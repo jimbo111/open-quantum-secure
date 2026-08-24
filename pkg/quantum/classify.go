@@ -720,6 +720,20 @@ var curveCatalog = map[string]curveInfo{
 	// Montgomery curves are key-exchange only; libsodium's symbol table
 	// emits the literal "Curve25519".
 	"CURVE25519": {256, "X25519", true}, "CURVE448": {448, "X448", true},
+	// Compact spellings produced by some engines and the registry canonicalizer.
+	"P256": {256, "ECDH", false}, "P384": {384, "ECDH", false}, "P521": {521, "ECDH", false},
+}
+
+// CurveBits returns the bit size of a known elliptic-curve identifier, for
+// callers that carry the curve separately from the algorithm name (e.g. the
+// orchestrator backfilling Algorithm.KeySize from Algorithm.Curve so tiered
+// target selection works).
+func CurveBits(curve string) (int, bool) {
+	ci, ok := curveCatalog[strings.ToUpper(strings.TrimSpace(curve))]
+	if !ok {
+		return 0, false
+	}
+	return ci.Bits, true
 }
 
 // resolveCurveName maps a bare curve identifier to its vulnerable family,

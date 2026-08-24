@@ -983,7 +983,15 @@ func classifyFindings(ff []findings.UnifiedFinding) {
 	for i := range ff {
 		f := &ff[i]
 		if f.Algorithm != nil {
-			c := quantum.ClassifyAlgorithm(f.Algorithm.Name, f.Algorithm.Primitive, f.Algorithm.KeySize)
+			// Backfill key size from the curve when the engine reported none,
+			// so size-tiered targets apply (ECDSA P-521 → ML-DSA-87, not -65).
+			keySize := f.Algorithm.KeySize
+			if keySize == 0 && f.Algorithm.Curve != "" {
+				if bits, ok := quantum.CurveBits(f.Algorithm.Curve); ok {
+					keySize = bits
+				}
+			}
+			c := quantum.ClassifyAlgorithm(f.Algorithm.Name, f.Algorithm.Primitive, keySize)
 			f.QuantumRisk = findings.QuantumRisk(c.Risk)
 			f.Severity = findings.Severity(c.Severity)
 			f.Recommendation = c.Recommendation
