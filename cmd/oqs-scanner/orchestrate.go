@@ -20,6 +20,7 @@ import (
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cryptodeps"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/cryptoscan"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/ctlookup"
+	"github.com/jimbo111/open-quantum-secure/pkg/engines/keyfile"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/semgrep"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/sshprobe"
 	"github.com/jimbo111/open-quantum-secure/pkg/engines/suricatalog"
@@ -60,6 +61,9 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 	// Tier 1: Config file scanner (pure Go, always available)
 	cfgs := configscanner.New()
 
+	// Tier 1: Key/certificate file inventory engine (pure Go, always available)
+	kf := keyfile.New()
+
 	// Tier 5: TLS probe engine (pure Go, always available)
 	tlsp := tlsprobe.New()
 
@@ -78,7 +82,7 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 	// Tier 5: Suricata eve.json log ingestion engine (pure Go, always available; Sprint 6).
 	suri := suricatalog.New()
 
-	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, tlsp, ct, sshp, zeek, suri)
+	return orchestrator.New(cs, cscan, ag, sg, cdeps, cdx, sy, cbk, bs, cfgs, kf, tlsp, ct, sshp, zeek, suri)
 }
 
 // engineVersionsHash computes a stable SHA-256 hex digest over the
