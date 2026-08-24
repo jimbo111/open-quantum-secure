@@ -117,6 +117,15 @@ var registry = []EngineInfo{
 		InstallHint: "Built-in (no installation required)",
 	},
 	{
+		Name:        "keyfile",
+		Description: "Key/certificate file inventory (PEM, DER, CSR, SSH keys, authorized_keys, known_hosts)",
+		Tier:        1,
+		Languages:   []string{"(artifacts)"},
+		BinaryName:  "", // embedded — no external binary needed
+		BuildTool:   "embedded",
+		InstallHint: "Built-in (no installation required)",
+	},
+	{
 		Name:        "config-scanner",
 		Description: "Config file scanning for cryptographic parameters (YAML, JSON, .properties, .env, TOML, XML, INI, HCL)",
 		Tier:        1,

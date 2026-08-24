@@ -21,6 +21,7 @@ func TestRegistry(t *testing.T) {
 		"cbomkit-theia":  "cbomkit-theia",
 		"binary-scanner": "", // embedded engine — no external binary
 		"config-scanner": "", // embedded engine — no external binary
+		"keyfile":        "", // embedded engine — no external binary
 		"tls-probe":      "", // Tier 5 network engine — embedded
 		"ct-lookup":      "", // Tier 5 network engine — embedded
 		"ssh-probe":      "", // Tier 5 network engine — embedded
@@ -49,7 +50,7 @@ func TestRegistry(t *testing.T) {
 
 // TestRegistry_Tiers verifies the tier assignments are correct.
 func TestRegistry_Tiers(t *testing.T) {
-	tier1 := map[string]bool{"cipherscope": true, "cryptoscan": true, "astgrep": true, "config-scanner": true}
+	tier1 := map[string]bool{"cipherscope": true, "cryptoscan": true, "astgrep": true, "config-scanner": true, "keyfile": true}
 	tier2 := map[string]bool{"semgrep": true}
 	tier3 := map[string]bool{"cryptodeps": true, "cdxgen": true, "syft": true, "cbomkit-theia": true}
 	tier4 := map[string]bool{"binary-scanner": true}
