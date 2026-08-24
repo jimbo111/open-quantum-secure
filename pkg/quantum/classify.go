@@ -1,6 +1,7 @@
 package quantum
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -172,6 +173,18 @@ var quantumVulnerableFamilies = map[string]bool{
 	"FFDH": true, "DH": true, "Diffie-Hellman": true,
 	"ElGamal": true, "ECIES": true, "MQV": true, "ECMQV": true,
 	"KCDSA": true, "EC-KCDSA": true,
+	// Generic elliptic-curve identifier. cryptoscan emits the literal "ECC"
+	// for crypto.createECDH / crypto/ecdsa imports / ssl_ecdh_curve; without
+	// this entry those findings fell through to RiskUnknown/P4 — a silent
+	// HNDL false negative on real key-exchange code. Bare "EC" is deliberately
+	// NOT added: the longest-prefix scan would swallow "ECB" (cipher mode).
+	"ECC": true,
+	// SRP (RFC 5054) is a Diffie-Hellman-based PAKE — Shor-breakable.
+	"SRP": true,
+	// HPKE (RFC 9180) base suites key-wrap with DHKEM(X25519/P-256/P-384),
+	// all Shor-breakable. PQ/hybrid HPKE KEMs (X-Wing, ML-KEM) are separate
+	// names and classify via pqcSafeFamilies.
+	"HPKE": true,
 	// Chinese national standard (GM/T 0003-2012). ECC-based signature/key
 	// exchange, Shor-breakable exactly like ECDSA/ECDH. Its PQC hybrid pairing
 	// (curveSM2MLKEM768) is modeled separately in pqcSafeFamilies and MUST
@@ -272,6 +285,17 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 	// tokenised names. Without this, " RSA " fell through to RiskUnknown.
 	name = strings.TrimSpace(name)
 	upperName := strings.ToUpper(name)
+
+	// Bare curve identifiers ("secp256r1", "P-384", "Curve25519") resolve to
+	// their EC family with the curve's bit size backfilled, so tiered target
+	// selection (ML-KEM-1024 / ML-DSA-87 for >=384/521-bit curves) works even
+	// when the engine reported no key size.
+	if family, bits, ok := resolveCurveName(upperName, primitive, keySize); ok {
+		name = family
+		keySize = bits
+		upperName = strings.ToUpper(name)
+	}
+
 	baseName := extractBaseName(name)
 
 	// 1. Check deprecated first (classically broken)
@@ -417,8 +441,41 @@ func ClassifyAlgorithm(name, primitive string, keySize int) Classification {
 }
 
 // classifyVulnerable returns classification for known quantum-vulnerable algorithms.
+// kexOnlyFamilies / signatureOnlyFamilies let classifyVulnerable route
+// findings whose primitive tag is ambiguous ("asymmetric", empty, engine
+// noise) by what the algorithm can actually do. An algorithm that only ever
+// performs key establishment is an HNDL-immediate finding regardless of how
+// the engine tagged it; a signature-only algorithm can never be one.
+var kexOnlyFamilies = map[string]bool{
+	"ECDH": true, "ECDHE": true, "X25519": true, "X448": true,
+	"DH": true, "FFDH": true, "Diffie-Hellman": true,
+	"ElGamal": true, "ECIES": true, "MQV": true, "ECMQV": true,
+	"RSAES-PKCS1": true, "RSAES-OAEP": true, "SRP": true, "HPKE": true,
+}
+
+var signatureOnlyFamilies = map[string]bool{
+	"DSA": true, "ECDSA": true, "EdDSA": true, "Ed25519": true, "Ed448": true,
+	"KCDSA": true, "EC-KCDSA": true, "RSASSA-PKCS1": true, "RSASSA-PSS": true,
+	"GOST R 34.10": true, "GOST3410": true,
+}
+
 func classifyVulnerable(baseName, primitive string, keySize int) Classification {
 	p := normalizePrimitive(primitive)
+	// The "asymmetric" tag (configscanner/astgrep/gobinary) positively marks
+	// public-key crypto without saying signature vs key establishment, so it
+	// previously took the default branch even for algorithms whose usage is
+	// unambiguous from the name — ECDH findings lost their Critical severity
+	// and RSA-encryption configs got a signature migration target. Route by
+	// name category. Empty/other primitives keep the default branch and its
+	// richer per-name recommendation text.
+	if p == "asymmetric" {
+		switch {
+		case kexOnlyFamilies[baseName]:
+			p = "key-agree"
+		case signatureOnlyFamilies[baseName]:
+			p = "signature"
+		}
+	}
 	t := LookupTargetForKeySize(baseName, keySize)
 	// Override target when algorithm is used for encryption/KEM — LookupTarget
 	// defaults RSA to signing, but RSA encryption should target ML-KEM.
@@ -446,9 +503,17 @@ func classifyVulnerable(baseName, primitive string, keySize int) Classification 
 		}
 	default:
 		// Unknown primitive for vulnerable algorithm — assume immediate (conservative).
+		// When the engine positively tagged the finding as asymmetric crypto
+		// (just without saying signature vs key establishment — RSA, ECC,
+		// SM2), the worst case is key establishment: treat it Critical like
+		// the key-agree branch instead of demoting to High.
+		sev := SeverityHigh
+		if p == "asymmetric" {
+			sev = SeverityCritical
+		}
 		return Classification{
 			Risk:            RiskVulnerable,
-			Severity:        SeverityHigh,
+			Severity:        sev,
 			HNDLRisk:        HNDLImmediate,
 			Recommendation:  vulnerableRecommendation(baseName),
 			TargetAlgorithm: t.Algorithm,
@@ -564,9 +629,11 @@ func classifySymmetric(baseName, upperName string, keySize int, isHash bool) Cla
 		}
 		if effectiveKeySize < 256 {
 			return Classification{
-				Risk:            RiskWeakened,
-				Severity:        SeverityLow,
-				Recommendation:  "128-bit symmetric is weakened by Grover's algorithm (~64-bit effective). Consider 256-bit.",
+				Risk:     RiskWeakened,
+				Severity: SeverityLow,
+				Recommendation: fmt.Sprintf(
+					"%d-bit symmetric keys are weakened by Grover's algorithm (~%d-bit effective). Upgrade to a 256-bit key.",
+					effectiveKeySize, effectiveKeySize/2),
 				TargetAlgorithm: "AES-256",
 			}
 		}
@@ -604,6 +671,65 @@ var jwaAlgNames = map[string]string{
 	"A128CBC-HS256": "AES", "A192CBC-HS384": "AES", "A256CBC-HS512": "AES",
 	"A128KW": "AES", "A192KW": "AES", "A256KW": "AES",
 	"A128GCMKW": "AES", "A192GCMKW": "AES", "A256GCMKW": "AES",
+	// JWS "alg" (RFC 7518 §3.1) signature tokens. Engines that surface the
+	// raw token (jsonwebtoken/PyJWT/jjwt call sites, JWKS documents) rather
+	// than a config "alg:" key previously classified these RiskUnknown.
+	"RS256": "RSASSA-PKCS1", "RS384": "RSASSA-PKCS1", "RS512": "RSASSA-PKCS1",
+	"PS256": "RSASSA-PSS", "PS384": "RSASSA-PSS", "PS512": "RSASSA-PSS",
+	"ES256": "ECDSA", "ES384": "ECDSA", "ES512": "ECDSA", "ES256K": "ECDSA",
+	// HMAC tokens follow the inner hash (same rule as the HMAC-* recursion).
+	"HS256": "SHA-256", "HS384": "SHA-384", "HS512": "SHA-512",
+	// JWE key-agreement tokens — ECDH-ES with or without AES key wrap.
+	"ECDH-ES": "ECDH", "ECDH-ES+A128KW": "ECDH",
+	"ECDH-ES+A192KW": "ECDH", "ECDH-ES+A256KW": "ECDH",
+}
+
+// curveInfo describes a bare elliptic-curve identifier: the family it
+// resolves to when the primitive disambiguates usage, and the curve's bit
+// size for key-size-tiered target selection.
+type curveInfo struct {
+	Bits int
+	// KexFamily is used for key-agreement/unknown usage; signature usage
+	// resolves to ECDSA (except Montgomery curves, which are kex-only).
+	KexFamily string
+	KexOnly   bool
+}
+
+// curveCatalog maps bare curve identifiers (as emitted by engines and found
+// in configs: "secp256r1", "prime256v1", "P-256", "Curve25519", ...) to the
+// vulnerable EC family plus the curve's bit size. Without this, a finding
+// whose Algorithm.Name is just the curve fell through to RiskUnknown.
+// Keys are uppercase.
+var curveCatalog = map[string]curveInfo{
+	"SECP256R1": {256, "ECDH", false}, "PRIME256V1": {256, "ECDH", false},
+	"NISTP256": {256, "ECDH", false}, "P-256": {256, "ECDH", false},
+	"SECP384R1": {384, "ECDH", false}, "NISTP384": {384, "ECDH", false},
+	"P-384": {384, "ECDH", false},
+	"SECP521R1": {521, "ECDH", false}, "NISTP521": {521, "ECDH", false},
+	"P-521": {521, "ECDH", false},
+	"SECP256K1":       {256, "ECDH", false},
+	"BRAINPOOLP256R1": {256, "ECDH", false}, "BRAINPOOLP320R1": {320, "ECDH", false},
+	"BRAINPOOLP384R1": {384, "ECDH", false}, "BRAINPOOLP512R1": {512, "ECDH", false},
+	// Montgomery curves are key-exchange only; libsodium's symbol table
+	// emits the literal "Curve25519".
+	"CURVE25519": {256, "X25519", true}, "CURVE448": {448, "X448", true},
+}
+
+// resolveCurveName maps a bare curve identifier to its vulnerable family,
+// disambiguated by primitive, backfilling keySize from the curve when the
+// caller had none. Returns ok=false when the name is not a known curve.
+func resolveCurveName(upperName, primitive string, keySize int) (family string, bits int, ok bool) {
+	ci, ok := curveCatalog[upperName]
+	if !ok {
+		return "", keySize, false
+	}
+	if keySize == 0 {
+		keySize = ci.Bits
+	}
+	if !ci.KexOnly && normalizePrimitive(primitive) == "signature" {
+		return "ECDSA", keySize, true
+	}
+	return ci.KexFamily, keySize, true
 }
 
 // protocolVersionNames canonicalizes TLS/SSL protocol-version spellings.
@@ -953,6 +1079,12 @@ func vulnerableRecommendation(name string) string {
 		return "Ed448 (EdDSA) is quantum-vulnerable. Migrate to ML-DSA-87 (FIPS 204). Transition: use Ed448+ML-DSA-87 composite signature (IETF draft) for backward compatibility."
 	case "DSA":
 		return "DSA is quantum-vulnerable. Migrate to ML-DSA-65 (FIPS 204). DSA has no hybrid path — replace directly. See NIST PQC standards (FIPS 203/204/205)."
+	case "ECC":
+		return "Elliptic-curve cryptography is quantum-vulnerable (Shor's algorithm). For key exchange (HNDL risk: IMMEDIATE), migrate to ML-KEM-768 (FIPS 203) via an X25519+ML-KEM-768 hybrid. For signatures, migrate to ML-DSA-65 (FIPS 204). CNSA 2.0 deadline: 2030."
+	case "SRP":
+		return "SRP is Diffie-Hellman-based and quantum-vulnerable (Shor's algorithm). Migrate password authentication to a PQC-safe mechanism (e.g. OPAQUE over an ML-KEM-hybrid channel, or TLS 1.3 with X25519MLKEM768)."
+	case "HPKE":
+		return "HNDL risk: IMMEDIATE. HPKE base suites (RFC 9180) use DHKEM(X25519/P-256/P-384), which is quantum-vulnerable. Migrate to a PQ or hybrid HPKE KEM (X-Wing or ML-KEM-768)."
 	case "SM2":
 		return "SM2 is quantum-vulnerable (ECC-based, Shor's algorithm). For key exchange, migrate to the curveSM2MLKEM768 hybrid (Chinese national standard pairing). For signatures, migrate to ML-DSA-65 (FIPS 204)."
 	case "GOST R 34.10", "GOST3410":

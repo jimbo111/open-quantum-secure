@@ -38,6 +38,12 @@ var migrationTargets = map[string]MigrationTarget{
 	"ECIES":          {Algorithm: "ML-KEM-768", Standard: "FIPS 203"},
 	"MQV":            {Algorithm: "ML-KEM-768", Standard: "FIPS 203"},
 	"ECMQV":          {Algorithm: "ML-KEM-768", Standard: "FIPS 203"},
+	// Generic EC usage: key-establishment is the HNDL-urgent path, so the
+	// default target is the KEM; signature-tagged findings route to ECDSA
+	// upstream (resolveCurveName / classifyVulnerable) and never land here.
+	"ECC":  {Algorithm: "ML-KEM-768", Standard: "FIPS 203"},
+	"SRP":  {Algorithm: "ML-KEM-768", Standard: "FIPS 203"},
+	"HPKE": {Algorithm: "ML-KEM-768", Standard: "FIPS 203"},
 
 	// Deprecated → direct replacements (not PQC, but modern)
 	"MD5":        {Algorithm: "SHA-256", Standard: ""},
@@ -125,7 +131,7 @@ func LookupTargetForKeySize(baseName string, keySize int) MigrationTarget {
 			return MigrationTarget{Algorithm: "ML-DSA-87", Standard: "FIPS 204"}
 		}
 		return MigrationTarget{Algorithm: "ML-DSA-65", Standard: "FIPS 204"}
-	case "ECDH", "ECDHE":
+	case "ECDH", "ECDHE", "ECC":
 		if keySize >= 384 {
 			return MigrationTarget{Algorithm: "ML-KEM-1024", Standard: "FIPS 203"}
 		}
