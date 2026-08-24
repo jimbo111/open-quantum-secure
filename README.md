@@ -19,8 +19,11 @@ No backend. Fully offline (except optional Certificate Transparency lookups).
 ## Quick start
 
 ```bash
-# Download pre-built binary
-curl -sSL https://raw.githubusercontent.com/jimbo111/open-quantum-secure/main/install.sh | sh
+# Download pre-built binary (bash required — the script is not POSIX-sh compatible)
+curl -sSL https://raw.githubusercontent.com/jimbo111/open-quantum-secure/main/install.sh | bash
+
+# Or install with Go
+go install github.com/jimbo111/open-quantum-secure/cmd/oqs-scanner@latest
 
 # Or build from source
 git clone https://github.com/jimbo111/open-quantum-secure.git
@@ -167,15 +170,16 @@ The `tls-probe` engine connects to each target, inspects the TLS handshake, and 
 
 **Size-based passive signals.** The probe also emits `handshakeVolumeClass` (`classical` / `hybrid-kem` / `full-pqc` / `unknown` based on handshake byte volume — thresholds per Mallick et al., arXiv:2503.17830) and `handshakeBytes` (total). These are deterministic signals that corroborate the codepoint classification and surface in JSON, SARIF (`result.properties`), and CBOM (`oqs:*` component properties).
 
-**ECH-enabled hosts.** When the server advertises Encrypted Client Hello (ECH) via a DNS HTTPS RR, findings are annotated `partialInventory=true` with `partialInventoryReason="ECH_ENABLED"` — some handshake details are encrypted and the active probe's inventory is necessarily incomplete. A future Certificate Transparency lookup engine (Sprint 3) will recover the cert algorithm for these hosts.
+**ECH-enabled hosts.** ECH detection is **opt-in** via `--detect-ech` (off by default because the DNS HTTPS RR query leaks each scanned hostname to the resolver). When enabled and the server advertises Encrypted Client Hello (ECH) via a DNS HTTPS RR, findings are annotated `partialInventory=true` with `partialInventoryReason="ECH_ENABLED"` — some handshake details are encrypted and the active probe's inventory is necessarily incomplete. The Certificate Transparency lookup engine can recover the cert algorithm for these hosts (see `--ct-lookup-from-ech` below).
 
-**Security:** DNS pinning prevents rebinding attacks. RFC 1918/loopback IPs are blocked with `--tls-strict`. Under `--tls-strict`, the ECH DNS path also rejects a private/loopback system resolver in favour of public fallbacks (1.1.1.1, 8.8.8.8). TLS targets cannot be set via project config (`.oqs-scanner.yaml`) to prevent SSRF in CI.
+**Security:** DNS pinning prevents rebinding attacks. RFC 1918/loopback IPs are blocked with `--tls-strict` (default: on). Under `--tls-strict`, when the system resolver is itself a private/loopback address, the ECH DNS query is skipped entirely — there is no fallback to public resolvers, which would leak scanned hostnames to a third party. Point the system resolver at a non-private upstream you control if you need ECH detection under strict mode. TLS targets cannot be set via project config (`.oqs-scanner.yaml`) to prevent SSRF in CI.
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--tls-targets` | (none) | Comma-separated `host:port` endpoints |
 | `--tls-insecure` | false | Skip certificate verification |
-| `--tls-strict` | false (CLI) / true (Action) | Block private IP connections |
+| `--tls-strict` | true | Block private IP connections (`--tls-strict=false` to allow) |
+| `--detect-ech` | false | Opt-in ECH detection via DNS HTTPS RR query |
 
 ### Raw ClientHello deep-probe
 
@@ -226,8 +230,8 @@ RFC 4253 §4.2 preamble-compliant (handles Google Cloud IAP / Bastillion / fail2
 # Explicit hostnames
 oqs-scanner scan --path . --ct-lookup-targets api.example.com,admin.example.com
 
-# Auto-chain from TLS-probe ECH findings
-oqs-scanner scan --path . --tls-targets api.example.com:443 --ct-lookup-from-ech
+# Auto-chain from TLS-probe ECH findings (requires --detect-ech to produce them)
+oqs-scanner scan --path . --tls-targets api.example.com:443 --detect-ech --ct-lookup-from-ech
 ```
 
 Queries crt.sh for the hostname and extracts certificate signing algorithms from the returned CT log entries. When an active TLS probe can't see the real cert (ECH enabled), this engine fills in the gap. Hostnames extracted from ECH findings propagate automatically when `--ct-lookup-from-ech` is set. S2→S3 auto-chain survives combined ECH + enumeration truncation (PartialInventoryReason is composed, not overwritten).
@@ -342,18 +346,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: jimbo111/open-quantum-secure@v2.0.0
+      - name: OQS Scanner
+        id: scan
+        uses: jimbo111/open-quantum-secure@v2   # floating major tag; pin @v2.1.0 for reproducibility
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path: '.'
           format: 'sarif'
-          upload-sarif: 'true'
+          upload-sarif: 'true'     # generates the SARIF file — upload happens in the next step
           pr-comment: 'true'       # posts results as a PR comment
           compliance: 'cnsa-2.0'
           ci-mode: 'advisory'      # won't block merges — use 'blocking' when ready
           tls-targets: 'api.staging.example.com:443'  # optional: probe TLS endpoints
           tls-strict: 'true'       # block private IP probing (CI default)
+
+      # The action generates SARIF but cannot upload it itself — this step is required
+      # for findings to reach the Security tab (Code Scanning).
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always() && steps.scan.outputs.sarif-path != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif-path }}
+          category: oqs-quantum-crypto
 ```
 
 The Docker-based action ships with ast-grep and semgrep pre-installed, so CI scans cover more languages than a bare local install.
@@ -378,6 +393,16 @@ Results feed into GitLab's Security Dashboard. Set `OQS_MR_NOTE: "true"` to post
 - **blocking** — exit 1 on policy violations (default, for enforcing standards)
 - **advisory** — warnings only, always exit 0 (for onboarding without breaking builds)
 - **silent** — no policy output, always exit 0
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Scan completed, no policy violations |
+| 1 | Scan completed, but policy/compliance violations were found (`--fail-on` / blocking compliance errors) |
+| 2 | Scan itself failed (bad path, config error, all engines failed) — results are absent or meaningless |
+
+Gate merges on exit 1; treat exit 2 as an infrastructure failure. `--ci-mode advisory` and `silent` keep violations at exit 0.
 
 ---
 
@@ -414,14 +439,18 @@ oqs-scanner scan --path . --format cbom --sign-cbom --output signed-cbom.json
 |------|-------------|
 | `--compliance cnsa-2.0,bsi-tr-02102` | Multi-framework compliance check (`all` shortcut supported) |
 | `--ci-mode advisory` | Non-blocking CI |
+| `--no-config` | Skip loading `.oqs-scanner.yaml` from the scanned repo (use in CI to prevent policy bypass) |
+| `--offline` / `--no-network` | Disable all outbound network calls (TLS/SSH probe + CT lookup) |
 | `--sign-cbom` | Ed25519 CBOM signing |
 | `--data-lifetime-years 30` | Amplify HNDL urgency for long-lived data |
+| `--sector medical` | Industry preset for HNDL shelf-life (`medical`/`finance`/`state`/`infra`/`code`/`generic`; overridden by `--data-lifetime-years`) |
 | `--webhook-url https://...` | POST results to Jira, ServiceNow, etc. |
 | `--fail-on critical` | Exit 1 if findings at or above this severity |
 | `--scan-type binary` | Scan binary artifacts only |
 | `--incremental` | Skip unchanged files using local cache |
 | `--exclude "vendor/**"` | Skip directories by glob |
 | `--tls-targets host:443` | Probe TLS endpoints for PQC support |
+| `--detect-ech` | Opt-in ECH detection (DNS HTTPS RR query per target; skipped under `--tls-strict` with a private resolver) |
 | `--deep-probe` | Raw ClientHello probe of PQC group codepoints |
 | `--enumerate-groups` | Probe all 13 IANA TLS groups individually |
 | `--enumerate-sigalgs` | Probe 17 TLS signature schemes (ML-DSA, RSA, ECDSA, EdDSA) |
@@ -444,6 +473,15 @@ oqs-scanner trends --project my-org/my-repo       # QRS trend analysis
 oqs-scanner history --project my-org/my-repo      # Scan history
 oqs-scanner engines list                          # All engines and status
 oqs-scanner engines doctor                        # Engine health check
+oqs-scanner engines install --all                 # Download/install optional engine binaries
+oqs-scanner engines update --all                  # Update installed engines to manifest versions
+oqs-scanner config show                           # Print resolved config (flags > project > global)
+oqs-scanner config init                           # Scaffold a .oqs-scanner.yaml in the current dir
+oqs-scanner login                                 # Authenticate with the OQS platform (--no-browser for device code)
+oqs-scanner logout                                # Revoke token and delete stored credentials
+oqs-scanner whoami                                # Show the authenticated identity
+oqs-scanner apikey create --name ci-bot           # Manage platform API keys (create/list/revoke)
+oqs-scanner upload --cbom cbom.json               # Upload a CBOM to the platform dashboard
 oqs-scanner version                               # Version info
 ```
 

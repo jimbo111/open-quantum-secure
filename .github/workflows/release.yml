@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  packages: write  # push container image to ghcr.io
 
 jobs:
   build:
@@ -82,3 +83,42 @@ jobs:
           files: |
             dist/oqs-scanner-*
             dist/checksums.txt
+
+      # Keep a floating major tag (v2 -> latest v2.x.y) so workflows can pin
+      # `uses: jimbo111/open-quantum-secure@v2` and still receive fixes.
+      - name: Update floating major tag
+        run: |
+          MAJOR="${GITHUB_REF_NAME%%.*}"   # v2.1.0 -> v2
+          if [ "$MAJOR" = "$GITHUB_REF_NAME" ]; then
+            echo "Tag ${GITHUB_REF_NAME} has no minor/patch component — skipping floating tag"
+            exit 0
+          fi
+          git tag -f "$MAJOR"
+          git push origin "refs/tags/$MAJOR" --force
+
+  docker:
+    # Publishes the image consumed by the GitLab CI template
+    # (.gitlab-ci-template.yml) and available for direct docker runs.
+    name: Publish Docker image
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}

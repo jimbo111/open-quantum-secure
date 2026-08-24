@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # OQS Scanner — Cross-platform install script
-# Usage: curl -sSL https://raw.githubusercontent.com/jimbo111/open-quantum-secure/main/install.sh | sh
+# Usage: curl -sSL https://raw.githubusercontent.com/jimbo111/open-quantum-secure/main/install.sh | bash
+# (bash required: the script uses `set -o pipefail` and `echo -e`, which break under dash/sh)
 #
 # Detects OS and architecture, downloads the correct binary from GitHub Releases,
 # verifies SHA-256 checksum, and installs to /usr/local/bin (or ~/bin if no root).
@@ -102,6 +103,15 @@ main() {
   if [ -f "${tmpdir}/checksums.txt" ]; then
     local expected_hash actual_hash
     expected_hash=$(grep -F "${binary_name}" "${tmpdir}/checksums.txt" | awk '{print $1}')
+    if [ -z "$expected_hash" ]; then
+      # checksums.txt downloaded but has no entry for this binary — do NOT
+      # install silently unverified.
+      if [ "${OQS_ALLOW_UNVERIFIED:-}" = "1" ]; then
+        warn "checksums.txt has no entry for ${binary_name} — proceeding UNVERIFIED (OQS_ALLOW_UNVERIFIED=1)"
+      else
+        error "checksums.txt has no entry for ${binary_name} — refusing to install an unverified binary.\n  Re-run with OQS_ALLOW_UNVERIFIED=1 to bypass verification (not recommended)."
+      fi
+    fi
     if [ -n "$expected_hash" ]; then
       if command -v sha256sum >/dev/null 2>&1; then
         actual_hash=$(sha256sum "${tmpdir}/${binary_name}" | awk '{print $1}')

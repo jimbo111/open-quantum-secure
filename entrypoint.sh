@@ -6,7 +6,9 @@ set -e
 PATH_ARG="${1:-.}"
 MODE="${2:-full}"
 FORMAT="${3:-sarif}"
-OUTPUT_DIR="${4:-/tmp/oqs-results}"
+# Default is workspace-relative: only /github/workspace persists after a Docker
+# container action exits, so sarif-path/cbom-path outputs must point inside it.
+OUTPUT_DIR="${4:-oqs-results}"
 FAIL_ON="${5:-}"
 NO_CONFIG=$(echo "${6:-true}" | tr '[:upper:]' '[:lower:]')
 UPLOAD_SARIF=$(echo "${7:-true}" | tr '[:upper:]' '[:lower:]')
@@ -61,6 +63,17 @@ oqs-scanner "$SCAN_CMD" --path "$PATH_ARG" --format json --output "${OUTPUT_DIR}
   ${TLS_STRICT_FLAG:+"$TLS_STRICT_FLAG"} \
   || SCAN_EXIT=$?
 
+# Exit-code contract: 0 = clean, 1 = policy violation (findings at/above
+# --fail-on, or compliance errors in blocking mode), 2+ = scan itself failed.
+# Policy violations still produce full results — continue generating outputs
+# and report at the end. A hard failure aborts immediately.
+if [ "$SCAN_EXIT" -eq 1 ]; then
+  echo "::notice::Policy violations detected (exit 1) — results and outputs are still generated"
+elif [ "$SCAN_EXIT" -ge 2 ]; then
+  echo "::error::oqs-scanner scan failed (exit ${SCAN_EXIT}) — no results produced"
+  exit "$SCAN_EXIT"
+fi
+
 # Initialize metric variables with sane defaults (used by PR comment even if JSON fails)
 QRS="0"; QRS_GRADE="N/A"; FINDINGS="0"; CRITICAL="0"; DEPRECATED="0"; QUANTUM_SAFE="0"
 
@@ -81,16 +94,22 @@ if [ -f "${OUTPUT_DIR}.json" ]; then
   fi
 fi
 
-# Generate requested format output if not JSON (reuse scan results, don't rescan)
+# Generate requested format output if not JSON (reuse scan results, don't rescan).
+# --ci-mode silent: this pass exists only to produce the output file — the primary
+# scan already enforced policy. Without it, a --fail-on violation exits 1 here and
+# is misread as a generation failure. TLS flags are repeated so TLS probe findings
+# appear in the secondary format too.
 if [ "$FORMAT" != "json" ]; then
   if ! oqs-scanner "$SCAN_CMD" --path "$PATH_ARG" --format "$FORMAT" --output "$OUTPUT_DIR" \
     --incremental --cache-path /tmp/oqs-ci-cache.json \
     ${NO_CONFIG_FLAG:+"$NO_CONFIG_FLAG"} \
-    ${FAIL_ON:+--fail-on "$FAIL_ON"} \
     ${DIFF_BASE_VAL:+--base "$DIFF_BASE_VAL"} \
     ${COMPLIANCE:+--compliance "$COMPLIANCE"} \
-    ${CI_MODE:+--ci-mode "$CI_MODE"} \
-    ${DATA_LIFETIME:+--data-lifetime-years "$DATA_LIFETIME"} 2>&1; then
+    --ci-mode silent \
+    ${DATA_LIFETIME:+--data-lifetime-years "$DATA_LIFETIME"} \
+    ${TLS_TARGETS:+--tls-targets "$TLS_TARGETS"} \
+    ${TLS_INSECURE_FLAG:+"$TLS_INSECURE_FLAG"} \
+    ${TLS_STRICT_FLAG:+"$TLS_STRICT_FLAG"} 2>&1; then
     echo "::warning::Secondary format ($FORMAT) generation failed"
   fi
 fi
@@ -100,11 +119,18 @@ SARIF_PATH="${OUTPUT_DIR}.sarif"
 if [ "$UPLOAD_SARIF" = "true" ] && [ "$FORMAT" != "sarif" ]; then
   # Generate SARIF for Code Scanning. Use incremental mode to avoid re-scanning.
   # Errors are logged but don't fail the overall action (SARIF upload is best-effort).
+  # --ci-mode silent keeps a policy-violation exit (1) from masquerading as a
+  # generation failure; TLS flags are repeated so TLS probe findings reach
+  # Code Scanning.
   if ! oqs-scanner "$SCAN_CMD" --path "$PATH_ARG" --format sarif --output "$SARIF_PATH" \
     --incremental --cache-path /tmp/oqs-ci-cache.json \
     ${NO_CONFIG_FLAG:+"$NO_CONFIG_FLAG"} \
     ${DIFF_BASE_VAL:+--base "$DIFF_BASE_VAL"} \
-    ${COMPLIANCE:+--compliance "$COMPLIANCE"} 2>&1; then
+    ${COMPLIANCE:+--compliance "$COMPLIANCE"} \
+    --ci-mode silent \
+    ${TLS_TARGETS:+--tls-targets "$TLS_TARGETS"} \
+    ${TLS_INSECURE_FLAG:+"$TLS_INSECURE_FLAG"} \
+    ${TLS_STRICT_FLAG:+"$TLS_STRICT_FLAG"} 2>&1; then
     echo "::warning::SARIF generation failed — Code Scanning upload will be skipped"
   fi
 elif [ "$FORMAT" = "sarif" ]; then
@@ -159,8 +185,11 @@ if [ "$PR_COMMENT" = "true" ] && [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
     if [ "$IS_FORK" = "true" ]; then
       echo "::warning::PR comments not supported for fork PRs (GITHUB_TOKEN is read-only)"
     elif [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
-      # Sanitize VERSION to alphanumeric, dots, hyphens only
-      VERSION=$(oqs-scanner version 2>/dev/null | head -1 | tr -cd '[:alnum:].-' || echo "unknown")
+      # Extract the version token ("oqs-scanner v2.1.0" -> "v2.1.0"), then
+      # sanitize to alphanumeric, dots, hyphens only. tr alone would glue the
+      # banner into "oqs-scannerv2.1.0" because it deletes the space.
+      VERSION=$(oqs-scanner version 2>/dev/null | head -1 | awk '{print $2}' | tr -cd '[:alnum:].-' || echo "unknown")
+      [ -n "$VERSION" ] || VERSION="unknown"
 
       COMMENT_BODY="<!-- oqs-scanner-comment -->
 ## OQS Scanner Results

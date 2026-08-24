@@ -28,7 +28,7 @@ inputs:
     required: false
     default: 'true'
   upload-sarif:
-    description: 'Upload SARIF results to GitHub Code Scanning'
+    description: 'Generate SARIF results for GitHub Code Scanning (the action cannot upload them itself — add a github/codeql-action/upload-sarif step that consumes the sarif-path output)'
     required: false
     default: 'true'
   api-key:
@@ -89,7 +89,10 @@ runs:
     - ${{ inputs.path }}
     - ${{ inputs.mode }}
     - ${{ inputs.format }}
-    - '/tmp/oqs-results'
+    # Workspace-relative dir: Docker container actions only persist /github/workspace,
+    # so outputs written to /tmp would be gone before a later upload-sarif step runs.
+    # The container WORKDIR is /github/workspace (see Dockerfile), so this resolves there.
+    - 'oqs-results'
     - ${{ inputs.fail-on }}
     - ${{ inputs.no-config }}
     - ${{ inputs.upload-sarif }}

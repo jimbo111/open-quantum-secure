@@ -21,7 +21,11 @@
 
 .oqs-scanner:
   stage: test
-  image: ghcr.io/jimbo111/open-quantum-secure:latest
+  # entrypoint must be cleared: the image's ENTRYPOINT is the GitHub Actions
+  # entrypoint.sh, which would hijack the GitLab job script otherwise.
+  image:
+    name: ghcr.io/jimbo111/open-quantum-secure:latest
+    entrypoint: [""]
 
   # ---------------------------------------------------------------------------
   # Variables — all overridable per job via the `variables:` key.
@@ -176,30 +180,41 @@
       fi
 
     # ---- 4. Generate requested primary format (if not JSON) -----------------
+    # The primary artifact gets a proper extension so it can be listed in
+    # artifacts:paths (a bare "oqs-results" file would never be collected).
+    - |
+      case "${OQS_FORMAT:-sarif}" in
+        sarif) _OQS_PRIMARY_OUT="${_OQS_SARIF_PATH}" ;;
+        html)  _OQS_PRIMARY_OUT="${_OQS_WORK_DIR}.html" ;;
+        cbom)  _OQS_PRIMARY_OUT="${_OQS_WORK_DIR}.cbom.json" ;;
+        csv)   _OQS_PRIMARY_OUT="${_OQS_WORK_DIR}.csv" ;;
+        table) _OQS_PRIMARY_OUT="${_OQS_WORK_DIR}.txt" ;;
+        *)     _OQS_PRIMARY_OUT="${_OQS_WORK_DIR}.json" ;;
+      esac
     - |
       if [ "${OQS_FORMAT:-sarif}" != "json" ]; then
         # shellcheck disable=SC2086
         oqs-scanner ${SCAN_SUBCMD} \
           --path "${OQS_SCAN_PATH:-.}" \
           --format "${OQS_FORMAT:-sarif}" \
-          --output "${_OQS_WORK_DIR}" \
+          --output "${_OQS_PRIMARY_OUT}" \
           ${NO_CONFIG_FLAG} \
-          ${FAIL_ON_FLAG} \
           ${DIFF_BASE_FLAG} \
           ${COMPLIANCE_FLAG} \
           ${DATA_LIFETIME_FLAG} \
+          --ci-mode silent \
           2>&1 || echo "WARNING: secondary format (${OQS_FORMAT}) generation failed"
       fi
 
     # ---- 5. Generate / locate SARIF -----------------------------------------
     # SARIF is always produced so GitLab Security Dashboard can ingest it.
     # Three cases:
-    #   a) format=sarif  — primary scan (step 4) wrote it to _OQS_WORK_DIR; copy.
+    #   a) format=sarif  — primary scan (step 4) already wrote _OQS_SARIF_PATH.
     #   b) format!=sarif — run a dedicated sarif pass into _OQS_SARIF_PATH.
     #   c) format=sarif but file missing (step 4 failed) — fall through to case b.
     - |
-      if [ "${OQS_FORMAT:-sarif}" = "sarif" ] && [ -f "${_OQS_WORK_DIR}" ]; then
-        cp "${_OQS_WORK_DIR}" "${_OQS_SARIF_PATH}"
+      if [ "${OQS_FORMAT:-sarif}" = "sarif" ] && [ -f "${_OQS_SARIF_PATH}" ]; then
+        echo "SARIF already generated as primary format: ${_OQS_SARIF_PATH}"
       else
         # Covers format!=sarif AND the fallback when format=sarif but output is missing.
         # shellcheck disable=SC2086
@@ -210,6 +225,7 @@
           ${NO_CONFIG_FLAG} \
           ${DIFF_BASE_FLAG} \
           ${COMPLIANCE_FLAG} \
+          --ci-mode silent \
           2>&1 || echo "WARNING: SARIF generation failed — Security Dashboard integration skipped"
       fi
 
@@ -295,7 +311,10 @@
         if [ -z "$_GL_TOKEN" ]; then
           echo "WARNING: OQS_MR_NOTE=true but no token found (set GITLAB_TOKEN)."
         else
-          VERSION=$(oqs-scanner version 2>/dev/null | head -1 | tr -cd '[:alnum:].-' || echo "unknown")
+          # awk extracts the version token ("oqs-scanner v2.1.0" -> "v2.1.0");
+          # tr alone would glue the banner into "oqs-scannerv2.1.0".
+          VERSION=$(oqs-scanner version 2>/dev/null | head -1 | awk '{print $2}' | tr -cd '[:alnum:].-' || echo "unknown")
+          [ -n "$VERSION" ] || VERSION="unknown"
 
           NOTE_BODY="<!-- oqs-scanner-mr-note -->
       ## OQS Scanner Results
@@ -376,6 +395,9 @@
     # gl-sast-report.json feeds GitLab Security Dashboard and MR security widget.
     reports:
       sast: gl-oqs-report.json
+      # dotenv exposes OQS_QRS, OQS_TOTAL, OQS_VULN, etc. as variables in
+      # downstream jobs (artifacts:paths alone only ships the file).
+      dotenv: oqs.env
 
     paths:
       # SARIF for IDE / external tooling integration.
@@ -384,6 +406,12 @@
       - "oqs.env"
       # Raw JSON output for custom parsing.
       - "oqs-results.json"
+      # Primary artifact when OQS_FORMAT is html/cbom/csv/table.
+      # Missing paths only produce a collection warning, not a job failure.
+      - "oqs-results.html"
+      - "oqs-results.cbom.json"
+      - "oqs-results.csv"
+      - "oqs-results.txt"
 
     # Retain artifacts even when the job fails so findings are always available.
     when: always

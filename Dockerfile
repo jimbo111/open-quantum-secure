@@ -1,11 +1,15 @@
 # Stage 1: Build Go binary
 FROM golang:1.25-alpine AS builder
 
+# Release version stamped into the binary (`oqs-scanner version`).
+# Fed by the release workflow via --build-arg VERSION=vX.Y.Z; "dev" for local builds.
+ARG VERSION=dev
+
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /oqs-scanner ./cmd/oqs-scanner/
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION}" -o /oqs-scanner ./cmd/oqs-scanner/
 
 # Stage 2: Runtime with semgrep + ast-grep
 FROM python:3.12-slim

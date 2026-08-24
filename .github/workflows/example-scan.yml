@@ -20,7 +20,10 @@ jobs:
 
       - name: OQS Scanner
         id: scan
-        uses: jimbo111/open-quantum-secure@main  # Pin to a release tag (e.g., @v1) for stability
+        # In your repo, use @v2 (floating major tag, updated on each release)
+        # or pin an exact release tag (e.g. @v2.1.0) for reproducibility.
+        # @main is used here only because this example runs inside the scanner repo itself.
+        uses: jimbo111/open-quantum-secure@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
