@@ -89,6 +89,13 @@ var pqcSafeFamilies = map[string]bool{
 	"SecP256r1MLKEM768":  true, // 0x11EB
 	"SecP384r1MLKEM1024": true, // 0x11ED
 	"curveSM2MLKEM768":   true, // 0x11EE — SM2 hybrid (Chinese national standard pairing)
+	// OpenSSH hybrid KEX methods. sntrup761x25519 (Streamlined NTRU Prime +
+	// X25519) has been OpenSSH's default since 9.0; mlkem768x25519 since 9.9.
+	// Listed under their SSH wire names so sshd_config / KEXINIT findings
+	// classify safe. The prefix match also covers the -sha256/-sha512 and
+	// @openssh.com suffixed forms.
+	"sntrup761x25519": true,
+	"mlkem768x25519":  true,
 	// Pure ML-KEM (FIPS 203) — listed with full names so extractBaseName's
 	// longest-prefix match returns the correct base (MLKEM1024 > MLKEM768/MLKEM512).
 	"MLKEM512":  true, // 0x0200

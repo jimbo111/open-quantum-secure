@@ -157,6 +157,21 @@ func TestSRPAndHPKE(t *testing.T) {
 	}
 }
 
+func TestOpenSSHHybridKEXNames(t *testing.T) {
+	// SSH wire names for OpenSSH's hybrid PQC key exchange, with and without
+	// hash/vendor suffixes, must classify safe.
+	for _, name := range []string{
+		"sntrup761x25519-sha512@openssh.com",
+		"sntrup761x25519",
+		"mlkem768x25519-sha256",
+	} {
+		c := ClassifyAlgorithm(name, "kem", 0)
+		if c.Risk != RiskSafe {
+			t.Errorf("ClassifyAlgorithm(%q): risk=%s, want safe", name, c.Risk)
+		}
+	}
+}
+
 func TestAES192RecommendationText(t *testing.T) {
 	c := ClassifyAlgorithm("AES", "symmetric", 192)
 	if !strings.Contains(c.Recommendation, "192-bit") || !strings.Contains(c.Recommendation, "96-bit") {
