@@ -172,7 +172,7 @@ func TestAudit_F24_PerEngine_GetUnchangedFindingsForEngine_VersionGuard(t *testi
 	allHashes := map[string]string{"/src/b.go": "hash_b"}
 
 	// Upgraded cipherscope — must not serve stale findings.
-	cached, changed := sc.GetUnchangedFindingsForEngine("cipherscope", "0.3.1", allHashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine("cipherscope", "0.3.1", "", allHashes)
 	if len(cached) != 0 {
 		t.Errorf("stale finding leaked across engine upgrade: got %d cached, want 0", len(cached))
 	}
@@ -181,7 +181,7 @@ func TestAudit_F24_PerEngine_GetUnchangedFindingsForEngine_VersionGuard(t *testi
 	}
 
 	// Same version → cache hit.
-	cached2, _ := sc.GetUnchangedFindingsForEngine("cipherscope", "0.3.0-OLD", allHashes)
+	cached2, _ := sc.GetUnchangedFindingsForEngine("cipherscope", "0.3.0-OLD", "", allHashes)
 	if len(cached2) != 1 {
 		t.Errorf("same engine version should hit cache: got %d cached", len(cached2))
 	}

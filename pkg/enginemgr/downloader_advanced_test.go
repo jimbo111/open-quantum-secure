@@ -164,8 +164,9 @@ func TestAdvanced_DownloadEngines_ContextCancelMidParallel(t *testing.T) {
 	done := make(chan []DownloadResult, 1)
 	go func() {
 		done <- DownloadEngines(ctx, engines, manifest, DownloadOptions{
-			InstallDir: dir,
-			HTTPClient: client,
+			InstallDir:      dir,
+			HTTPClient:      client,
+			AllowUnverified: true, // placeholder-SHA fixtures; test targets cancel behavior
 		})
 	}()
 
@@ -468,8 +469,9 @@ func TestAdvanced_MaxSizeEnforced(t *testing.T) {
 	}
 
 	result := downloadOne(context.Background(), info, entry, DownloadOptions{
-		InstallDir: dir,
-		HTTPClient: client,
+		InstallDir:      dir,
+		HTTPClient:      client,
+		AllowUnverified: true, // placeholder-SHA fixture; test targets the size cap
 	})
 
 	if result.Err == nil {
@@ -590,8 +592,9 @@ func TestAdvanced_RetryDoesNotRetryContextCancel(t *testing.T) {
 
 	start := time.Now()
 	result := downloadOne(ctx, info, entry, DownloadOptions{
-		InstallDir: dir,
-		HTTPClient: client,
+		InstallDir:      dir,
+		HTTPClient:      client,
+		AllowUnverified: true, // placeholder-SHA fixture; test targets retry cancel
 	})
 	elapsed := time.Since(start)
 
@@ -886,8 +889,9 @@ func TestAdvanced_DownloadOne_TempCleanupOnContextCancel(t *testing.T) {
 	done := make(chan DownloadResult, 1)
 	go func() {
 		done <- downloadOne(ctx, info, entry, DownloadOptions{
-			InstallDir: dir,
-			HTTPClient: client,
+			InstallDir:      dir,
+			HTTPClient:      client,
+			AllowUnverified: true, // placeholder-SHA fixture; test targets temp cleanup
 		})
 	}()
 
@@ -1202,10 +1206,10 @@ func TestAdvanced_DoubleEncodedPathTraversal(t *testing.T) {
 	dir := t.TempDir()
 
 	cases := []struct {
-		name        string
+		name         string
 		wantRejected bool
 	}{
-		{"../etc/passwd", true},          // raw slash — rejected by filepath.Base check
+		{"../etc/passwd", true},           // raw slash — rejected by filepath.Base check
 		{"sub/dir/engine", true},          // innocent relative path — still rejected
 		{"..%2F..%2Fetc%2Fpasswd", false}, // percent-encoded: no literal slash, passes Base check
 	}
@@ -1363,9 +1367,12 @@ func TestAdvanced_MixedResults_SuccessSkipFail(t *testing.T) {
 		},
 	}
 
+	// AllowUnverified so the "fail" entry (placeholder SHA fixture) exercises
+	// the HTTP 500 failure path rather than the earlier unverified-refusal.
 	results := DownloadEngines(context.Background(), engines, manifest, DownloadOptions{
-		InstallDir: dir,
-		HTTPClient: client,
+		InstallDir:      dir,
+		HTTPClient:      client,
+		AllowUnverified: true,
 	})
 
 	if len(results) != 3 {
@@ -1663,9 +1670,11 @@ func TestAdvanced_FetchRemoteManifest_NonOKStatus(t *testing.T) {
 // 7. Regression tests for known patterns
 // ============================================================
 
-// TestAdvanced_PlaceholderSHA256_NotProductionSafe documents and verifies that
-// the "placeholder" sentinel bypasses SHA-256 verification. A CI gate must
-// reject manifest releases that still contain placeholder hashes.
+// TestAdvanced_PlaceholderSHA256_NotProductionSafe verifies that the
+// "placeholder" sentinel is REFUSED by default (no download, no install) and
+// only installed — with a warning — when AllowUnverified is explicitly set.
+// This is the enforcement of the former "CI gate must reject placeholder
+// hashes" recommendation: the client itself now refuses.
 func TestAdvanced_PlaceholderSHA256_NotProductionSafe(t *testing.T) {
 	t.Parallel()
 
@@ -1685,21 +1694,36 @@ func TestAdvanced_PlaceholderSHA256_NotProductionSafe(t *testing.T) {
 		},
 	}
 
+	// Default: refused, nothing installed.
 	result := downloadOne(context.Background(), info, entry, DownloadOptions{
 		InstallDir: dir,
 		HTTPClient: client,
 	})
-
-	// CURRENT BEHAVIOUR: placeholder bypasses verification and succeeds.
-	// A CI gate is expected to block manifest releases with placeholder hashes.
-	if result.Err != nil {
-		t.Logf("NOTE: if this fails, the placeholder bypass has been removed — update this test")
-		t.Fatalf("unexpected error with placeholder SHA256: %v", result.Err)
+	if result.Err == nil {
+		t.Fatal("placeholder SHA256 must be refused by default")
 	}
-	// The file IS written without verification — document this explicitly.
+	if !strings.Contains(result.Err.Error(), "allow-unverified") {
+		t.Errorf("refusal error should point at --allow-unverified, got: %v", result.Err)
+	}
 	dest := filepath.Join(dir, "pre-release")
+	if _, err := os.Stat(dest); err == nil {
+		t.Error("no file may be installed when the entry is refused")
+	}
+
+	// Explicit opt-in: installed with a warning.
+	result = downloadOne(context.Background(), info, entry, DownloadOptions{
+		InstallDir:      dir,
+		HTTPClient:      client,
+		AllowUnverified: true,
+	})
+	if result.Err != nil {
+		t.Fatalf("AllowUnverified install should succeed: %v", result.Err)
+	}
+	if result.WarnMsg == "" {
+		t.Error("expected an integrity warning on AllowUnverified install")
+	}
 	if _, err := os.Stat(dest); os.IsNotExist(err) {
-		t.Error("expected file to be written even with placeholder hash")
+		t.Error("expected file to be written with AllowUnverified")
 	}
 }
 

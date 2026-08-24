@@ -156,12 +156,32 @@ func (o *Orchestrator) ScanWithMetrics(ctx context.Context, opts engines.ScanOpt
 }
 
 // defaultCachePath returns the default cache file location for a scan target.
+// The cache lives OUTSIDE the scanned tree (~/.oqs/cache/scans/<slug>.json):
+// a repo-local cache file inside an untrusted repository could be crafted to
+// suppress or fabricate findings (cache poisoning), so it is never trusted.
 func defaultCachePath(targetPath string) string {
-	return filepath.Join(targetPath, ".oqs-scanner-cache.json")
+	return cache.DefaultPath(targetPath)
+}
+
+// skipWalkDirs are well-known dependency/build output directories that are
+// excluded from the incremental-scan file walk. Hashing them (node_modules
+// alone can be hundreds of MB) is a pre-engine DoS vector and their contents
+// are vendored third-party code. Aligned with the exclusion lists used by
+// configscanner (vendor/node_modules/.git) and constresolver; dot-directories
+// (.git, .venv, …) are skipped by the generic dot-dir rule below.
+var skipWalkDirs = map[string]bool{
+	"node_modules": true,
+	"vendor":       true,
+	"target":       true,
+	"build":        true,
+	"dist":         true,
+	"__pycache__":  true,
+	"venv":         true,
 }
 
 // walkSourceFiles returns absolute paths of all regular files under dir,
-// excluding hidden directories (names starting with ".").
+// excluding hidden directories (names starting with ".") and well-known
+// dependency/build directories (skipWalkDirs).
 func walkSourceFiles(dir string) ([]string, error) {
 	var paths []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -169,8 +189,12 @@ func walkSourceFiles(dir string) ([]string, error) {
 			return nil // skip unreadable entries
 		}
 		if d.IsDir() {
-			// Skip hidden directories (e.g. .git, .oqs-cache).
+			// Skip hidden directories (e.g. .git, .venv, .oqs-cache) and
+			// dependency/build trees (node_modules, vendor, target, …).
 			if len(d.Name()) > 1 && d.Name()[0] == '.' {
+				return filepath.SkipDir
+			}
+			if skipWalkDirs[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
@@ -181,6 +205,12 @@ func walkSourceFiles(dir string) ([]string, error) {
 		return nil
 	})
 	return paths, err
+}
+
+// fileExists reports whether path exists and is a regular file.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // groupFindingsByFile partitions a flat findings slice into a map keyed by
@@ -238,8 +268,16 @@ func toRelativePaths(absPaths []string, basePath string) []string {
 //  1. Filters hashes to files matching the engine's language extensions.
 //  2. Checks the per-engine cache validity (engine version match).
 //  3. Separates unchanged (cached) files from changed files.
-//  4. Runs only changed files through the engine.
+//  4. Runs the engine and keeps only findings located in changed files.
 //  5. Updates that engine's cache entries.
+//
+// NOTE: caching is at the FINDINGS level, not the execution level. The
+// changed-file list is passed to engines via ScanOptions.ChangedFiles, but no
+// current engine consumes it — engines scan the whole tree and the
+// orchestrator filters their output down to changed files afterward
+// (filterByChangedFiles). The savings are in skipping re-classification and
+// re-reporting, not in engine runtime. Making engines honor ChangedFiles is
+// future work.
 //
 // Engines run in parallel goroutines. Cache mutations are serialized with a
 // mutex (Go maps are not safe for concurrent writes).
@@ -257,6 +295,14 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 	cachePath := opts.CachePath
 	if cachePath == "" {
 		cachePath = defaultCachePath(targetPath)
+		// A cache file inside the scanned repo is attacker-controlled input:
+		// a crafted cache with correct content hashes and matching versions
+		// would suppress or fabricate findings without any engine running.
+		// Legacy repo-local caches are therefore IGNORED unless the user
+		// explicitly opted in via --cache-path.
+		if legacy := cache.LegacyRepoLocalPath(targetPath); fileExists(legacy) {
+			fmt.Fprintf(os.Stderr, "WARNING: ignoring repo-local cache %s — repo-local caches are no longer trusted; using %s (pass --cache-path to override)\n", legacy, cachePath)
+		}
 	}
 
 	sc, _ := cache.Load(cachePath) // always returns non-nil
@@ -288,9 +334,34 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 		}
 	}
 
-	allHashes, hashErr := cache.HashFiles(allPaths)
+	// Pre-hash extension filter: only hash files at least one selected engine
+	// can consume. ExtensionsForEngines returns nil when any engine scans all
+	// files, in which case no pre-filter is applied. This runs BEFORE hashing
+	// (the per-engine filterHashesByExtension still narrows further) so large
+	// irrelevant trees are never read.
+	if unionExts := engines.ExtensionsForEngines(available); unionExts != nil {
+		filtered := allPaths[:0]
+		for _, p := range allPaths {
+			if engines.IsRelevantFile(p, unionExts) {
+				filtered = append(filtered, p)
+			}
+		}
+		allPaths = filtered
+	}
+
+	// Size cap: files larger than MaxFileMB are never read for hashing.
+	// They are treated as always-changed (scanned fresh every run, never
+	// cached) — see the oversized handling in the per-engine loop below.
+	maxFileMB := opts.MaxFileMB
+	if maxFileMB <= 0 {
+		maxFileMB = 16 // conservative default when the caller didn't set one
+	}
+	allHashes, oversized, hashErr := cache.HashFilesWithLimit(allPaths, int64(maxFileMB)<<20)
 	if hashErr != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: incremental cache: hash errors (partial): %v\n", hashErr)
+	}
+	if len(oversized) > 0 {
+		fmt.Fprintf(os.Stderr, "WARNING: incremental cache: %d file(s) exceed %d MB and will be re-scanned every run (not cached)\n", len(oversized), maxFileMB)
 	}
 
 	// Per-engine incremental scan in parallel.
@@ -341,7 +412,7 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 			var changedPaths []string
 
 			if engineValid {
-				cached, changedPaths = sc.GetUnchangedFindingsForEngine(eng.Name(), eng.Version(), engineHashes)
+				cached, changedPaths = sc.GetUnchangedFindingsForEngine(eng.Name(), eng.Version(), scannerVersion, engineHashes)
 			} else {
 				// Engine version changed or new engine → re-scan all its files.
 				for p := range engineHashes {
@@ -349,15 +420,28 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 				}
 			}
 
-			// 3. Run engine only on changed files.
+			// Oversized files were never hashed: treat them as always-changed
+			// so the engine still scans them. They stay out of engineHashes,
+			// so UpdateEngine never caches their findings.
+			for _, p := range oversized {
+				if engines.IsRelevantFile(p, exts) {
+					changedPaths = append(changedPaths, p)
+				}
+			}
+
+			// 3. Run the engine when there are changed files, then keep only
+			// findings located in those files. ChangedFiles is advisory: no
+			// current engine restricts its execution to it, so the engine may
+			// scan the whole tree — filterByChangedFiles below narrows the
+			// output. Caching operates at the findings level, not execution.
 			var fresh []findings.UnifiedFinding
 			scanFailed := false
 			if len(changedPaths) > 0 {
 				relChanged := toRelativePaths(changedPaths, targetPath)
 
 				engOpts := opts
-				engOpts.TargetPath = targetPath  // absolute path → engine output matches hash keys
-				engOpts.Incremental = false      // prevent re-entry
+				engOpts.TargetPath = targetPath // absolute path → engine output matches hash keys
+				engOpts.Incremental = false     // prevent re-entry
 				engOpts.ChangedFiles = relChanged
 
 				res, scanErr := eng.Scan(ctx, engOpts)
@@ -385,10 +469,10 @@ func (o *Orchestrator) runIncremental(ctx context.Context, opts engines.ScanOpti
 					}
 				}
 				// Only prune deleted files in full mode. In diff mode, engineHashes
-			// is a partial set (only changed files) — pruning would destroy
-			// valid cached entries for unchanged files.
-			pruneDeleted := opts.Mode != engines.ModeDiff
-			sc.UpdateEngine(eng.Name(), freshByFile, engineHashes, pruneDeleted)
+				// is a partial set (only changed files) — pruning would destroy
+				// valid cached entries for unchanged files.
+				pruneDeleted := opts.Mode != engines.ModeDiff
+				sc.UpdateEngine(eng.Name(), freshByFile, engineHashes, pruneDeleted)
 			}
 
 			results[i] = engineResult{cached: cached, fresh: fresh, scanFailed: scanFailed}

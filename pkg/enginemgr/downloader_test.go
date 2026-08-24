@@ -627,9 +627,12 @@ func TestDownloadEngines_PartialFailure(t *testing.T) {
 		},
 	}
 
+	// AllowUnverified so the "fail" entry (placeholder SHA fixture) exercises
+	// the HTTP 404 failure path rather than the earlier unverified-refusal.
 	results := DownloadEngines(context.Background(), engines, manifest, DownloadOptions{
-		InstallDir: dir,
-		HTTPClient: client,
+		InstallDir:      dir,
+		HTTPClient:      client,
+		AllowUnverified: true,
 	})
 
 	if results[0].Err != nil {
@@ -934,9 +937,50 @@ func TestDownloadResult_SetErr(t *testing.T) {
 	}
 }
 
-// --- DownloadOne with placeholder SHA-256 ---
+// --- DownloadOne with placeholder / empty SHA-256 ---
+//
+// Unverifiable manifest entries are REFUSED by default and only installed
+// when DownloadOptions.AllowUnverified is set (surfaced to users as the
+// --allow-unverified flag).
 
-func TestDownloadOne_PlaceholderSHA256(t *testing.T) {
+func TestDownloadOne_PlaceholderSHA256_RefusedByDefault(t *testing.T) {
+	var served int32
+	ts, client := newTLSTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&served, 1)
+		w.Write([]byte("any content — hash not verified"))
+	}))
+	defer ts.Close()
+
+	dir := t.TempDir()
+	info := EngineInfo{Name: "placeholder-engine", BinaryName: "placeholder-engine"}
+	entry := ManifestEngine{
+		Version:           "1.0.0",
+		DownloadSupported: true,
+		Platforms: map[string]ManifestPlatform{
+			PlatformKey(): {URL: ts.URL + "/placeholder", SHA256: "placeholder"},
+		},
+	}
+
+	result := downloadOne(context.Background(), info, entry, DownloadOptions{
+		InstallDir: dir,
+		HTTPClient: client,
+	})
+	if result.Err == nil {
+		t.Fatal("downloadOne with placeholder SHA256 must be refused by default")
+	}
+	if !strings.Contains(result.Err.Error(), "allow-unverified") {
+		t.Errorf("refusal error should mention --allow-unverified, got: %v", result.Err)
+	}
+	// The refusal must happen BEFORE any bytes are fetched.
+	if s := atomic.LoadInt32(&served); s != 0 {
+		t.Errorf("expected 0 HTTP requests for refused install, got %d", s)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "placeholder-engine")); err == nil {
+		t.Error("no file should be installed when the entry is refused")
+	}
+}
+
+func TestDownloadOne_PlaceholderSHA256_AllowUnverified(t *testing.T) {
 	body := []byte("any content — hash not verified")
 
 	ts, client := newTLSTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -955,19 +999,21 @@ func TestDownloadOne_PlaceholderSHA256(t *testing.T) {
 	}
 
 	result := downloadOne(context.Background(), info, entry, DownloadOptions{
-		InstallDir: dir,
-		HTTPClient: client,
+		InstallDir:      dir,
+		HTTPClient:      client,
+		AllowUnverified: true,
 	})
 	if result.Err != nil {
-		t.Fatalf("downloadOne with placeholder SHA256 should succeed: %v", result.Err)
+		t.Fatalf("downloadOne with placeholder SHA256 and AllowUnverified should succeed: %v", result.Err)
+	}
+	if result.WarnMsg == "" {
+		t.Error("expected a warning about unverified integrity")
 	}
 }
 
-func TestDownloadOne_EmptySHA256(t *testing.T) {
-	body := []byte("any content — hash not verified")
-
+func TestDownloadOne_EmptySHA256_RefusedByDefault(t *testing.T) {
 	ts, client := newTLSTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(body)
+		w.Write([]byte("any content — hash not verified"))
 	}))
 	defer ts.Close()
 
@@ -985,8 +1031,21 @@ func TestDownloadOne_EmptySHA256(t *testing.T) {
 		InstallDir: dir,
 		HTTPClient: client,
 	})
+	if result.Err == nil {
+		t.Fatal("downloadOne with empty SHA256 must be refused by default")
+	}
+
+	// With AllowUnverified it installs (with a warning).
+	result = downloadOne(context.Background(), info, entry, DownloadOptions{
+		InstallDir:      dir,
+		HTTPClient:      client,
+		AllowUnverified: true,
+	})
 	if result.Err != nil {
-		t.Fatalf("downloadOne with empty SHA256 should succeed: %v", result.Err)
+		t.Fatalf("downloadOne with empty SHA256 and AllowUnverified should succeed: %v", result.Err)
+	}
+	if result.WarnMsg == "" {
+		t.Error("expected a warning about unverified integrity")
 	}
 }
 

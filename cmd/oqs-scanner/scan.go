@@ -265,7 +265,7 @@ Example with data lifetime adjustment for healthcare:
 			if incremental && noCache {
 				fmt.Fprintf(os.Stderr, "WARNING: --no-cache overrides --incremental, performing full scan.\n")
 			} else if incremental {
-				fmt.Fprintf(os.Stderr, "Incremental mode enabled — only changed files will be re-scanned.\n")
+				fmt.Fprintf(os.Stderr, "Incremental mode enabled — unchanged files reuse cached findings.\n")
 			}
 
 			// Show which engines will actually be used (mirrors Scan's filtering)

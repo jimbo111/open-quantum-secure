@@ -6,6 +6,7 @@ import (
 	"context"
 	"path/filepath"
 
+	"github.com/jimbo111/open-quantum-secure/pkg/cache"
 	"github.com/jimbo111/open-quantum-secure/pkg/gitutil"
 )
 
@@ -64,9 +65,17 @@ func resolveProjectFromInfo(cfgProject string, projInfo *gitutil.ProjectInfo, sc
 }
 
 // resolveCachePath returns the effective local cache file path.
+//
+// The default lives OUTSIDE the scanned tree (~/.oqs/cache/scans/<slug>.json,
+// see cache.DefaultPath): a repo-local cache inside an untrusted repository is
+// attacker-controlled input and is no longer trusted. An explicit --cache-path
+// override is always honored (the user's deliberate choice). Must stay in
+// sync with pkg/orchestrator's defaultCachePath, which delegates to the same
+// helper — otherwise the remote-cache download/upload would target a
+// different file than the incremental scan reads.
 func resolveCachePath(override, scanPath string) string {
 	if override != "" {
 		return override
 	}
-	return filepath.Join(scanPath, ".oqs-scanner-cache.json")
+	return cache.DefaultPath(scanPath)
 }

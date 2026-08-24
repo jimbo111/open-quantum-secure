@@ -324,7 +324,7 @@ func TestGetUnchangedFindingsForEngine_HitAndMiss(t *testing.T) {
 		"/src/baz.go": "hash_baz",     // new file
 	}
 
-	cached, changed := sc.GetUnchangedFindingsForEngine("cipherscope", "", allHashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine("cipherscope", "", "", allHashes)
 
 	if len(cached) != 1 {
 		t.Errorf("expected 1 cached finding (foo.go), got %d", len(cached))
@@ -359,7 +359,7 @@ func TestGetUnchangedFindingsForEngine_NilEngineEntries_AllChanged(t *testing.T)
 		"/src/b.go": "hashB",
 	}
 
-	cached, changed := sc.GetUnchangedFindingsForEngine("new-engine", "", allHashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine("new-engine", "", "", allHashes)
 
 	if len(cached) != 0 {
 		t.Errorf("expected 0 cached findings for unknown engine, got %d", len(cached))
@@ -528,4 +528,3 @@ func TestHashFiles_ParallelSafety(t *testing.T) {
 		t.Errorf("expected %d hashes, got %d", numFiles, len(hashes))
 	}
 }
-

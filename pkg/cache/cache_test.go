@@ -337,8 +337,8 @@ func TestGetUnchangedFindings_MixedState(t *testing.T) {
 
 	allHashes := map[string]string{
 		"/src/unchanged.go": "hashU",
-		"/src/modified.go":  "hashNew",  // changed
-		"/src/new.go":       "hashN",    // new file
+		"/src/modified.go":  "hashNew", // changed
+		"/src/new.go":       "hashN",   // new file
 	}
 
 	cached, changed := sc.GetUnchangedFindings("", allHashes)
@@ -806,7 +806,7 @@ func TestGetUnchangedFindingsForEngine_AllUnchanged(t *testing.T) {
 	}
 
 	hashes := map[string]string{"/src/foo.go": "h1", "/src/bar.go": "h2"}
-	cached, changed := sc.GetUnchangedFindingsForEngine("ast-grep", "", hashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine("ast-grep", "", "", hashes)
 
 	if len(changed) != 0 {
 		t.Errorf("expected 0 changed, got %v", changed)
@@ -823,7 +823,7 @@ func TestGetUnchangedFindingsForEngine_ModifiedFile(t *testing.T) {
 	}
 
 	hashes := map[string]string{"/src/foo.go": "newhash"}
-	cached, changed := sc.GetUnchangedFindingsForEngine("ast-grep", "", hashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine("ast-grep", "", "", hashes)
 
 	if len(cached) != 0 {
 		t.Errorf("expected 0 cached, got %d", len(cached))
@@ -837,7 +837,7 @@ func TestGetUnchangedFindingsForEngine_NoEngineEntries(t *testing.T) {
 	sc := New() // no entries for any engine
 
 	hashes := map[string]string{"/src/foo.go": "h1", "/src/bar.go": "h2"}
-	cached, changed := sc.GetUnchangedFindingsForEngine("ast-grep", "", hashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine("ast-grep", "", "", hashes)
 
 	if len(cached) != 0 {
 		t.Errorf("expected 0 cached, got %d", len(cached))
@@ -854,7 +854,7 @@ func TestGetUnchangedFindingsForEngine_DeletedFile(t *testing.T) {
 	}
 
 	// File no longer on disk.
-	cached, changed := sc.GetUnchangedFindingsForEngine("ast-grep", "", map[string]string{})
+	cached, changed := sc.GetUnchangedFindingsForEngine("ast-grep", "", "", map[string]string{})
 
 	if len(cached) != 0 {
 		t.Errorf("expected 0 cached for deleted file, got %d", len(cached))
@@ -878,7 +878,7 @@ func TestGetUnchangedFindingsForEngine_MixedState(t *testing.T) {
 		"/src/newfile.go":   "hN",
 	}
 
-	cached, changed := sc.GetUnchangedFindingsForEngine("cipherscope", "", hashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine("cipherscope", "", "", hashes)
 
 	if len(cached) != 1 || cached[0].Algorithm.Name != "AES-256" {
 		t.Errorf("expected 1 cached (AES-256), got %v", cached)
@@ -912,8 +912,8 @@ func TestGetUnchangedFindingsForEngine_MultipleEnginesSameFile(t *testing.T) {
 	hashes := map[string]string{"/src/foo.go": "h1"}
 
 	// Each engine query returns its own findings independently.
-	agCached, agChanged := sc.GetUnchangedFindingsForEngine("ast-grep", "", hashes)
-	csCached, csChanged := sc.GetUnchangedFindingsForEngine("cipherscope", "", hashes)
+	agCached, agChanged := sc.GetUnchangedFindingsForEngine("ast-grep", "", "", hashes)
+	csCached, csChanged := sc.GetUnchangedFindingsForEngine("cipherscope", "", "", hashes)
 
 	if len(agCached) != 1 || agCached[0].Algorithm.Name != "RSA-1024" {
 		t.Errorf("ast-grep: expected RSA-1024, got %v", agCached)
@@ -1167,7 +1167,7 @@ func TestCacheLifecycleV2_PerEngine(t *testing.T) {
 
 	hashesSecond, _ := HashFiles([]string{fileA, fileB})
 
-	agCached, agChanged := sc2.GetUnchangedFindingsForEngine("ast-grep", "0.15.0", map[string]string{fileA: hashesSecond[fileA]})
+	agCached, agChanged := sc2.GetUnchangedFindingsForEngine("ast-grep", "0.15.0", "1.0.0", map[string]string{fileA: hashesSecond[fileA]})
 	if len(agChanged) != 0 {
 		t.Errorf("ast-grep: expected 0 changed, got %v", agChanged)
 	}
@@ -1175,7 +1175,7 @@ func TestCacheLifecycleV2_PerEngine(t *testing.T) {
 		t.Errorf("ast-grep: expected AES-256, got %v", agCached)
 	}
 
-	csCached, csChanged := sc2.GetUnchangedFindingsForEngine("cipherscope", "0.3.1", hashesSecond)
+	csCached, csChanged := sc2.GetUnchangedFindingsForEngine("cipherscope", "0.3.1", "1.0.0", hashesSecond)
 	if len(csChanged) != 0 {
 		t.Errorf("cipherscope: expected 0 changed, got %v", csChanged)
 	}
@@ -1199,7 +1199,7 @@ func TestCacheLifecycleV2_PerEngine(t *testing.T) {
 	hashesThird, _ := HashFiles([]string{fileA, fileB})
 
 	// ast-grep sees fileA changed.
-	agCached3, agChanged3 := sc2.GetUnchangedFindingsForEngine("ast-grep", "0.15.0", map[string]string{fileA: hashesThird[fileA]})
+	agCached3, agChanged3 := sc2.GetUnchangedFindingsForEngine("ast-grep", "0.15.0", "1.0.0", map[string]string{fileA: hashesThird[fileA]})
 	if len(agCached3) != 0 {
 		t.Errorf("ast-grep: fileA changed, expected 0 cached, got %d", len(agCached3))
 	}
@@ -1446,7 +1446,7 @@ func TestGetUnchangedFindingsForEngine_NewEngine(t *testing.T) {
 	hashes := map[string]string{"/src/foo.go": "h1"}
 
 	// Query for a completely new engine — all files should be changed.
-	cached, changed := sc.GetUnchangedFindingsForEngine("new-engine", "", hashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine("new-engine", "", "", hashes)
 	if len(cached) != 0 {
 		t.Errorf("new engine should have 0 cached, got %d", len(cached))
 	}
@@ -1455,7 +1455,7 @@ func TestGetUnchangedFindingsForEngine_NewEngine(t *testing.T) {
 	}
 
 	// ast-grep should still work independently.
-	agCached, agChanged := sc.GetUnchangedFindingsForEngine("ast-grep", "", hashes)
+	agCached, agChanged := sc.GetUnchangedFindingsForEngine("ast-grep", "", "", hashes)
 	if len(agCached) != 1 {
 		t.Errorf("ast-grep should have 1 cached, got %d", len(agCached))
 	}

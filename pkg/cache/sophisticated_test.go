@@ -101,7 +101,7 @@ func TestGetUnchangedFindingsForEngine_OldEngineVersion_CacheMiss(t *testing.T) 
 
 	hashes := map[string]string{path: "deadbeef"}
 	// Engine is now v0.4.0 — version mismatch.
-	cached, changed := sc.GetUnchangedFindingsForEngine(engName, "v0.4.0", hashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine(engName, "v0.4.0", "", hashes)
 
 	if len(cached) > 0 {
 		t.Errorf("expected 0 cached findings on engine version mismatch; got %d", len(cached))
@@ -128,7 +128,7 @@ func TestGetUnchangedFindingsForEngine_SameEngineVersion_CacheHit(t *testing.T) 
 	}
 
 	hashes := map[string]string{path: hash}
-	cached, changed := sc.GetUnchangedFindingsForEngine(engName, "v1.0.0", hashes)
+	cached, changed := sc.GetUnchangedFindingsForEngine(engName, "v1.0.0", "", hashes)
 
 	if len(cached) != 1 {
 		t.Errorf("expected 1 cached finding; got %d", len(cached))

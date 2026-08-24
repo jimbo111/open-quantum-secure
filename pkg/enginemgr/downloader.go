@@ -53,6 +53,12 @@ type DownloadOptions struct {
 	InstallDir string
 	Force      bool
 	HTTPClient *http.Client
+	// AllowUnverified permits installing a binary whose manifest entry has no
+	// usable SHA-256 (empty or the "placeholder" sentinel). By default such
+	// entries are REFUSED: without a pinned hash the only integrity guarantee
+	// is TLS, and a compromised release host or CA yields arbitrary binary
+	// execution. Setting this installs anyway with a warning in the result.
+	AllowUnverified bool
 	// ProgressFunc is called with the engine name and cumulative bytes downloaded.
 	// When used with DownloadEngines, this function is called concurrently from
 	// multiple goroutines — implementations must be goroutine-safe.
@@ -126,6 +132,15 @@ func downloadOne(ctx context.Context, info EngineInfo, entry ManifestEngine, opt
 		return result
 	}
 
+	// Refuse unverifiable binaries by default. A manifest entry without a real
+	// SHA-256 gives no integrity-after-fetch guarantee — installing it means
+	// trusting the release host (and every CA) with arbitrary code execution.
+	unverified := plat.SHA256 == "" || plat.SHA256 == "placeholder"
+	if unverified && !opts.AllowUnverified {
+		result.setErr(fmt.Errorf("engine %q: refusing to install unverified binary (manifest SHA-256 is %q); pass --allow-unverified to install anyway", info.Name, plat.SHA256))
+		return result
+	}
+
 	// Create install directory with restrictive permissions.
 	if err := os.MkdirAll(opts.InstallDir, 0700); err != nil {
 		result.setErr(fmt.Errorf("create install dir: %w", err))
@@ -157,7 +172,7 @@ func downloadOne(ctx context.Context, info EngineInfo, entry ManifestEngine, opt
 		n, err := downloadAtomicVerify(ctx, client, plat.URL, plat.SHA256, destPath, info.Name, opts.ProgressFunc)
 		if err == nil {
 			result.BytesRead = n
-			if plat.SHA256 == "" || plat.SHA256 == "placeholder" {
+			if unverified {
 				result.WarnMsg = fmt.Sprintf("engine %q: integrity not verified (SHA-256 is %q); do not use in production", info.Name, plat.SHA256)
 			}
 			return result

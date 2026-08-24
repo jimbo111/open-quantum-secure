@@ -127,10 +127,11 @@ func enginesDoctorCmd() *cobra.Command {
 
 func enginesInstallCmd() *cobra.Command {
 	var (
-		all         bool
-		force       bool
-		manifestURL string
-		offline     bool
+		all             bool
+		force           bool
+		manifestURL     string
+		offline         bool
+		allowUnverified bool
 	)
 
 	cmd := &cobra.Command{
@@ -264,9 +265,10 @@ Examples:
 			// Mutex protects concurrent progress writes to stderr.
 			var progressMu sync.Mutex
 			results := enginemgr.DownloadEngines(ctx, downloadable, manifest, enginemgr.DownloadOptions{
-				InstallDir: installDir,
-				Force:      force,
-				HTTPClient: downloadClient,
+				InstallDir:      installDir,
+				Force:           force,
+				AllowUnverified: allowUnverified,
+				HTTPClient:      downloadClient,
 				ProgressFunc: func(engine string, bytesRead int64) {
 					progressMu.Lock()
 					fmt.Fprintf(os.Stderr, "\r  %s: %d bytes downloaded", engine, bytesRead)
@@ -306,17 +308,19 @@ Examples:
 	cmd.Flags().BoolVar(&force, "force", false, "Re-download even if binary already exists")
 	cmd.Flags().StringVar(&manifestURL, "manifest-url", "https://releases.oqs.dev/engines/manifest.json", "URL for the engine manifest")
 	cmd.Flags().BoolVar(&offline, "offline", false, "Use embedded manifest only (no remote fetch)")
+	cmd.Flags().BoolVar(&allowUnverified, "allow-unverified", false, "Install binaries whose manifest entry has no SHA-256 (UNSAFE: integrity cannot be verified)")
 
 	return cmd
 }
 
 func enginesUpdateCmd() *cobra.Command {
 	var (
-		all         bool
-		manifestURL string
-		offline     bool
-		asJSON      bool
-		dryRun      bool
+		all             bool
+		manifestURL     string
+		offline         bool
+		asJSON          bool
+		dryRun          bool
+		allowUnverified bool
 	)
 
 	cmd := &cobra.Command{
@@ -446,9 +450,10 @@ Examples:
 
 			var progressMu sync.Mutex
 			results := enginemgr.DownloadEngines(ctx, toUpdate, manifest, enginemgr.DownloadOptions{
-				InstallDir: installDir,
-				Force:      true,
-				HTTPClient: downloadClient,
+				InstallDir:      installDir,
+				Force:           true,
+				AllowUnverified: allowUnverified,
+				HTTPClient:      downloadClient,
 				ProgressFunc: func(engine string, bytesRead int64) {
 					progressMu.Lock()
 					fmt.Fprintf(os.Stderr, "\r  %s: %d bytes downloaded", engine, bytesRead)
@@ -481,6 +486,7 @@ Examples:
 	cmd.Flags().BoolVar(&offline, "offline", false, "Use embedded manifest only (no remote fetch)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output update checks as JSON (no downloads)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Check for updates without downloading")
+	cmd.Flags().BoolVar(&allowUnverified, "allow-unverified", false, "Install binaries whose manifest entry has no SHA-256 (UNSAFE: integrity cannot be verified)")
 
 	return cmd
 }

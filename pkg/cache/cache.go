@@ -79,19 +79,24 @@ func New() *ScanCache {
 // Load reads a ScanCache from the JSON file at path.
 // If the file does not exist or cannot be parsed, an empty (but valid) cache
 // is returned — the caller should treat this as a cache miss, not an error.
+// Failures other than fs.ErrNotExist (permission denied, EIO, corrupt JSON)
+// are surfaced as a stderr WARNING so operators notice that caching is
+// silently disabled instead of unknowingly re-scanning everything forever.
 func Load(path string) (*ScanCache, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return New(), nil
 	}
 	if err != nil {
-		// Unreadable — return empty cache, not a hard error.
+		// Unreadable — return empty cache, not a hard error, but tell the operator.
+		fmt.Fprintf(os.Stderr, "WARNING: cache load failed (%v); scanning fresh\n", err)
 		return New(), nil
 	}
 
 	var sc ScanCache
 	if err := json.Unmarshal(data, &sc); err != nil {
-		// Corrupt JSON — treat as cache miss.
+		// Corrupt JSON — treat as cache miss, but tell the operator.
+		fmt.Fprintf(os.Stderr, "WARNING: cache load failed (%s: %v); scanning fresh\n", path, err)
 		return New(), nil
 	}
 
@@ -120,6 +125,10 @@ func (sc *ScanCache) Save(path string) error {
 	}
 
 	dir := filepath.Dir(path)
+	// The default cache location (~/.oqs/cache/scans/) may not exist yet.
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create cache dir: %w", err)
+	}
 	tmp, err := os.CreateTemp(dir, ".oqs-cache-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp cache file: %w", err)
@@ -277,10 +286,13 @@ func (sc *ScanCache) IsValidForEngine(engineName, currentVersion string) bool {
 // GetUnchangedFindingsForEngine is the per-engine variant of GetUnchangedFindings.
 // It checks only the entries belonging to engineName in EngineEntries.
 //
-// currentVersion guards against stale findings surviving an engine upgrade:
-// when the recorded EngineVersions[engineName] or cache format version does
-// not match, every path is reported as changed (forcing a fresh scan) and no
-// cached findings are returned.
+// currentScannerVersion and currentVersion guard against stale findings
+// surviving a scanner or engine upgrade: when the recorded ScannerVersion,
+// EngineVersions[engineName], or cache format version does not match, every
+// path is reported as changed (forcing a fresh scan) and no cached findings
+// are returned. The ScannerVersion guard mirrors the V1 GetUnchangedFindings
+// path — without it, a cache produced by (or crafted for) a different scanner
+// binary could serve findings the current binary never validated.
 //
 // Returns:
 //   - cachedFindings: findings from files whose content hash has not changed
@@ -288,11 +300,14 @@ func (sc *ScanCache) IsValidForEngine(engineName, currentVersion string) bool {
 //
 // Files in the engine's cache that are not in allFileHashes (deleted or no
 // longer relevant) are silently dropped.
-func (sc *ScanCache) GetUnchangedFindingsForEngine(engineName, currentVersion string, allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
+func (sc *ScanCache) GetUnchangedFindingsForEngine(engineName, currentVersion, currentScannerVersion string, allFileHashes map[string]string) (cachedFindings []findings.UnifiedFinding, changedPaths []string) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	// Version guard: cache format or engine version mismatch → all paths changed.
-	if sc.Version != cacheFormatVersion || sc.EngineVersions[engineName] != currentVersion {
+	// Version guard: cache format, scanner version, or engine version mismatch
+	// → all paths changed.
+	if sc.Version != cacheFormatVersion ||
+		sc.ScannerVersion != currentScannerVersion ||
+		sc.EngineVersions[engineName] != currentVersion {
 		changedPaths = make([]string, 0, len(allFileHashes))
 		for path := range allFileHashes {
 			changedPaths = append(changedPaths, path)
