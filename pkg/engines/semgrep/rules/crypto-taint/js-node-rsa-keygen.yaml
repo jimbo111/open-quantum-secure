@@ -1,0 +1,19 @@
+rules:
+  - id: js-node-rsa-keygen
+    patterns:
+      - pattern-either:
+          - pattern: |
+              crypto.generateKeyPair('rsa', ...)
+          - pattern: |
+              crypto.generateKeyPairSync('rsa', ...)
+          - pattern: |
+              crypto.generateKeyPair("rsa", ...)
+          - pattern: |
+              crypto.generateKeyPairSync("rsa", ...)
+    message: "Node crypto RSA key pair generation detected — quantum-vulnerable asymmetric algorithm"
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      algorithm: RSA
+      primitive: asymmetric
+      cwe: "CWE-327"

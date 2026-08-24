@@ -68,7 +68,7 @@ severity: info
 // `id:` per embedded rule. This is the integration check that ast-grep would
 // accept the output via `-r tmpfile`.
 func TestConcatEmbeddedRules_ProducesMultiDocFile(t *testing.T) {
-	path, cleanup, err := concatEmbeddedRules()
+	path, cleanup, meta, err := concatEmbeddedRules()
 	if err != nil {
 		t.Fatalf("concatEmbeddedRules: %v", err)
 	}
@@ -89,5 +89,57 @@ func TestConcatEmbeddedRules_ProducesMultiDocFile(t *testing.T) {
 	idCount := bytes.Count(data, []byte("id: "))
 	if idCount < 4 {
 		t.Errorf("expected at least 4 flattened rules across embedded files, got id-line count %d", idCount)
+	}
+	// The metadata blocks must survive the yaml.Node round-trip flatten — the
+	// wrapper consults them by ruleId (ast-grep does not echo metadata in its
+	// JSON output).
+	if !bytes.Contains(data, []byte("metadata:")) {
+		t.Error("flattened rules lost their metadata blocks")
+	}
+	// And the harvested map must reflect them.
+	for id, want := range map[string]ruleMeta{
+		"crypto-go-rsa-generate-key":   {"RSA", "pke"},
+		"crypto-go-md5-new":            {"MD5", "hash"},
+		"crypto-go-ecdh-generate-key":  {"ECDH", "key-agree"},
+		"crypto-java-cipher":           {"", "symmetric"},
+		"crypto-node-create-ecdh":      {"ECDH", "key-agree"},
+		"crypto-node-create-ecdh-ts":   {"ECDH", "key-agree"},
+		"crypto-openssl-hmac-init-ex":  {"HMAC", "mac"},
+		"crypto-python-hashlib-sha256": {"SHA-256", "hash"},
+	} {
+		got, ok := meta[id]
+		if !ok {
+			t.Errorf("harvested meta missing rule %q", id)
+			continue
+		}
+		if got != want {
+			t.Errorf("meta[%q] = %+v, want %+v", id, got, want)
+		}
+	}
+}
+
+// TestBuiltinRuleMetaMatchesEmbeddedMetadata guards against drift between the
+// curated builtin table and the metadata blocks in rules/*.yml.
+func TestBuiltinRuleMetaMatchesEmbeddedMetadata(t *testing.T) {
+	_, cleanup, meta, err := concatEmbeddedRules()
+	if err != nil {
+		t.Fatalf("concatEmbeddedRules: %v", err)
+	}
+	defer cleanup()
+
+	for id, want := range meta {
+		got, ok := lookupBuiltinRuleMeta(id)
+		if !ok {
+			t.Errorf("embedded rule %q has metadata but no builtinRuleMeta entry", id)
+			continue
+		}
+		if got != want {
+			t.Errorf("builtinRuleMeta[%q] = %+v, embedded metadata = %+v", id, got, want)
+		}
+	}
+	for id := range builtinRuleMeta {
+		if _, ok := meta[id]; !ok {
+			t.Errorf("builtinRuleMeta entry %q has no embedded rule metadata", id)
+		}
 	}
 }

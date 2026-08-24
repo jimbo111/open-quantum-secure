@@ -49,6 +49,35 @@ type rawMetaVar struct {
 	Text string `json:"text"`
 }
 
+// UnmarshalJSON accepts both metaVariables shapes: the real ast-grep CLI
+// (>=0.12) nests single captures under a "single" key —
+// {"single": {"BITS": {"text": "2048", ...}}, "multi": {...}, "transformed": {...}}
+// — while older fixtures (and this package's earlier tests) used a flat
+// {"BITS": {"text": "2048"}} map. Without the nested branch every capture is
+// silently dropped against the real CLI, killing algorithm/key-size
+// extraction. "multi" and "transformed" captures are intentionally ignored.
+func (mv *rawMetaVars) UnmarshalJSON(data []byte) error {
+	var nested struct {
+		Single map[string]rawMetaVar `json:"single"`
+	}
+	if err := json.Unmarshal(data, &nested); err == nil && nested.Single != nil {
+		*mv = nested.Single
+		return nil
+	}
+	var flat map[string]rawMetaVar
+	if err := json.Unmarshal(data, &flat); err != nil {
+		return err
+	}
+	// A flat map that was actually the nested form (e.g. empty "single")
+	// would leave junk keys, but rawMetaVar decoding of the nested objects
+	// yields empty Text values which every consumer treats as absent.
+	delete(flat, "single")
+	delete(flat, "multi")
+	delete(flat, "transformed")
+	*mv = flat
+	return nil
+}
+
 // Engine is the ast-grep engine wrapper.
 type Engine struct {
 	binaryPath string
@@ -83,7 +112,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 		return nil, fmt.Errorf("ast-grep binary not found")
 	}
 
-	rulesFile, tmpCleanup, err := e.resolveRulesFile()
+	rulesFile, tmpCleanup, ruleMetaByID, err := e.resolveRulesFile()
 	if err != nil {
 		return nil, fmt.Errorf("astgrep rules: %w", err)
 	}
@@ -123,7 +152,7 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 
 	result := make([]findings.UnifiedFinding, 0, len(matches))
 	for _, m := range matches {
-		result = append(result, normalize(m))
+		result = append(result, normalize(m, ruleMetaByID))
 	}
 
 	return result, nil
@@ -142,8 +171,10 @@ func (e *Engine) Scan(ctx context.Context, opts engines.ScanOptions) ([]findings
 // multi-doc file so the caller has one clean argument.
 //
 // The second return value is a cleanup function (always non-nil for the embed
-// path; nil-safe at the call site).
-func (e *Engine) resolveRulesFile() (string, func(), error) {
+// path; nil-safe at the call site). The third is the ruleID -> metadata map
+// harvested from the flattened docs; ast-grep's JSON output does not echo rule
+// metadata per match, so it must be recorded here at rule-load time.
+func (e *Engine) resolveRulesFile() (string, func(), map[string]ruleMeta, error) {
 	if e.rulesDir != "" {
 		return concatExternalRules(e.rulesDir)
 	}
@@ -153,10 +184,10 @@ func (e *Engine) resolveRulesFile() (string, func(), error) {
 // concatEmbeddedRules parses each embedded `rules:`-array YAML, flattens its
 // rules into individual docs, joins them with `---` separators, and writes the
 // result to a single temp file.
-func concatEmbeddedRules() (string, func(), error) {
+func concatEmbeddedRules() (string, func(), map[string]ruleMeta, error) {
 	entries, err := fs.ReadDir(embeddedRules, "rules")
 	if err != nil {
-		return "", nil, fmt.Errorf("read embedded rules: %w", err)
+		return "", nil, nil, fmt.Errorf("read embedded rules: %w", err)
 	}
 
 	var docs [][]byte
@@ -166,24 +197,28 @@ func concatEmbeddedRules() (string, func(), error) {
 		}
 		data, err := embeddedRules.ReadFile("rules/" + entry.Name())
 		if err != nil {
-			return "", nil, fmt.Errorf("read embedded rule %s: %w", entry.Name(), err)
+			return "", nil, nil, fmt.Errorf("read embedded rule %s: %w", entry.Name(), err)
 		}
 		flat, err := flattenRulesArray(data)
 		if err != nil {
-			return "", nil, fmt.Errorf("flatten %s: %w", entry.Name(), err)
+			return "", nil, nil, fmt.Errorf("flatten %s: %w", entry.Name(), err)
 		}
 		docs = append(docs, flat...)
 	}
-	return writeRulesTempFile(docs)
+	path, cleanup, err := writeRulesTempFile(docs)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return path, cleanup, ruleMetaFromDocs(docs), nil
 }
 
 // concatExternalRules reads every .yml file in dir and joins them as multi-doc
 // YAML. Files using the wrapper `rules:` format are flattened; bare single-rule
 // files are passed through unchanged.
-func concatExternalRules(dir string) (string, func(), error) {
+func concatExternalRules(dir string) (string, func(), map[string]ruleMeta, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return "", nil, fmt.Errorf("read external rules dir: %w", err)
+		return "", nil, nil, fmt.Errorf("read external rules dir: %w", err)
 	}
 
 	var docs [][]byte
@@ -193,15 +228,44 @@ func concatExternalRules(dir string) (string, func(), error) {
 		}
 		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			return "", nil, fmt.Errorf("read external rule %s: %w", entry.Name(), err)
+			return "", nil, nil, fmt.Errorf("read external rule %s: %w", entry.Name(), err)
 		}
 		flat, err := flattenRulesArray(data)
 		if err != nil {
-			return "", nil, fmt.Errorf("flatten %s: %w", entry.Name(), err)
+			return "", nil, nil, fmt.Errorf("flatten %s: %w", entry.Name(), err)
 		}
 		docs = append(docs, flat...)
 	}
-	return writeRulesTempFile(docs)
+	path, cleanup, err := writeRulesTempFile(docs)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return path, cleanup, ruleMetaFromDocs(docs), nil
+}
+
+// ruleMetaFromDocs harvests `id` + `metadata.{algorithm,primitive}` from each
+// flattened rule doc. Best-effort: a doc that fails to parse (or carries no
+// metadata) is skipped — ast-grep still runs it, and normalize falls back to
+// the builtin table / ruleID inference for its findings.
+func ruleMetaFromDocs(docs [][]byte) map[string]ruleMeta {
+	meta := make(map[string]ruleMeta, len(docs))
+	for _, doc := range docs {
+		var h struct {
+			ID       string `yaml:"id"`
+			Metadata struct {
+				Algorithm string `yaml:"algorithm"`
+				Primitive string `yaml:"primitive"`
+			} `yaml:"metadata"`
+		}
+		if err := yaml.Unmarshal(doc, &h); err != nil || h.ID == "" {
+			continue
+		}
+		if h.Metadata.Algorithm == "" && h.Metadata.Primitive == "" {
+			continue
+		}
+		meta[h.ID] = ruleMeta{Algorithm: h.Metadata.Algorithm, Primitive: h.Metadata.Primitive}
+	}
+	return meta
 }
 
 // flattenRulesArray returns one YAML doc per rule. If the input has a top-level
@@ -254,9 +318,11 @@ func writeRulesTempFile(docs [][]byte) (string, func(), error) {
 	return tmp.Name(), cleanup, nil
 }
 
-// normalize converts an ast-grep match into a UnifiedFinding.
-func normalize(m rawMatch) findings.UnifiedFinding {
-	algName := extractAlgorithm(m)
+// normalize converts an ast-grep match into a UnifiedFinding. meta is the
+// ruleID -> metadata map from resolveRulesFile (nil-safe: the builtin table
+// and ruleID inference cover matches whose rules carry no loaded metadata).
+func normalize(m rawMatch, meta map[string]ruleMeta) findings.UnifiedFinding {
+	algName, keySize, mode := extractAlgorithmDetails(m, meta)
 
 	uf := findings.UnifiedFinding{
 		Location: findings.Location{
@@ -273,49 +339,21 @@ func normalize(m rawMatch) findings.UnifiedFinding {
 	if algName != "" {
 		uf.Algorithm = &findings.Algorithm{
 			Name:      algName,
-			Primitive: primitiveFromRuleID(m.RuleID),
+			Primitive: extractPrimitive(m.RuleID, meta),
+			KeySize:   keySize,
+			Mode:      mode,
+			Curve:     extractCurve(m),
 		}
 	}
 
 	return uf
 }
 
-// extractAlgorithm derives a canonical algorithm name from the match.
-// Priority: ALGO metavariable > message substring > ruleId suffix.
-func extractAlgorithm(m rawMatch) string {
-	// 1. Prefer the ALGO metavariable captured by the rule.
-	if mv, ok := m.MetaVars["ALGO"]; ok && mv.Text != "" {
-		return strings.Trim(mv.Text, `"'`)
-	}
-
-	// 2. Try to pull a quoted string literal from the message.
-	if name := extractQuoted(m.Message); name != "" {
-		return name
-	}
-
-	// 3. Fall back to last segment of the ruleId (e.g. "crypto-java-cipher" -> "cipher").
-	parts := strings.Split(m.RuleID, "-")
-	if len(parts) > 0 {
-		return strings.ToUpper(parts[len(parts)-1])
-	}
-
-	return m.RuleID
-}
-
-// extractQuoted returns the first colon-separated suffix after a colon in msg,
-// used to pull "AES-256" from messages like "Java Cipher.getInstance: AES-256".
-func extractQuoted(msg string) string {
-	idx := strings.LastIndex(msg, ": ")
-	if idx < 0 {
-		return ""
-	}
-	candidate := strings.TrimSpace(msg[idx+2:])
-	// Strip surrounding quotes from literal captures like `"AES/CBC/PKCS5Padding"`.
-	candidate = strings.Trim(candidate, `"'`)
-	if candidate == "" || strings.ContainsAny(candidate, " \t\n") {
-		return ""
-	}
-	return candidate
+// extractAlgorithm derives a canonical algorithm name from the match. Thin
+// wrapper over extractAlgorithmDetails (see algomap.go for the priority order).
+func extractAlgorithm(m rawMatch, meta map[string]ruleMeta) string {
+	name, _, _ := extractAlgorithmDetails(m, meta)
+	return name
 }
 
 // confidenceFromSeverity maps ast-grep severity to our Confidence enum.

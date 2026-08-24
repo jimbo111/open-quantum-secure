@@ -1,0 +1,215 @@
+# Node.js / TypeScript crypto rules. ast-grep matches per-language, so every
+# rule appears twice: once for javascript (.js/.mjs/.cjs) and once for
+# typescript (.ts/.tsx/.mts/.cts) under the same id + "-ts" suffix.
+#
+# Value-generic rules capture the algorithm selector ($ALGO / $TYPE / $CURVE)
+# and rely on the wrapper's capture canonicalization ('rsa' -> RSA,
+# 'RS256' -> RSA, 'md5' -> MD5, ...); metadata carries a static algorithm
+# name only where one is unambiguous (createDiffieHellman, createECDH).
+#
+# Patterns containing object literals ({ key: $VAL }) must be quoted:
+# unquoted they are parsed as YAML flow mappings, not pattern strings.
+rules:
+  # --- JavaScript ---
+  - id: crypto-node-create-hash
+    language: javascript
+    rule:
+      pattern: crypto.createHash($ALGO)
+    message: "Node crypto.createHash: $ALGO"
+    severity: warning
+    metadata:
+      primitive: hash
+
+  - id: crypto-node-generate-key-pair
+    language: javascript
+    rule:
+      pattern: crypto.generateKeyPair($TYPE, $$$)
+    message: "Node crypto.generateKeyPair: $TYPE"
+    severity: warning
+    metadata:
+      primitive: pke
+
+  - id: crypto-node-generate-key-pair-sync
+    language: javascript
+    rule:
+      pattern: crypto.generateKeyPairSync($TYPE, $$$)
+    message: "Node crypto.generateKeyPairSync: $TYPE"
+    severity: warning
+    metadata:
+      primitive: pke
+
+  - id: crypto-node-generate-key-pair-modulus
+    language: javascript
+    rule:
+      pattern: "crypto.generateKeyPair($TYPE, { modulusLength: $BITS, $$$ }, $CB)"
+    message: "Node crypto.generateKeyPair: $TYPE $BITS-bit"
+    severity: warning
+    metadata:
+      primitive: pke
+
+  - id: crypto-node-generate-key-pair-sync-modulus
+    language: javascript
+    rule:
+      pattern: "crypto.generateKeyPairSync($TYPE, { modulusLength: $BITS, $$$ })"
+    message: "Node crypto.generateKeyPairSync: $TYPE $BITS-bit"
+    severity: warning
+    metadata:
+      primitive: pke
+
+  - id: crypto-node-create-diffie-hellman
+    language: javascript
+    rule:
+      pattern: crypto.createDiffieHellman($$$)
+    message: "Node crypto.createDiffieHellman usage"
+    severity: warning
+    metadata:
+      algorithm: DH
+      primitive: key-agree
+
+  - id: crypto-node-create-ecdh
+    language: javascript
+    rule:
+      pattern: crypto.createECDH($CURVE)
+    message: "Node crypto.createECDH: $CURVE"
+    severity: warning
+    metadata:
+      algorithm: ECDH
+      primitive: key-agree
+
+  - id: crypto-node-create-sign
+    language: javascript
+    rule:
+      pattern: crypto.createSign($ALGO)
+    message: "Node crypto.createSign: $ALGO"
+    severity: warning
+    metadata:
+      primitive: signature
+
+  - id: crypto-node-create-verify
+    language: javascript
+    rule:
+      pattern: crypto.createVerify($ALGO)
+    message: "Node crypto.createVerify: $ALGO"
+    severity: warning
+    metadata:
+      primitive: signature
+
+  - id: crypto-node-jwt-sign
+    language: javascript
+    rule:
+      pattern: "jwt.sign($PAYLOAD, $KEY, { algorithm: $ALGO, $$$ })"
+    message: "jsonwebtoken jwt.sign: $ALGO"
+    severity: warning
+    metadata:
+      primitive: signature
+
+  - id: crypto-node-webcrypto-generate-key
+    language: javascript
+    rule:
+      pattern: "crypto.subtle.generateKey({ name: $ALGO, $$$ }, $EXT, $USAGES)"
+    message: "WebCrypto crypto.subtle.generateKey: $ALGO"
+    severity: warning
+    metadata:
+      primitive: pke
+
+  # --- TypeScript ---
+  - id: crypto-node-create-hash-ts
+    language: typescript
+    rule:
+      pattern: crypto.createHash($ALGO)
+    message: "Node crypto.createHash: $ALGO"
+    severity: warning
+    metadata:
+      primitive: hash
+
+  - id: crypto-node-generate-key-pair-ts
+    language: typescript
+    rule:
+      pattern: crypto.generateKeyPair($TYPE, $$$)
+    message: "Node crypto.generateKeyPair: $TYPE"
+    severity: warning
+    metadata:
+      primitive: pke
+
+  - id: crypto-node-generate-key-pair-sync-ts
+    language: typescript
+    rule:
+      pattern: crypto.generateKeyPairSync($TYPE, $$$)
+    message: "Node crypto.generateKeyPairSync: $TYPE"
+    severity: warning
+    metadata:
+      primitive: pke
+
+  - id: crypto-node-generate-key-pair-modulus-ts
+    language: typescript
+    rule:
+      pattern: "crypto.generateKeyPair($TYPE, { modulusLength: $BITS, $$$ }, $CB)"
+    message: "Node crypto.generateKeyPair: $TYPE $BITS-bit"
+    severity: warning
+    metadata:
+      primitive: pke
+
+  - id: crypto-node-generate-key-pair-sync-modulus-ts
+    language: typescript
+    rule:
+      pattern: "crypto.generateKeyPairSync($TYPE, { modulusLength: $BITS, $$$ })"
+    message: "Node crypto.generateKeyPairSync: $TYPE $BITS-bit"
+    severity: warning
+    metadata:
+      primitive: pke
+
+  - id: crypto-node-create-diffie-hellman-ts
+    language: typescript
+    rule:
+      pattern: crypto.createDiffieHellman($$$)
+    message: "Node crypto.createDiffieHellman usage"
+    severity: warning
+    metadata:
+      algorithm: DH
+      primitive: key-agree
+
+  - id: crypto-node-create-ecdh-ts
+    language: typescript
+    rule:
+      pattern: crypto.createECDH($CURVE)
+    message: "Node crypto.createECDH: $CURVE"
+    severity: warning
+    metadata:
+      algorithm: ECDH
+      primitive: key-agree
+
+  - id: crypto-node-create-sign-ts
+    language: typescript
+    rule:
+      pattern: crypto.createSign($ALGO)
+    message: "Node crypto.createSign: $ALGO"
+    severity: warning
+    metadata:
+      primitive: signature
+
+  - id: crypto-node-create-verify-ts
+    language: typescript
+    rule:
+      pattern: crypto.createVerify($ALGO)
+    message: "Node crypto.createVerify: $ALGO"
+    severity: warning
+    metadata:
+      primitive: signature
+
+  - id: crypto-node-jwt-sign-ts
+    language: typescript
+    rule:
+      pattern: "jwt.sign($PAYLOAD, $KEY, { algorithm: $ALGO, $$$ })"
+    message: "jsonwebtoken jwt.sign: $ALGO"
+    severity: warning
+    metadata:
+      primitive: signature
+
+  - id: crypto-node-webcrypto-generate-key-ts
+    language: typescript
+    rule:
+      pattern: "crypto.subtle.generateKey({ name: $ALGO, $$$ }, $EXT, $USAGES)"
+    message: "WebCrypto crypto.subtle.generateKey: $ALGO"
+    severity: warning
+    metadata:
+      primitive: pke

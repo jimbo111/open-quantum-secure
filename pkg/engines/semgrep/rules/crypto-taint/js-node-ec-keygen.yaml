@@ -1,0 +1,21 @@
+rules:
+  - id: js-node-ec-keygen
+    patterns:
+      - pattern-either:
+          - pattern: |
+              crypto.generateKeyPair('ec', ...)
+          - pattern: |
+              crypto.generateKeyPairSync('ec', ...)
+          - pattern: |
+              crypto.generateKeyPair("ec", ...)
+          - pattern: |
+              crypto.generateKeyPairSync("ec", ...)
+          - pattern: |
+              crypto.createECDH(...)
+    message: "Node crypto elliptic-curve key generation detected — quantum-vulnerable asymmetric algorithm"
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      algorithm: ECDSA
+      primitive: asymmetric
+      cwe: "CWE-327"

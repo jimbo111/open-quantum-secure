@@ -5,6 +5,9 @@ rules:
       pattern: aes.NewCipher($KEY)
     message: "Go crypto/aes NewCipher usage"
     severity: warning
+    metadata:
+      algorithm: AES
+      primitive: symmetric
 
   - id: crypto-go-rsa-generate-key
     language: go
@@ -12,6 +15,9 @@ rules:
       pattern: rsa.GenerateKey($RAND, $BITS)
     message: "Go crypto/rsa GenerateKey: $BITS-bit"
     severity: warning
+    metadata:
+      algorithm: RSA
+      primitive: pke
 
   - id: crypto-go-rsa-encrypt-oaep
     language: go
@@ -19,6 +25,9 @@ rules:
       pattern: rsa.EncryptOAEP($HASH, $RAND, $PUB, $MSG, $LABEL)
     message: "Go crypto/rsa EncryptOAEP usage"
     severity: warning
+    metadata:
+      algorithm: RSA
+      primitive: pke
 
   - id: crypto-go-rsa-sign-pkcs1v15
     language: go
@@ -26,6 +35,9 @@ rules:
       pattern: rsa.SignPKCS1v15($RAND, $PRIV, $HASH, $DIGEST)
     message: "Go crypto/rsa SignPKCS1v15 usage"
     severity: warning
+    metadata:
+      algorithm: RSA
+      primitive: signature
 
   - id: crypto-go-ecdsa-generate-key
     language: go
@@ -33,6 +45,9 @@ rules:
       pattern: ecdsa.GenerateKey($CURVE, $RAND)
     message: "Go crypto/ecdsa GenerateKey: $CURVE"
     severity: warning
+    metadata:
+      algorithm: ECDSA
+      primitive: signature
 
   - id: crypto-go-ecdsa-sign
     language: go
@@ -40,6 +55,9 @@ rules:
       pattern: ecdsa.Sign($RAND, $PRIV, $DIGEST)
     message: "Go crypto/ecdsa Sign usage"
     severity: warning
+    metadata:
+      algorithm: ECDSA
+      primitive: signature
 
   - id: crypto-go-sha256-new
     language: go
@@ -47,6 +65,9 @@ rules:
       pattern: sha256.New()
     message: "Go crypto/sha256 usage"
     severity: info
+    metadata:
+      algorithm: SHA-256
+      primitive: hash
 
   - id: crypto-go-sha512-new
     language: go
@@ -54,6 +75,9 @@ rules:
       pattern: sha512.New()
     message: "Go crypto/sha512 usage"
     severity: info
+    metadata:
+      algorithm: SHA-512
+      primitive: hash
 
   - id: crypto-go-md5-new
     language: go
@@ -61,6 +85,9 @@ rules:
       pattern: md5.New()
     message: "Go crypto/md5 usage"
     severity: warning
+    metadata:
+      algorithm: MD5
+      primitive: hash
 
   - id: crypto-go-hmac-new
     language: go
@@ -68,6 +95,9 @@ rules:
       pattern: hmac.New($HASH, $KEY)
     message: "Go crypto/hmac usage"
     severity: info
+    metadata:
+      algorithm: HMAC
+      primitive: mac
 
   - id: crypto-go-tls-config
     language: go
@@ -75,6 +105,9 @@ rules:
       pattern: tls.Config{$$$}
     message: "Go crypto/tls Config usage"
     severity: info
+    metadata:
+      algorithm: TLS
+      primitive: protocol
 
   - id: crypto-go-ecdh-generate-key
     language: go
@@ -82,3 +115,6 @@ rules:
       pattern: ecdh.P256().GenerateKey($RAND)
     message: "Go crypto/ecdh P-256 key generation"
     severity: warning
+    metadata:
+      algorithm: ECDH
+      primitive: key-agree

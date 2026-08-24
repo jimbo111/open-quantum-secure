@@ -17,6 +17,8 @@ func TestNormalize(t *testing.T) {
 		wantColumn  int
 		wantAlg     string
 		wantPrim    string
+		wantKeySize int
+		wantMode    string
 		wantConf    findings.Confidence
 		wantEngine  string
 	}{
@@ -46,7 +48,7 @@ func TestNormalize(t *testing.T) {
 			wantEngine: "astgrep",
 		},
 		{
-			name: "openssl evp encrypt init no metavar",
+			name: "openssl evp encrypt init parses CIPHER selector",
 			match: rawMatch{
 				Text:     "EVP_EncryptInit(ctx, EVP_aes_256_cbc(), key, iv)",
 				File:     "lib/crypto.c",
@@ -57,15 +59,19 @@ func TestNormalize(t *testing.T) {
 				Range: rawRange{
 					Start: rawPosition{Line: 0, Column: 0},
 				},
-				MetaVars: rawMetaVars{},
+				MetaVars: rawMetaVars{
+					"CIPHER": {Text: "EVP_aes_256_cbc()"},
+				},
 			},
-			wantFile:   "lib/crypto.c",
-			wantLine:   1,
-			wantColumn: 1,
-			wantAlg:    "EVP_aes_256_cbc()",
-			wantPrim:   "symmetric",
-			wantConf:   findings.ConfidenceMedium,
-			wantEngine: "astgrep",
+			wantFile:    "lib/crypto.c",
+			wantLine:    1,
+			wantColumn:  1,
+			wantAlg:     "AES",
+			wantPrim:    "symmetric",
+			wantKeySize: 256,
+			wantMode:    "CBC",
+			wantConf:    findings.ConfidenceMedium,
+			wantEngine:  "astgrep",
 		},
 		{
 			name: "go rsa generate key error severity",
@@ -83,16 +89,17 @@ func TestNormalize(t *testing.T) {
 					"BITS": {Text: "2048"},
 				},
 			},
-			wantFile:   "internal/keys.go",
-			wantLine:   20,
-			wantColumn: 2,
-			wantAlg:    "2048-bit",
-			wantPrim:   "asymmetric",
-			wantConf:   findings.ConfidenceHigh,
-			wantEngine: "astgrep",
+			wantFile:    "internal/keys.go",
+			wantLine:    20,
+			wantColumn:  2,
+			wantAlg:     "RSA", // curated name — NOT the poisoned "2048-bit" message suffix
+			wantPrim:    "pke",
+			wantKeySize: 2048,
+			wantConf:    findings.ConfidenceHigh,
+			wantEngine:  "astgrep",
 		},
 		{
-			name: "python hashlib md5 info severity fallback ruleId",
+			name: "python hashlib md5 info severity curated name",
 			match: rawMatch{
 				Text:     "hashlib.md5(data)",
 				File:     "utils/hash.py",
@@ -108,16 +115,88 @@ func TestNormalize(t *testing.T) {
 			wantFile:   "utils/hash.py",
 			wantLine:   5,
 			wantColumn: 1,
-			wantAlg:    "MD5", // ruleId last segment uppercased
+			wantAlg:    "MD5",
 			wantPrim:   "hash",
 			wantConf:   findings.ConfidenceLow,
+			wantEngine: "astgrep",
+		},
+		{
+			name: "go ecdh generate key curated name",
+			match: rawMatch{
+				Text:     "ecdh.P256().GenerateKey(rand.Reader)",
+				File:     "internal/kex.go",
+				Language: "go",
+				RuleID:   "crypto-go-ecdh-generate-key",
+				Message:  "Go crypto/ecdh P-256 key generation",
+				Severity: "warning",
+				Range: rawRange{
+					Start: rawPosition{Line: 7, Column: 0},
+				},
+				MetaVars: rawMetaVars{},
+			},
+			wantFile:   "internal/kex.go",
+			wantLine:   8,
+			wantColumn: 1,
+			wantAlg:    "ECDH",
+			wantPrim:   "key-agree",
+			wantConf:   findings.ConfidenceMedium,
+			wantEngine: "astgrep",
+		},
+		{
+			name: "node generateKeyPairSync rsa with modulusLength",
+			match: rawMatch{
+				Text:     "crypto.generateKeyPairSync('rsa', { modulusLength: 2048 })",
+				File:     "src/keys.js",
+				Language: "javascript",
+				RuleID:   "crypto-node-generate-key-pair-sync-modulus",
+				Message:  "Node crypto.generateKeyPairSync: 'rsa' 2048-bit",
+				Severity: "warning",
+				Range: rawRange{
+					Start: rawPosition{Line: 2, Column: 0},
+				},
+				MetaVars: rawMetaVars{
+					"TYPE": {Text: "'rsa'"},
+					"BITS": {Text: "2048"},
+				},
+			},
+			wantFile:    "src/keys.js",
+			wantLine:    3,
+			wantColumn:  1,
+			wantAlg:     "RSA",
+			wantPrim:    "pke",
+			wantKeySize: 2048,
+			wantConf:    findings.ConfidenceMedium,
+			wantEngine:  "astgrep",
+		},
+		{
+			name: "jwt sign RS256 maps to RSA",
+			match: rawMatch{
+				Text:     "jwt.sign(payload, key, { algorithm: 'RS256' })",
+				File:     "src/auth.ts",
+				Language: "typescript",
+				RuleID:   "crypto-node-jwt-sign-ts",
+				Message:  "jsonwebtoken jwt.sign: 'RS256'",
+				Severity: "warning",
+				Range: rawRange{
+					Start: rawPosition{Line: 11, Column: 0},
+				},
+				MetaVars: rawMetaVars{
+					"ALGO": {Text: "'RS256'"},
+				},
+			},
+			wantFile:   "src/auth.ts",
+			wantLine:   12,
+			wantColumn: 1,
+			wantAlg:    "RSA",
+			wantPrim:   "signature",
+			wantConf:   findings.ConfidenceMedium,
 			wantEngine: "astgrep",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			uf := normalize(tc.match)
+			uf := normalize(tc.match, nil)
 
 			if uf.Location.File != tc.wantFile {
 				t.Errorf("File: got %q, want %q", uf.Location.File, tc.wantFile)
@@ -143,6 +222,12 @@ func TestNormalize(t *testing.T) {
 				}
 				if uf.Algorithm.Primitive != tc.wantPrim {
 					t.Errorf("Algorithm.Primitive: got %q, want %q", uf.Algorithm.Primitive, tc.wantPrim)
+				}
+				if uf.Algorithm.KeySize != tc.wantKeySize {
+					t.Errorf("Algorithm.KeySize: got %d, want %d", uf.Algorithm.KeySize, tc.wantKeySize)
+				}
+				if uf.Algorithm.Mode != tc.wantMode {
+					t.Errorf("Algorithm.Mode: got %q, want %q", uf.Algorithm.Mode, tc.wantMode)
 				}
 			}
 		})
@@ -178,32 +263,126 @@ func TestExtractAlgorithm(t *testing.T) {
 			want: "AES/GCM/NoPadding",
 		},
 		{
-			name: "message colon extraction fallback",
+			name: "openssl CIPHER selector parsed to family name",
 			match: rawMatch{
-				RuleID:   "crypto-openssl-evp-encrypt-init",
-				Message:  "OpenSSL EVP_EncryptInit usage: EVP_aes_128_cbc",
-				MetaVars: rawMetaVars{},
+				RuleID:  "crypto-openssl-evp-encrypt-init",
+				Message: "OpenSSL EVP_EncryptInit usage: EVP_aes_128_cbc()",
+				MetaVars: rawMetaVars{
+					"CIPHER": {Text: "EVP_aes_128_cbc()"},
+				},
 			},
-			want: "EVP_aes_128_cbc",
+			want: "AES",
 		},
 		{
-			name: "ruleId last segment fallback",
+			name: "curated ruleID name beats old last-segment fallback",
 			match: rawMatch{
 				RuleID:   "crypto-python-hashlib-sha256",
 				Message:  "Python hashlib.sha256 usage",
 				MetaVars: rawMetaVars{},
 			},
-			want: "SHA256",
+			want: "SHA-256",
+		},
+		{
+			name: "message suffix is never consulted (no 2048-bit poisoning)",
+			match: rawMatch{
+				RuleID:   "crypto-go-rsa-generate-key",
+				Message:  "Go crypto/rsa GenerateKey: 2048-bit",
+				MetaVars: rawMetaVars{"BITS": {Text: "2048"}},
+			},
+			want: "RSA",
+		},
+		{
+			name: "node keygen type token canonicalized",
+			match: rawMatch{
+				RuleID:   "crypto-node-generate-key-pair",
+				Message:  "Node crypto.generateKeyPair: 'ec'",
+				MetaVars: rawMetaVars{"TYPE": {Text: "'ec'"}},
+			},
+			want: "ECDSA",
+		},
+		{
+			name: "unquoted variable capture falls back to metadata not garbage",
+			match: rawMatch{
+				RuleID:   "crypto-java-cipher",
+				Message:  "Java Cipher.getInstance: transform",
+				MetaVars: rawMetaVars{"ALGO": {Text: "transform"}},
+			},
+			want: "", // value-generic rule + unresolvable capture → no algorithm
+		},
+		{
+			name: "java signature transform maps to base algorithm",
+			match: rawMatch{
+				RuleID:   "crypto-java-signature",
+				Message:  `Java Signature.getInstance: "SHA256withRSA"`,
+				MetaVars: rawMetaVars{"ALGO": {Text: `"SHA256withRSA"`}},
+			},
+			want: "RSA",
+		},
+		{
+			name: "unknown external rule infers from ruleID token",
+			match: rawMatch{
+				RuleID:   "custom-md5-usage-check",
+				MetaVars: rawMetaVars{},
+			},
+			want: "MD5",
+		},
+		{
+			name: "unknown external rule with no algorithm token yields empty (no NEW/CONFIG)",
+			match: rawMatch{
+				RuleID:   "custom-thing-new",
+				MetaVars: rawMetaVars{},
+			},
+			want: "",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := extractAlgorithm(tc.match)
+			got := extractAlgorithm(tc.match, nil)
 			if got != tc.want {
 				t.Errorf("extractAlgorithm: got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestExtractAlgorithm_LoadedMetadataWins verifies that metadata harvested from
+// rule files (the map returned by resolveRulesFile) takes precedence over the
+// builtin table and ruleID inference for static names.
+func TestExtractAlgorithm_LoadedMetadataWins(t *testing.T) {
+	meta := map[string]ruleMeta{
+		"external-custom-keygen": {Algorithm: "DSA", Primitive: "signature"},
+	}
+	m := rawMatch{RuleID: "external-custom-keygen", MetaVars: rawMetaVars{}}
+	if got := extractAlgorithm(m, meta); got != "DSA" {
+		t.Errorf("extractAlgorithm with loaded metadata: got %q, want %q", got, "DSA")
+	}
+	uf := normalize(m, meta)
+	if uf.Algorithm == nil || uf.Algorithm.Primitive != "signature" {
+		t.Errorf("normalize should take primitive from loaded metadata, got %+v", uf.Algorithm)
+	}
+}
+
+// TestMetaVarsUnmarshal_NestedSingle pins the real ast-grep CLI JSON contract:
+// metaVariables nests single captures under "single". The flat legacy shape
+// must keep working for old fixtures.
+func TestMetaVarsUnmarshal_NestedSingle(t *testing.T) {
+	nested := []byte(`{"single":{"BITS":{"text":"2048"},"ALGO":{"text":"'rsa'"}},"multi":{},"transformed":{}}`)
+	var mv rawMetaVars
+	if err := mv.UnmarshalJSON(nested); err != nil {
+		t.Fatalf("nested unmarshal: %v", err)
+	}
+	if mv["BITS"].Text != "2048" || mv["ALGO"].Text != "'rsa'" {
+		t.Errorf("nested metaVariables not decoded: %+v", mv)
+	}
+
+	flat := []byte(`{"BITS":{"text":"4096"}}`)
+	mv = nil
+	if err := mv.UnmarshalJSON(flat); err != nil {
+		t.Fatalf("flat unmarshal: %v", err)
+	}
+	if mv["BITS"].Text != "4096" {
+		t.Errorf("flat metaVariables not decoded: %+v", mv)
 	}
 }
 

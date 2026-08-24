@@ -5,6 +5,8 @@ rules:
       pattern: hashlib.new($ALGO)
     message: "Python hashlib.new: $ALGO"
     severity: warning
+    metadata:
+      primitive: hash
 
   - id: crypto-python-hashlib-sha256
     language: python
@@ -12,6 +14,9 @@ rules:
       pattern: hashlib.sha256($DATA)
     message: "Python hashlib.sha256 usage"
     severity: warning
+    metadata:
+      algorithm: SHA-256
+      primitive: hash
 
   - id: crypto-python-hashlib-sha1
     language: python
@@ -19,6 +24,9 @@ rules:
       pattern: hashlib.sha1($DATA)
     message: "Python hashlib.sha1 usage"
     severity: warning
+    metadata:
+      algorithm: SHA-1
+      primitive: hash
 
   - id: crypto-python-hashlib-md5
     language: python
@@ -26,6 +34,9 @@ rules:
       pattern: hashlib.md5($DATA)
     message: "Python hashlib.md5 usage"
     severity: warning
+    metadata:
+      algorithm: MD5
+      primitive: hash
 
   - id: crypto-python-pycryptodome-aes
     language: python
@@ -33,6 +44,9 @@ rules:
       pattern: AES.new($KEY, $MODE)
     message: "Python PyCryptodome AES.new: $MODE"
     severity: warning
+    metadata:
+      algorithm: AES
+      primitive: symmetric
 
   - id: crypto-python-pycryptodome-rsa-generate
     language: python
@@ -40,6 +54,9 @@ rules:
       pattern: RSA.generate($BITS)
     message: "Python PyCryptodome RSA.generate: $BITS-bit"
     severity: warning
+    metadata:
+      algorithm: RSA
+      primitive: pke
 
   - id: crypto-python-cryptography-hazmat-aes
     language: python
@@ -47,6 +64,9 @@ rules:
       pattern: algorithms.AES($KEY)
     message: "Python cryptography.hazmat AES usage"
     severity: warning
+    metadata:
+      algorithm: AES
+      primitive: symmetric
 
   - id: crypto-python-cryptography-hazmat-rsa
     language: python
@@ -54,6 +74,9 @@ rules:
       pattern: rsa.generate_private_key($PE, $KS, $BE)
     message: "Python cryptography.hazmat RSA key generation"
     severity: warning
+    metadata:
+      algorithm: RSA
+      primitive: pke
 
   - id: crypto-python-cryptography-hazmat-ec
     language: python
@@ -61,6 +84,9 @@ rules:
       pattern: ec.generate_private_key($CURVE, $BE)
     message: "Python cryptography.hazmat EC key generation: $CURVE"
     severity: warning
+    metadata:
+      algorithm: ECDSA
+      primitive: signature
 
   - id: crypto-python-ssl-wrap-socket
     language: python
@@ -68,3 +94,6 @@ rules:
       pattern: ssl.wrap_socket($SOCK)
     message: "Python ssl.wrap_socket usage (deprecated)"
     severity: warning
+    metadata:
+      algorithm: TLS
+      primitive: protocol

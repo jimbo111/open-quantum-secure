@@ -1,3 +1,7 @@
+# Java JCA rules are value-generic: the $ALGO metavariable captures the actual
+# algorithm string ("AES/CBC/PKCS5Padding", "RSA", "SHA256withRSA", ...), so
+# metadata carries only the primitive. The wrapper prefers the captured value
+# and never invents a static algorithm name for these rules.
 rules:
   - id: crypto-java-cipher
     language: java
@@ -5,6 +9,8 @@ rules:
       pattern: Cipher.getInstance($ALGO)
     message: "Java Cipher.getInstance: $ALGO"
     severity: warning
+    metadata:
+      primitive: symmetric
 
   - id: crypto-java-message-digest
     language: java
@@ -12,6 +18,8 @@ rules:
       pattern: MessageDigest.getInstance($ALGO)
     message: "Java MessageDigest.getInstance: $ALGO"
     severity: warning
+    metadata:
+      primitive: hash
 
   - id: crypto-java-key-pair-generator
     language: java
@@ -19,6 +27,8 @@ rules:
       pattern: KeyPairGenerator.getInstance($ALGO)
     message: "Java KeyPairGenerator.getInstance: $ALGO"
     severity: warning
+    metadata:
+      primitive: pke
 
   - id: crypto-java-key-generator
     language: java
@@ -26,6 +36,8 @@ rules:
       pattern: KeyGenerator.getInstance($ALGO)
     message: "Java KeyGenerator.getInstance: $ALGO"
     severity: warning
+    metadata:
+      primitive: symmetric
 
   - id: crypto-java-secret-key-factory
     language: java
@@ -33,6 +45,8 @@ rules:
       pattern: SecretKeyFactory.getInstance($ALGO)
     message: "Java SecretKeyFactory.getInstance: $ALGO"
     severity: warning
+    metadata:
+      primitive: symmetric
 
   - id: crypto-java-mac
     language: java
@@ -40,6 +54,8 @@ rules:
       pattern: Mac.getInstance($ALGO)
     message: "Java Mac.getInstance: $ALGO"
     severity: warning
+    metadata:
+      primitive: mac
 
   - id: crypto-java-signature
     language: java
@@ -47,6 +63,8 @@ rules:
       pattern: Signature.getInstance($ALGO)
     message: "Java Signature.getInstance: $ALGO"
     severity: warning
+    metadata:
+      primitive: signature
 
   - id: crypto-java-key-agreement
     language: java
@@ -54,3 +72,5 @@ rules:
       pattern: KeyAgreement.getInstance($ALGO)
     message: "Java KeyAgreement.getInstance: $ALGO"
     severity: warning
+    metadata:
+      primitive: key-agree
