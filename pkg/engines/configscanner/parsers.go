@@ -932,3 +932,60 @@ func stripQuotes(s string) string {
 	}
 	return s
 }
+
+// parseDirectives parses nginx / Apache / OpenSSH directive-style configs.
+// Line syntax is:
+//
+//	directive value1 value2;   (nginx — semicolon-terminated)
+//	Directive value1 value2    (Apache httpd / sshd_config / ssh_config)
+//
+// The first whitespace-delimited token is the key; the remainder of the line
+// (arguments joined by single spaces) is the value. Block openers/closers
+// ("server {", "}", "<VirtualHost ...>", "</VirtualHost>") and comments are
+// skipped. Nesting is intentionally flattened: crypto directives
+// (ssl_protocols, SSLCipherSuite, KexAlgorithms, ...) are globally unique
+// enough that block context adds nothing to vocabulary matching.
+func parseDirectives(data []byte) ([]KeyValue, error) {
+	var kvs []KeyValue
+	lines := splitLines(data)
+	for lineNum, raw := range lines {
+		if len(kvs) >= maxHCLEntries {
+			break
+		}
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Apache section tags: <VirtualHost *:443> / </VirtualHost>.
+		if strings.HasPrefix(line, "<") {
+			continue
+		}
+		// Strip trailing inline comment (nginx/apache/sshd all use #).
+		if ci := strings.Index(line, " #"); ci >= 0 {
+			line = strings.TrimSpace(line[:ci])
+		}
+		// Strip nginx block opener and statement terminator.
+		line = strings.TrimSpace(strings.TrimSuffix(line, "{"))
+		line = strings.TrimSpace(strings.TrimSuffix(line, ";"))
+		if line == "" || line == "}" {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			// Bare block name ("server", "http") or argument-less directive.
+			continue
+		}
+		key := fields[0]
+		value := strings.Join(fields[1:], " ")
+		if len(fields) == 2 {
+			value = stripQuotes(value)
+		}
+		kvs = append(kvs, KeyValue{
+			Key:   key,
+			Value: value,
+			Line:  lineNum + 1,
+		})
+	}
+	return kvs, nil
+}

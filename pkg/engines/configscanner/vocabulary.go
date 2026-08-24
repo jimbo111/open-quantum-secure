@@ -48,7 +48,17 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "algorithm", ValueHints: []string{"ecdsa"}, Algorithm: "ECDSA", Primitive: "signature"},
 	{KeyPattern: "algorithm", ValueHints: []string{"ecdh"}, Algorithm: "ECDH", Primitive: "key-exchange"},
 	{KeyPattern: "algorithm", ValueHints: []string{"ed25519"}, Algorithm: "Ed25519", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"ed448"}, Algorithm: "Ed448", Primitive: "signature"},
 	{KeyPattern: "algorithm", ValueHints: []string{"x25519"}, Algorithm: "X25519", Primitive: "key-exchange"},
+	{KeyPattern: "algorithm", ValueHints: []string{"x448"}, Algorithm: "X448", Primitive: "key-exchange"},
+	// AWS KMS SigningAlgorithm values (RSASSA_PSS_SHA_256, RSASSA_PKCS1_V1_5_SHA_384, ...).
+	// The bare "rsa" hint cannot see them: "rsa" inside "rsassa" is not
+	// word-bounded. ECDSA_SHA_256 is already covered by the "ecdsa" hint above.
+	{KeyPattern: "algorithm", ValueHints: []string{"rsassa"}, Algorithm: "RSA", Primitive: "signature"},
+	// "dsa" is word-bounded, so it cannot fire on "ecdsa"/"kcdsa" values
+	// (those are matched by their own earlier entries anyway).
+	{KeyPattern: "algorithm", ValueHints: []string{"dsa"}, Algorithm: "DSA", Primitive: "signature"},
+	{KeyPattern: "algorithm", ValueHints: []string{"elgamal"}, Algorithm: "ElGamal", Primitive: "asymmetric"},
 	// --- PQC under 'algorithm' (NIST FIPS 203/204/205 + IETF hybrid KEMs) ---
 	// More-specific hints first so first-match-wins picks the canonical name.
 	{KeyPattern: "algorithm", ValueHints: []string{"x25519mlkem768", "x25519-mlkem-768"}, Algorithm: "X25519MLKEM768", Primitive: "kem"},
@@ -247,6 +257,20 @@ var cryptoParams = []CryptoParam{
 	{KeyPattern: "alg", ValueHints: []string{"hs256"}, Algorithm: "HMAC-SHA256", Primitive: "mac"},
 	{KeyPattern: "alg", ValueHints: []string{"hs384"}, Algorithm: "HMAC-SHA384", Primitive: "mac"},
 	{KeyPattern: "alg", ValueHints: []string{"hs512"}, Algorithm: "HMAC-SHA512", Primitive: "mac"},
+
+	// --- AWS KMS key specs (Terraform aws_kms_key / KMS API) ---
+	// The "key_spec" pattern is word-bounded inside "customer_master_key_spec"
+	// too, so one pattern covers both the modern and the legacy attribute name.
+	// KMS SigningAlgorithm values (RSASSA_*, ECDSA_SHA_*) are handled by the
+	// "algorithm" entries above ("rsassa" / "ecdsa" hints) since "algorithm"
+	// segment-matches the key "signing_algorithm".
+	{KeyPattern: "key_spec", ValueHints: []string{"rsa_2048"}, Algorithm: "RSA", Primitive: "asymmetric", KeySize: 2048},
+	{KeyPattern: "key_spec", ValueHints: []string{"rsa_3072"}, Algorithm: "RSA", Primitive: "asymmetric", KeySize: 3072},
+	{KeyPattern: "key_spec", ValueHints: []string{"rsa_4096"}, Algorithm: "RSA", Primitive: "asymmetric", KeySize: 4096},
+	{KeyPattern: "key_spec", ValueHints: []string{"ecc_nist_p256"}, Algorithm: "ECDSA", Primitive: "signature", KeySize: 256},
+	{KeyPattern: "key_spec", ValueHints: []string{"ecc_nist_p384"}, Algorithm: "ECDSA", Primitive: "signature", KeySize: 384},
+	{KeyPattern: "key_spec", ValueHints: []string{"ecc_nist_p521"}, Algorithm: "ECDSA", Primitive: "signature", KeySize: 521},
+	{KeyPattern: "key_spec", ValueHints: []string{"ecc_secg_p256k1"}, Algorithm: "ECDSA", Primitive: "signature", KeySize: 256},
 }
 
 // keySizePatterns lists KeyPattern values for which the value is parsed as an
@@ -418,56 +442,130 @@ type KeyValue struct {
 	Line  int
 }
 
+// splitCompoundValue splits a multi-algorithm value on ',' and ':' so every
+// listed algorithm is matched, not just the first (previously a single
+// first-match-wins pass over the whole value dropped everything after the
+// first hit for values like "AES-256-GCM,ChaCha20-Poly1305"). Values without
+// either separator are returned unchanged as a single part. No ValueHint
+// contains ',' or ':', so per-part matching never loses a match the
+// whole-value pass would have found — part boundaries are word boundaries.
+func splitCompoundValue(value string) []string {
+	if !strings.ContainsAny(value, ",:") {
+		return []string{value}
+	}
+	return strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ':'
+	})
+}
+
+// newConfigFinding assembles the standard config-scanner finding shape.
+func newConfigFinding(filePath string, kv KeyValue, alg findings.Algorithm) findings.UnifiedFinding {
+	a := alg
+	return findings.UnifiedFinding{
+		Location: findings.Location{
+			File: filePath,
+			Line: kv.Line,
+		},
+		Algorithm:     &a,
+		Confidence:    findings.ConfidenceMedium,
+		SourceEngine:  "config-scanner",
+		Reachable:     findings.ReachableUnknown,
+		RawIdentifier: kv.Key + "=" + kv.Value,
+	}
+}
+
 // matchCryptoParams scans a slice of key-value pairs against the crypto
-// vocabulary and returns a finding for each match. The first matching
-// CryptoParam entry wins for a given key-value pair.
+// vocabulary and returns a finding for each match.
+//
+// Matching runs in three layers per key-value pair:
+//  1. ssl_prefer_server_ciphers emits a single info-level finding.
+//  2. Algorithm-list keys (ssl_ciphers, KexAlgorithms, enctypes, ike/esp,
+//     ... — see listValueKeyPatterns) are decomposed into per-algorithm
+//     crypto atoms, one finding per distinct atom. Authoritative — no
+//     fall-through (see the exclusion-token comment below).
+//  3. Generic vocabulary: the value is split on ','/':' and the first
+//     matching CryptoParam wins per part (duplicate algorithms across parts
+//     collapse to one finding).
 func matchCryptoParams(filePath string, kvPairs []KeyValue) []findings.UnifiedFinding {
 	var result []findings.UnifiedFinding
 	for _, kv := range kvPairs {
-		lowerVal := strings.ToLower(kv.Value)
+		// Layer 1: cipher-order policy directive (nginx). Checked BEFORE the
+		// list-key layer — "ssl_prefer_server_ciphers" ends in the segment
+		// "ciphers" and would otherwise be swallowed by the "ciphers" list
+		// pattern (whose "on"/"off" value decomposes to nothing). Not a
+		// crypto algorithm — surfaced as an info-level configuration note.
+		if keyMatchesPattern(kv.Key, "ssl_prefer_server_ciphers") {
+			f := newConfigFinding(filePath, kv, findings.Algorithm{
+				Name:      "ssl_prefer_server_ciphers",
+				Primitive: "config-directive",
+			})
+			f.Severity = findings.SevInfo
+			f.Recommendation = "Server cipher-order preference detected. With modern TLS 1.3-capable clients prefer client ordering (off); ensure the ssl_ciphers list itself contains no quantum-vulnerable-only suites."
+			result = append(result, f)
+			continue
+		}
 
-		for _, param := range cryptoParams {
-			if !keyMatchesPattern(kv.Key, param.KeyPattern) {
-				continue
+		// Layer 2: algorithm-list directives → cipher-suite decomposition.
+		// Decomposition is AUTHORITATIVE for these keys — no fall-through to
+		// the generic vocabulary. Falling through would resurrect exclusion
+		// tokens as findings: "SSLProtocol all -SSLv3" disables SSLv3, but a
+		// generic substring pass over the whole value would report SSLv3 as
+		// enabled. A value whose tokens are all unknown/excluded correctly
+		// yields nothing.
+		if isListValueKey(kv.Key) {
+			for _, a := range decomposeListValue(kv.Value) {
+				result = append(result, newConfigFinding(filePath, kv, findings.Algorithm{
+					Name:      a.Name,
+					Primitive: a.Primitive,
+					KeySize:   a.KeySize,
+					Mode:      a.Mode,
+				}))
 			}
+			continue
+		}
 
-			// If value hints are specified the value must contain one of them.
-			if len(param.ValueHints) > 0 {
-				matched := false
-				for _, hint := range param.ValueHints {
-					if containsWordBoundary(lowerVal, hint) {
-						matched = true
-						break
-					}
-				}
-				if !matched {
+		// Layer 3: generic vocabulary, first match wins per value part.
+		seen := map[string]bool{}
+		for _, part := range splitCompoundValue(kv.Value) {
+			lowerVal := strings.ToLower(part)
+
+			for _, param := range cryptoParams {
+				if !keyMatchesPattern(kv.Key, param.KeyPattern) {
 					continue
 				}
-			}
 
-			keySize := param.KeySize
-			if keySize == 0 && isKeySizePattern(param.KeyPattern) {
-				keySize = parseIntValue(kv.Value)
-			}
+				// If value hints are specified the value must contain one of them.
+				if len(param.ValueHints) > 0 {
+					matched := false
+					for _, hint := range param.ValueHints {
+						if containsWordBoundary(lowerVal, hint) {
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						continue
+					}
+				}
 
-			f := findings.UnifiedFinding{
-				Location: findings.Location{
-					File: filePath,
-					Line: kv.Line,
-				},
-				Algorithm: &findings.Algorithm{
-					Name:      param.Algorithm,
-					Primitive: param.Primitive,
-					KeySize:   keySize,
-					Mode:      param.Mode,
-				},
-				Confidence:    findings.ConfidenceMedium,
-				SourceEngine:  "config-scanner",
-				Reachable:     findings.ReachableUnknown,
-				RawIdentifier: kv.Key + "=" + kv.Value,
+				keySize := param.KeySize
+				if keySize == 0 && isKeySizePattern(param.KeyPattern) {
+					keySize = parseIntValue(part)
+				}
+
+				dedupe := param.Algorithm + "|" + param.Primitive + "|" +
+					strconv.Itoa(keySize) + "|" + param.Mode
+				if !seen[dedupe] {
+					seen[dedupe] = true
+					result = append(result, newConfigFinding(filePath, kv, findings.Algorithm{
+						Name:      param.Algorithm,
+						Primitive: param.Primitive,
+						KeySize:   keySize,
+						Mode:      param.Mode,
+					}))
+				}
+				break // first match wins per value part
 			}
-			result = append(result, f)
-			break // first match wins per KV pair
 		}
 	}
 	return result

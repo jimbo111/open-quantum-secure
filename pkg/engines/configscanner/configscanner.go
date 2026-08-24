@@ -104,6 +104,14 @@ func (e *Engine) scanConfigFile(path string) ([]findings.UnifiedFinding, error) 
 	var kvPairs []KeyValue
 
 	switch {
+	// Well-known server configs are routed by basename before the extension
+	// dispatch: sshd_config/ssh_config have no extension at all, and .conf
+	// is not a recognised extension (only well-known .conf basenames are
+	// ingested — see detect.go).
+	case directiveConfigs[base]:
+		kvPairs, err = parseDirectives(data)
+	case iniStyleConfConfigs[base]:
+		kvPairs, err = parseINI(data)
 	case ext == ".yaml" || ext == ".yml":
 		kvPairs, err = parseYAML(data)
 	case ext == ".json":

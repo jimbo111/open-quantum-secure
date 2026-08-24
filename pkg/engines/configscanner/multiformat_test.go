@@ -1,11 +1,13 @@
 package configscanner
 
-// Multi-format precedence test:
-// - nginx.conf (custom syntax — NOT in configExtensions, so skipped)
+// Multi-format test:
+// - nginx.conf (directive syntax — supported since the server-config sprint
+//   via parseDirectives; historically this file asserted nginx.conf was
+//   SKIPPED, but well-known server configs are now first-class inputs)
 // - server.toml (supported)
-// Both mention TLS ciphers. Verify configscanner picks up the TOML one and
-// ignores the nginx.conf. This confirms the engine's scope is declarative
-// config-only — nginx.conf goes to a different engine (if any).
+// Both mention TLS ciphers. Verify configscanner picks up BOTH: the TOML
+// key-value pairs and the nginx ssl_protocols/ssl_ciphers directives
+// (decomposed into per-algorithm findings).
 
 import (
 	"context"
@@ -55,9 +57,10 @@ cipher = "AES-256-GCM"
 		t.Fatal(err)
 	}
 
-	// Expect findings from server.toml (TOML) only.
+	// Expect findings from BOTH server.toml and nginx.conf.
 	seenTOML := false
 	seenNginx := false
+	seenNginxCipherAtom := false
 	for _, f := range fds {
 		t.Logf("finding: file=%s algo=%v line=%d", f.Location.File, f.Algorithm, f.Location.Line)
 		if filepath.Ext(f.Location.File) == ".toml" {
@@ -65,14 +68,21 @@ cipher = "AES-256-GCM"
 		}
 		if filepath.Ext(f.Location.File) == ".conf" {
 			seenNginx = true
+			if f.Algorithm != nil && f.Algorithm.Name == "ECDHE" {
+				// ssl_ciphers ECDHE-RSA-AES256-GCM-SHA384 decomposed.
+				seenNginxCipherAtom = true
+			}
 		}
 	}
 
 	if !seenTOML {
 		t.Error("expected findings from server.toml (TOML is declarative config)")
 	}
-	if seenNginx {
-		t.Error("unexpected findings from nginx.conf — config-scanner should not parse nginx custom syntax")
+	if !seenNginx {
+		t.Error("expected findings from nginx.conf — well-known server configs are supported (parseDirectives)")
+	}
+	if !seenNginxCipherAtom {
+		t.Error("expected an ECDHE finding from the decomposed nginx ssl_ciphers directive")
 	}
 }
 
